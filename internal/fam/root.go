@@ -67,10 +67,19 @@ func GitObjectStores(workDir string) ([]string, error) {
 	}
 	objects := filepath.Join(common, "objects")
 	out := []string{}
+	// Canonicalize to an absolute, symlink-resolved path so membership is matched
+	// on real Git object identity, not on a path string. git rev-parse can return
+	// a relative ".git" from a repo root, and EvalSymlinks of a relative path stays
+	// relative — which would collapse every repo's store to ".git/objects" and match
+	// any fam. Absolutize first, then resolve symlinks.
 	add := func(p string) {
-		if rp, err := filepath.EvalSymlinks(p); err == nil {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			abs = p
+		}
+		if rp, err := filepath.EvalSymlinks(abs); err == nil {
 			out = append(out, rp)
-		} else if abs, err := filepath.Abs(p); err == nil {
+		} else {
 			out = append(out, abs)
 		}
 	}
