@@ -1,37 +1,51 @@
 # botfam — Sessions (design-discussion layer)
 
 Status: **Proposed** (claude draft from claude + agy joint analysis of the
-deep-cuts prior art; pending proto-CCREP review) · depends on Phase 1
+deep-cuts and hydra prior art; pending proto-CCREP review) · depends on Phase 1
 ([DESIGN.md](DESIGN.md))
 
-Sessions are botfam's **discussion record**: an LSM-style append-and-compact log
-for multi-agent design discussions. `collab` moves messages (the wake-up), CCREP
-proves artifacts (the verdict) — sessions capture the *reasoning in between*,
-which today lives only in mailbox envelopes and is effectively write-only. The
-three layers compose: talk over `collab`, think in a session, ratchet the
-resulting artifact with CCREP.
+Sessions are botfam's **discussion record**: an append-only log for multi-agent
+design discussions. `collab` moves messages (the wake-up), CCREP proves
+artifacts (the verdict) — sessions capture the *reasoning in between*, which
+today lives only in mailbox envelopes and is effectively write-only. The three
+layers compose: talk over `collab`, think in a session, ratchet the resulting
+artifact with CCREP.
 
-This ports the proven deep-cuts protocol (`doc/collab/PROTOCOL.md`,
-`tools/merge_sessions.py` — self-described "LSM-style compaction"), adapted to
-botfam's out-of-repo coordination plane. The design was forced there by a real
-incident: three agents editing one shared `session.md` collided, an edit was
-lost, and ordering had to be back-filled by hand (deep-cuts, 2026-06-07).
+This synthesizes two prior arts. From **deep-cuts** (`doc/collab/PROTOCOL.md`):
+the session lifecycle, the behavioral rules, the human-gated tombstone, and the
+promotion of compacted records into the repo — proven over ~20 live sessions,
+shaped by a real three-writer collision on a shared log (2026-06-07). From
+**hydra** (`hydra/ledger.py`): JSONL as the storage format with flock'd
+appends. Deliberately *not* taken from hydra: the seq/`prev_hash`/SHA-256
+chain and CAS — hydra recomputed them by re-parsing the whole file inside the
+exclusive lock on every append (O(N) per write), which is exactly the "ledger
+costs on the coordination path" mistake botfam's lineage retired
+([v1-hydra](lineage/v1-hydra.md)). Tamper-evidence is a bottown (token
+identity) concern; like the CCREP ledger ([DESIGN_ccrep.md](DESIGN_ccrep.md)
+§3), hash-chaining can be added later without changing the tool surface.
 
 ---
 
-## 1. The LSM model
+## 1. The model
 
-- **Memtables:** each actor appends only to its own `session.<actor>.md`.
-  Sole-writer-per-file makes write races impossible by construction — no locks.
-- **Compaction:** a merge step folds the per-actor files into one
-  chronologically ordered, *generated* `session.md`. Run at closeout, never per
-  turn; during the session agents read each other's files (or `session_read`).
-- **Promotion:** durable decisions leave the session for permanent homes —
-  the compacted log is written into the repo, and accepted designs land in
-  `doc/` files via the normal (CCREP-gated) path. Sessions themselves are
-  ephemeral working records, like deep-cuts' "thinking out loud" rule.
+- **One log per session:** `session.jsonl`, append-only, one JSON entry per
+  line. Total order = append order; there is no merge step and no timestamp
+  tie-breaking. Appends are **blind** — lock, write one line, unlock; never
+  read-before-write.
+- **Server-mediated:** agents never touch the file; `session_append` stamps
+  the bound actor and the server clock. JSONL is both the storage and the wire
+  format.
+- **Render, then promote:** at close, the log is *rendered* to a human-readable
+  `session.md` (deep-cuts' compaction step, reduced to a pure projection) and
+  written into the repo. Markdown is output-only — never parsed, never an
+  input. Durable decisions then graduate to `doc/` files via the normal
+  (CCREP-gated) path; sessions themselves are ephemeral working records.
 - **Tombstone:** an `ARCHIVED` marker file ends a session — created **only by
   the human operator**, never by agents (§6).
+
+This is the same storage pattern as the Phase 2 CCREP ledger (append-only
+JSONL under `flock`, consensus *derived* by reading, never written) — one Go
+primitive serves both layers.
 
 ## 2. State layout
 
@@ -39,41 +53,41 @@ Live state under the fam root, beside the mailboxes:
 
 ```
 $COLLAB_ROOT/sessions/<YYYY-MM-DD-slug>/
-    meta.json              {slug, participants, created_by, created_at}
-    session.<actor>.md     per-actor append-only log (server-written)
-    ARCHIVED               tombstone (operator-created; any contents)
+    meta.json          {slug, participants, created_by, created_at}
+    session.jsonl      append-only entry log (server-written, flock on append)
+    ARCHIVED           tombstone (operator-created; any contents)
 ```
 
 Promoted state in the repo (written at close, committed under normal repo
 rules):
 
 ```
-doc/collab/sessions/<YYYY-MM-DD-slug>/session.md     generated; never hand-edit
+doc/collab/sessions/<YYYY-MM-DD-slug>/session.md     rendered; never hand-edit
 ```
 
-Living under `$COLLAB_ROOT` (not the repo) means live logs are visible to every
-worktree instantly with **no git churn** — deep-cuts' explicitly rejected
+Living under `$COLLAB_ROOT` (not the repo) means the live log is visible to
+every worktree instantly with **no git churn** — deep-cuts' explicitly rejected
 default ("commit-and-merge per handoff") stays rejected. Session slugs share
 the actor/topic naming restriction (`[A-Za-z0-9_-]+`, [DESIGN.md](DESIGN.md)
 §4) — no path traversal.
 
-## 3. Entry format & server stamping
+## 3. Entry format
 
-```markdown
-## [<actor>, <RFC3339 UTC, server-stamped>]
-<body — reasoning, findings, decisions; workspace-relative paths only>
+One JSON object per line:
 
-**→ Handoff:**
-**Task:** <what the next participant should do>
-**Context:** <files, prior decisions, evidence needed>
-**Deliverable:** <expected artifact>
+```json
+{ "id": "...", "actor": "claude", "ts": 1781042500.123,
+  "body": "reasoning, findings, decisions — workspace-relative paths only",
+  "handoff": { "task": "...", "context": "...", "deliverable": "..." } }
 ```
 
-The handoff block is optional (a session can be a plain log). The header is
-**written by the server, not the agent**: `session_append` stamps the bound
-actor and the server clock. Agent-supplied timestamps are never trusted. This
-removes deep-cuts' clock-skew hazard entirely — one stamping authority per fam,
-and entries within a file are monotonic by construction.
+- `id`, `actor`, `ts` are **server-stamped**; agent-supplied values are never
+  trusted. One stamping authority per fam kills the clock-skew hazard the
+  deep-cuts merge had to engineer around, and the per-actor `actor` field
+  preserves authorship without per-actor files.
+- `handoff` is optional (a session can be a plain log) and structured —
+  deep-cuts' Task/Context/Deliverable block as fields, machine-checkable.
+- `body` is markdown text; it renders verbatim into the entry body at close.
 
 ## 4. Tool surface
 
@@ -84,8 +98,8 @@ project settings eliminated):
 
 | Tool | Behavior |
 |---|---|
-| `session_append(session, body, handoff?)` | append one entry to own `session.<actor>.md`; server writes the `## [actor, ts]` header; returns the stamped entry |
-| `session_read(session, actor?, since?)` | read-only: entries from all (or one) actor's file, server-merged in timestamp order, optionally only those after `since`; returns a **JSON array of structured entries** `{actor, ts, body, handoff?}`, not raw markdown — markdown is the storage format, structured entries are the wire format |
+| `session_append(session, body, handoff?)` | append one entry under `flock`; server stamps `id`/`actor`/`ts`; returns the stamped entry |
+| `session_read(session, actor?, since_ts?, limit?)` | read-only: parse the log, optionally filter by actor / entries after `since_ts`; returns a JSON array of entries |
 
 CLI subcommands (operator / session-closer actions, not hot-path):
 
@@ -93,35 +107,37 @@ CLI subcommands (operator / session-closer actions, not hot-path):
 |---|---|
 | `botfam session new <slug> [--participants a,b]` | scaffold the session dir + `meta.json` |
 | `botfam session list` | active sessions (no `ARCHIVED`), most recent first |
-| `botfam session merge <slug> [--check]` | compaction: per-actor files → generated `session.md` on stdout or `--check` staleness |
-| `botfam session close <slug>` | run the compaction and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`) |
+| `botfam session render <slug>` | project `session.jsonl` → markdown on stdout |
+| `botfam session close <slug>` | render and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`) |
 
 `close` writes into the worktree but never commits — committing the promoted
 log follows the repo's normal rules (the operator asks). The fam discovers the
 active session by convention: the kickoff `collab` message names it.
 
-## 5. Compaction semantics
+## 5. Concurrency & rendering semantics
 
-Port of `merge_sessions.py`, in Go, no new dependencies:
-
-- Parse `## [<actor>, <ts>]` headers; the header is the merge key.
-- Sort by `(utc-instant, actor, original-order-within-file)` — deterministic;
-  ties cannot reorder across runs. (Server stamping makes the cross-actor
-  tie-break nearly moot, but it stays specified.)
-- Unparseable headers sort last, preserving raw order — a corrupted entry is
-  visible at the bottom, not silently dropped.
-- Output begins with a `<!-- GENERATED by botfam session merge — DO NOT EDIT
-  (edit session.<actor>.md) -->` banner.
-- Idempotent and derived: the generated file is never an input. Concurrent
-  merges are benign (same inputs → same output).
+- **Append:** open `O_APPEND`, take exclusive `flock`, write one
+  `\n`-terminated line, release. No read inside the lock. Lock scope is a
+  single line write — contention among a handful of agents is negligible.
+  Same-filesystem rule applies ([DESIGN.md](DESIGN.md) §12: no NFS).
+- **Read:** lock-free scan; a torn final line (reader racing a writer) is
+  ignored — it is complete on the next read.
+- **Render** (deterministic, idempotent): entries in file order;
+  `## [<actor>, <RFC3339 UTC from ts>]` headers; body verbatim; handoff as the
+  deep-cuts `**→ Handoff:**` block. Output begins with a
+  `<!-- RENDERED by botfam session render — DO NOT EDIT (append via
+  session_append) -->` banner. An unparseable line renders as a visible
+  `## [corrupt entry]` stanza at its position — surfaced, not silently
+  dropped. The rendered file is derived, never an input; concurrent renders
+  are benign.
 
 ## 6. Closeout & the human gate
 
-1. When agents believe the discussion has converged, one writes a
-   `## [Closed, <date>]` entry: accepted decisions, rejected alternatives
-   (with reasons, so they aren't re-proposed), links to follow-up
-   proposals/commits — then **hands back to the operator and stops**.
-2. Only the operator creates `ARCHIVED`. A `Closed` entry without a tombstone
+1. When agents believe the discussion has converged, one appends a **closeout
+   entry**: accepted decisions, rejected alternatives (with reasons, so they
+   aren't re-proposed), links to follow-up proposals/commits — then **hands
+   back to the operator and stops**.
+2. Only the operator creates `ARCHIVED`. A closeout entry without a tombstone
    means *awaiting sign-off* — still active, still resumable, more work can be
    requested.
 3. Promotion (`session close` → repo → commit) is part of sign-off, not part
@@ -138,14 +154,14 @@ them in v0:
 
 - **Quote the handoff you are answering, verbatim**, at the top of your entry.
   (With `collab`'s Tier 1 filters, the kickoff/handoff message id can ride
-  along in the handoff Context — `thread()` then links discussion to mail.)
+  along in the handoff context — `thread()` then links discussion to mail.)
 - **Verify before you ACK.** An ACK records *what you checked*, not just
   agreement — deep-cuts ACKs cite the commands run and results seen.
 - **Log agreement, not only dissent.** Consensus — and who reached it — must be
   readable from the record alone.
-- **Document the operator's steering** as a `## [<operator>, …]`-credited
-  entry (via any agent's `session_append`-relay or the operator's own editor —
-  the operator writes files directly and needs no tool).
+- **Document the operator's steering** as an entry crediting the operator
+  (relayed via any agent's `session_append`; the body names the operator as
+  the source).
 - **Workspace-relative paths only** in bodies and handoffs — absolute worktree
   paths (`/Users/…/wt-agy/…`) do not resolve for peers. Enforcement (a lint on
   append) is deferred.
@@ -154,10 +170,13 @@ them in v0:
 
 ## 8. Deferred (not v0)
 
+- seq / `prev_hash` / hash-chain tamper-evidence — bottown, and only if a
+  threat model demands it; addable without changing the tool surface (same
+  clause as the CCREP ledger).
 - Tombstone/permission enforcement (bottown tokens).
 - Path-rule linting on `session_append`.
 - Session search/indexing; cross-session links.
-- Any automatic compaction or pruning of live session dirs — `cur/`-style
-  unbounded growth is accepted, same as [DESIGN.md](DESIGN.md) §12.
+- Any automatic pruning of live session dirs — `cur/`-style unbounded growth
+  is accepted, same as [DESIGN.md](DESIGN.md) §12.
 - Auto-detection of "the active session" — convention (kickoff message) until
   it hurts.
