@@ -7,6 +7,13 @@ over stdio. Run one process per agent; they share a state directory and talk
 through it. This spec is the contract for v0; the goal is a kernel small enough
 to read in one sitting.
 
+**Current implementation note.** The checked-in Go code implements the Phase 1
+tool surface, maildir store, session identity binding, per-actor receive lock,
+setup command, and subprocess MCP integration tests. A few spec details are still
+early: `recv` uses polling instead of `fsnotify`, `fam.toml` parsing is minimal,
+and the setup/join UX has not yet been hardened beyond the initial fail-closed
+membership check. CCREP and bottown remain future phases.
+
 ---
 
 ## 1. What botfam is (and is not)

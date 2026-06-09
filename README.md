@@ -22,6 +22,63 @@ Python/venv, no consensus ledger in the hot path.
 
 See [doc/DESIGN.md](doc/DESIGN.md) for the full v0 spec.
 
+## Implementation status
+
+The repository now contains an initial Go implementation of the Phase 1
+coordination layer:
+
+- `botfam` runs a dependency-free stdio MCP server by default.
+- `botfam setup <project> --agents alice,bob` creates the fam root, registry,
+  mailboxes, task directories, and project symlink.
+- Mailbox tools are implemented: `send`, `recv`, `try_recv`, `peek`, `ack`,
+  `seen`, and `inbox`.
+- Task queue tools are implemented: `post`, `claim`, `complete`, `heartbeat`,
+  `abandon`, and `sweep`.
+- Identity is sticky per stdio session, with optional actor locking via
+  `BOTFAM_LOCK_ACTOR=1` or the out-of-repo botfam config.
+- Integration tests launch multiple real `botfam serve` subprocesses over stdio
+  with separate actors and a shared temporary `COLLAB_ROOT`.
+
+Still future or incomplete:
+
+- `recv` currently uses a short polling loop rather than `fsnotify`.
+- `fam.toml` handling is intentionally minimal and only parses the shape botfam
+  writes itself.
+- CCREP is not implemented; it remains Phase 2.
+- bottown is not implemented; it remains the future networked sibling.
+
+## Developer quickstart
+
+Run tests with Go's default cache if your environment allows it:
+
+```bash
+go test ./...
+```
+
+In restricted sandboxes, keep Go caches inside the workspace:
+
+```bash
+env GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache go test ./...
+```
+
+Build the binary:
+
+```bash
+go build ./cmd/botfam
+```
+
+Set up a fam from inside a git repository:
+
+```bash
+botfam setup my-project --agents alice,bob
+```
+
+Run the stdio MCP server:
+
+```bash
+botfam
+```
+
 > botfam is the stdio iteration. A later networked sibling — **bottown** — serves
 > agents that don't share a filesystem via a small **REST** service: an explicit
 > `topic` namespace, bearer-token identity, and long-poll for blocking `recv`. The
