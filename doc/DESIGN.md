@@ -37,9 +37,9 @@ agent B harness ──stdio──> botfam (COLLAB_ACTOR=bob)   ─┘
 - **One process per agent.** Each agent's harness launches its own `botfam`
   via `.mcp.json`, with that agent's identity pinned in the environment.
 - **Identity is cooperative by default, lockable on demand.** Every tool takes an
-  optional `actor`; when present it selects the mailbox, otherwise the session
-  actor pinned on first use applies. There is **no silent default** — identity must
-  be declared via `COLLAB_ACTOR` or the first call. This lets several agents that
+  optional `actor`; the **first** one a process sees binds it, and later calls must
+  either omit `actor` or pass the *same* one. There is **no silent default** —
+  identity must be declared via `COLLAB_ACTOR` or the first call. This lets several agents that
   **share one worktree (and therefore one `.mcp.json`)** each self-identify per
   call. An **out-of-repo** lock (§3, *Identity modes*) flips the server to ignore
   `actor` and trust only `COLLAB_ACTOR` — the anti-spoofing guarantee for
@@ -128,10 +128,11 @@ Resolution, per call:
 
 **Bind-on-first-use:** under stdio each agent gets its own botfam process even when
 agents share a worktree and a `.mcp.json`. So in cooperative mode the *first*
-`actor` a process sees sticks as the session actor; the agent states its name once
-and may omit it afterward. A per-call `actor` still overrides for that one call.
-This keeps the shared-config case working **and** makes accidental
-wrong-actor sends hard, without per-call boilerplate.
+`actor` a process sees binds as the session actor; the agent states its name once
+and may omit it afterward. The bind is **sticky and immutable**: a later call may
+omit `actor` or repeat the bound one, but a *conflicting* `actor` is **rejected**
+(no mid-session identity switch). This keeps the shared-config case working **and**
+makes wrong-actor sends impossible after bind, without per-call boilerplate.
 
 The lock lives **outside the repo** so a shared, committed `.mcp.json` can neither
 grant nor revoke it:
@@ -144,12 +145,11 @@ lock_actor = true
 `BOTFAM_LOCK_ACTOR=1` is also honored — but do **not** put it in `.mcp.json`, which
 would move the switch back into the repo and defeat the purpose.
 
-**Hardening (review round 1).** No silent default identity (above), and the session
-bind is **sticky** — once a process is bound, a *conflicting* later `actor` is
-rejected even in cooperative mode, preventing identity drift. (The
+**Threat model.** No silent default identity, and the bind is sticky (above). The
 "recycled / shared process" race a reviewer might fear is an HTTP/daemon threat
 model; under stdio each client spawns its *own* server process, so it does not
-arise here — it returns as a real concern in bottown.)
+arise here — it returns as a real concern in bottown. (Two processes accidentally
+sharing *one* actor is a different hazard, handled by the per-actor `flock` in §7.)
 
 ---
 
@@ -203,16 +203,21 @@ Mailbox:
 | `recv(match_type?, timeout_s=120)` | **yes** | block until a (matching) message lands in own `new/`, then **reserve** it (`new/→processing/`) and return it; return null on timeout |
 | `try_recv(match_type?)` | no | oldest matching message, reserved (`new/→processing/`), or null |
 | `peek(match_type?)` | no | oldest matching message **without reserving it** (stays in `new/`), or null |
-| `ack(id)` | no | confirm a reserved message processed (`processing/→cur/`); without it the message is redelivered after a crash |
-| `inbox()` | no | read-only snapshot: pending `new/`, in-flight `processing/`, recent `cur/`, task counts |
+| `ack(id, outcome?)` | no | confirm a reserved message processed (`processing/→cur/`), recording optional `outcome`; without it the message is redelivered after a crash |
+| `seen(id)` | no | has this `id` already been acked? (durable dedup check against `cur/`) |
+| `inbox()` | no | read-only snapshot: pending `new/`, in-flight `processing/`, recent `cur/` (with ids), task counts |
 
 **Delivery is at-least-once (review round 1).** `recv`/`try_recv` *reserve* a
-message into `processing/` and return it; the consumer calls `ack(id)` once it has
-durably acted, moving it to `cur/`. A crash before `ack` leaves the message in
-`processing/`, where the actor's next server start **rolls it back to `new/`** for
-redelivery (§7). Because redelivery means a message can arrive twice, **consumers
-must dedup on `id`** (idempotent handling). `peek` reserves nothing — look without
-taking.
+message into `processing/` and return it; the consumer calls `ack(id, outcome?)`
+once it has durably acted, moving it to `cur/`. A crash before `ack` leaves the
+message in `processing/`, where the actor's next server start **rolls it back to
+`new/`** for redelivery (§7). Because redelivery means a message can arrive twice,
+consumers must dedup — and botfam gives them a **durable place to do it**: the
+acked-`id` set in `cur/`, queryable via `seen(id)` (and surfaced by `inbox`). A
+consumer checks `seen(id)` before acting and `ack`s after. The one irreducible
+window — an *external* side effect performed, then a crash *before* `ack`, then
+redelivery — cannot be closed by any queue; make such effects idempotent by keying
+them on the message `id`. `peek` reserves nothing — look without taking.
 
 Task queue:
 
@@ -227,13 +232,13 @@ Task queue:
 
 **Lease reclamation is lazy, no daemon.** An expired lease is reclaimed when any
 agent next calls `claim`/`post` (they sweep in passing), when a **blocked `recv`
-wakes on its safety tick** (so even an all-idle fam self-heals — §6), or when a
+runs its throttled sweep** (so even an all-idle fam self-heals — §6), or when a
 coordinator calls `sweep` explicitly. A crashed worker's task returns to `open/`
 rather than lingering forever.
 
-Every tool also accepts an optional `actor?` — honored in cooperative mode
-(per-call override; pins the session actor on first use), ignored/validated under
-the lock (see §3, *Identity modes*).
+Every tool also accepts an optional `actor?` — in cooperative mode it binds the
+session actor on first use and must match it thereafter; under the lock it is
+validated against `COLLAB_ACTOR` (see §3, *Identity modes*).
 
 Tasks are identified by `env["id"]`, never by filename (filenames carry the ns
 prefix and differ across moves).
@@ -255,10 +260,13 @@ deadline is honored on every wakeup; on expiry `recv` returns null, not an error
 The server also honors client cancellation: if the harness cancels the call, the
 goroutine stops *without* reserving a message.
 
-**The safety tick also sweeps leases (review round 1).** On each ~1s re-scan the
-waiter runs the lazy lease sweep, so an all-idle fam — every agent blocked on
-`recv`, nobody calling `claim`/`post` — still reclaims a crashed worker's expired
-task. This closes the idle-deadlock that pure on-`claim`/`post` sweeping left open.
+**A blocked `recv` also sweeps leases — but throttled.** So an all-idle fam (every
+agent on `recv`, nobody calling `claim`/`post`) still reclaims a crashed worker's
+expired task, closing the idle-deadlock. To avoid making every idle agent do
+filesystem work every second (codex F6), the sweep is **decoupled from the 1s
+mailbox tick**: it runs at most once per coarse interval, or is scheduled from the
+nearest `lease_expires_at`. The mailbox wake stays cheap; lease maintenance happens
+on its own slow cadence.
 
 **`recv` is meant to be re-invoked in a loop.** Many harnesses cap a single
 tool-call's duration, so pick `timeout_s` *below* that ceiling and call `recv`
@@ -345,25 +353,42 @@ second tool surface, never in the messaging hot path.
 
 ## 11. Open questions for review
 
-**Resolved in review round 1** (reviewer: agy, Gemini family):
+**Resolved across review rounds** (agy, Gemini · codex, GPT-5):
 
-- Destructive `recv` → **at-least-once** via `ack` + `processing/` + dedup-on-`id` (§5, §7).
-- Message TTL disposition → **visible `expired/` dead-letter**, not mixed into `cur/` (§4).
-- Idle-fam lease deadlock → the **`recv` safety tick also sweeps leases** (§5, §6).
-- Identity foot-guns → **no silent default** + **sticky bind** (§3).
+- Destructive `recv` → **at-least-once** via `ack`/`processing/`, with a durable
+  dedup surface (`seen(id)` over `cur/`) and the irreducible window documented (§5, §7).
+- Message TTL disposition → **visible `expired/` dead-letter** (§4).
+- Idle-fam lease deadlock → a blocked `recv` sweeps leases, **throttled** off the 1s
+  tick so idle stays cheap (§5, §6).
+- Identity foot-guns + self-contradiction → **no silent default**, **one sticky,
+  immutable bind** (a conflicting later `actor` is rejected) (§2, §3, §5).
+- Two-processes-as-one-actor → **enforced per-actor `flock`** on `<actor>/.lock`;
+  `recv`/`ack`/rollback require it (§7). *(Both reviewers flagged this independently.)*
+- CCREP gate categories → **rule-based detection**, never agent self-declaration
+  (DESIGN_ccrep §8).
 
-**Still open — this round:**
+**Still open — needs your adjudication:**
 
-- **F2 — fam keying `[priority]`.** A reviewer pushed for a path-hash key (isolate
-  clones, distinguish forks); the author rejected it because **clone-sharing is the
-  deliberate model** (the scriba per-agent-clone topology) — but the push exposed a
-  real bug: the old `<repo-slug>` component silently *broke* clone-sharing. Current
-  answer: **content-address the fam by root commit, catch fork/template collisions
-  at `setup` (with an optional `origin` hint), warn at runtime** (§3). Does this
-  hold, or is there a cleaner key? **Most-wanted challenge this round.**
-- **Identity trust model.** Bind-on-first-use (now sticky, no silent default) with
-  an out-of-repo lock — right default for your harness, or should the lock be on by
-  default?
+- **F2 — fam keying `[priority]`.** Both reviewers agree the current
+  *warn-only-at-runtime* fork/template collision (§3) is a real **silent-corruption**
+  hazard. They disagree on the fix, and that disagreement is the decision:
+  - **agy:** change the key to an *alternates-aware parent path* — auto-shares only
+    object-linked clones (`--shared`/`--reference`, i.e. the real scriba topology)
+    and worktrees, auto-isolates forks/independent clones. Zero-config, but redefines
+    "clone-sharing" and leans on git internals.
+  - **codex:** keep root-commit addressing (preserve all-clone sharing), but make a
+    missing/mismatched `fam.toml` a **hard runtime refusal** unless the operator opts
+    in (`COLLAB_ROOT` / `BOTFAM_FAM` / recorded override). Notes that without a remote
+    or declared namespace there is *no* automatic way to distinguish forks from clones.
+  - Author's lean: a hybrid — keep root-commit, replace warn-with-hard-refuse
+    (codex), and use agy's alternates signal to *auto-confirm* membership so the
+    `--shared` topology stays zero-config while forks fail closed.
+- **Multi-root histories (codex).** `git rev-list --max-parents=0 HEAD | tail -1`
+  is under-specified — a repo can have several root commits. Fold into the F2 fix:
+  hash the *sorted full root-commit set*, or reject multi-root and require explicit
+  `BOTFAM_FAM`/`COLLAB_ROOT`.
+- **Identity trust model.** Sticky bind + out-of-repo lock — right default, or
+  lock-on by default?
 
 ## 12. Known limitations (v0, accepted)
 
