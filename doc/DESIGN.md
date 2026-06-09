@@ -277,9 +277,13 @@ client will wait that long.
   no CAS retries — the rename *is* the compare-and-swap.
 - **ack / rollback:** `recv` reserves into `processing/`; `ack` moves it to `cur/`.
   On startup an actor reclaims its own stale `processing/` back to `new/` (crash
-  redelivery). This assumes **one live server per actor** — two concurrent servers
-  for one actor could roll back each other's in-flight mail; the locked identity
-  mode (or simply one process per actor) guarantees it.
+  redelivery). "One live server per actor" is an **enforced invariant**, not an
+  assumption: a server takes an exclusive advisory `flock` on `<actor>/.lock` when
+  its identity binds, and **`recv`, `ack`, and the startup rollback require holding
+  it**. A second concurrent server for the same actor (two IDE windows, a stray CLI)
+  fails to acquire the lock and refuses receive ops with a loud error, rather than
+  racing the rollback and silently losing in-flight mail. Sends only touch *other*
+  actors' `new/`, so they are unaffected and need no lock.
 - Same-filesystem rename is required (keep `tmp/` and the mailboxes under one
   `$COLLAB_ROOT` on one volume).
 

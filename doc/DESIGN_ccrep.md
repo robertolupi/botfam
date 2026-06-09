@@ -119,6 +119,14 @@ Inadmissible critiques don't block — so vibes can't stop a merge, and noise is
 change**, **destructive migration**, **model-or-dataset change**, **large
 architecture change**. Surface these to the operator; agents never self-merge them.
 
+**Detection is rule-based, not self-declared.** These categories are triggered by
+inspectable rules — primarily path/pattern matches on the diff (e.g. changes under
+`api/`, `migrations/`, `models/`, or to exported symbols) — **not** by the proposing
+agent's own classification, which a buggy or adversarial agent could understate to
+slip the gate. Self-declaration may only *add* a gate, never *remove* one. Richer
+enforcement (e.g. diffing the change against the approved design's AST) is a
+later-phase concern (§10); Phase 2 ships the path-rule gate plus the human backstop.
+
 ## 9. Executor & eval cache
 
 `run_evaluation` shells out: `git worktree add` a detached checkout of the exact
