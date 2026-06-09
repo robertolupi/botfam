@@ -1,0 +1,23 @@
+{
+    "enabledMcpjsonServers": [
+        "collab"
+    ],
+    "permissions": {
+        "allow": [
+            "mcp__collab__*",
+            "Bash(basename:*)",
+            "Bash(git status:*)",
+            "Bash(git log:*)",
+            "Bash(git show:*)",
+            "Bash(git diff:*)",
+            "Bash(git branch:*)",
+            "Bash(git rev-parse:*)",
+            "Bash(git worktree list:*)",
+            "Bash(git check-ignore:*)",
+            "Bash(go build:*)",
+            "Bash(go test:*)",
+            "Bash(go vet:*)",
+            "Bash(gofmt:*)"
+        ]
+    }
+}
