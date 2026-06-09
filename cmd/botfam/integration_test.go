@@ -6,11 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/textproto"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 )
@@ -184,7 +182,7 @@ func (c *botClient) Call(t *testing.T, method string, params map[string]any) map
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fmt.Fprintf(c.stdin, "Content-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+	if _, err := fmt.Fprintf(c.stdin, "%s\n", body); err != nil {
 		t.Fatalf("write request: %v; stderr:\n%s", err, c.stderr.String())
 	}
 	resp := c.readResponse(t)
@@ -207,7 +205,7 @@ func (c *botClient) CallError(t *testing.T, method string, params map[string]any
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fmt.Fprintf(c.stdin, "Content-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+	if _, err := fmt.Fprintf(c.stdin, "%s\n", body); err != nil {
 		t.Fatalf("write request: %v; stderr:\n%s", err, c.stderr.String())
 	}
 	resp := c.readResponse(t)
@@ -245,22 +243,18 @@ func (c *botClient) ToolError(t *testing.T, name string, args map[string]any) st
 
 func (c *botClient) readResponse(t *testing.T) map[string]any {
 	t.Helper()
-	tp := textproto.NewReader(c.stdout)
-	header, err := tp.ReadMIMEHeader()
-	if err != nil {
-		t.Fatalf("read response header: %v; stderr:\n%s", err, c.stderr.String())
+	for {
+		line, err := c.stdout.ReadString('\n')
+		if err != nil {
+			t.Fatalf("read response: %v; stderr:\n%s", err, c.stderr.String())
+		}
+		if len(bytes.TrimSpace([]byte(line))) == 0 {
+			continue
+		}
+		var resp map[string]any
+		if err := json.Unmarshal([]byte(line), &resp); err != nil {
+			t.Fatalf("response %q: %v", line, err)
+		}
+		return resp
 	}
-	n, err := strconv.Atoi(header.Get("Content-Length"))
-	if err != nil {
-		t.Fatalf("bad Content-Length %q: %v", header.Get("Content-Length"), err)
-	}
-	body := make([]byte, n)
-	if _, err := io.ReadFull(c.stdout, body); err != nil {
-		t.Fatalf("read response body: %v; stderr:\n%s", err, c.stderr.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("response %q: %v", string(body), err)
-	}
-	return resp
 }

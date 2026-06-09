@@ -56,7 +56,7 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 
 	mcpSrv := mcpserver.NewMCPServer("botfam", "0.1.0", mcpserver.WithToolCapabilities(false))
 	s.registerTools(mcpSrv)
-	return serveContentLength(context.Background(), mcpSrv, in, out)
+	return serveStdio(context.Background(), mcpSrv, in, out)
 }
 
 func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
@@ -304,7 +304,11 @@ func toolResult(v any) (*mcplib.CallToolResult, error) {
 	return mcplib.NewToolResultText(string(b)), nil
 }
 
-func serveContentLength(ctx context.Context, mcpSrv *mcpserver.MCPServer, in io.Reader, out io.Writer) error {
+// serveStdio implements the MCP stdio transport: messages are newline-delimited
+// JSON, one per line, with no framing headers. The reader (readFrame) also
+// tolerates legacy Content-Length-framed input, but responses are always written
+// as a single line of JSON terminated by '\n'.
+func serveStdio(ctx context.Context, mcpSrv *mcpserver.MCPServer, in io.Reader, out io.Writer) error {
 	r := bufio.NewReader(in)
 	var writeMu sync.Mutex
 	for {
@@ -323,8 +327,9 @@ func serveContentLength(ctx context.Context, mcpSrv *mcpserver.MCPServer, in io.
 		if err != nil {
 			return err
 		}
+		b = append(b, '\n')
 		writeMu.Lock()
-		_, err = fmt.Fprintf(out, "Content-Length: %d\r\n\r\n%s", len(b), b)
+		_, err = out.Write(b)
 		writeMu.Unlock()
 		if err != nil {
 			return err
