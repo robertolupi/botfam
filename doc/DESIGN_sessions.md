@@ -85,7 +85,7 @@ project settings eliminated):
 | Tool | Behavior |
 |---|---|
 | `session_append(session, body, handoff?)` | append one entry to own `session.<actor>.md`; server writes the `## [actor, ts]` header; returns the stamped entry |
-| `session_read(session, actor?, since?)` | read-only: entries from all (or one) actor's file, server-merged in timestamp order, optionally only those after `since` |
+| `session_read(session, actor?, since?)` | read-only: entries from all (or one) actor's file, server-merged in timestamp order, optionally only those after `since`; returns a **JSON array of structured entries** `{actor, ts, body, handoff?}`, not raw markdown — markdown is the storage format, structured entries are the wire format |
 
 CLI subcommands (operator / session-closer actions, not hot-path):
 
@@ -94,7 +94,7 @@ CLI subcommands (operator / session-closer actions, not hot-path):
 | `botfam session new <slug> [--participants a,b]` | scaffold the session dir + `meta.json` |
 | `botfam session list` | active sessions (no `ARCHIVED`), most recent first |
 | `botfam session merge <slug> [--check]` | compaction: per-actor files → generated `session.md` on stdout or `--check` staleness |
-| `botfam session close <slug>` | run the compaction and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree** |
+| `botfam session close <slug>` | run the compaction and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`) |
 
 `close` writes into the worktree but never commits — committing the promoted
 log follows the repo's normal rules (the operator asks). The fam discovers the
