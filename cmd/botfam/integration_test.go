@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -337,6 +338,140 @@ func TestIntegrationDirectoryBasedResolution(t *testing.T) {
 	expectedRoot := filepath.Join(homeDir, ".botfam", "myfam")
 	if _, err := os.Stat(expectedRoot); err != nil {
 		t.Fatalf("expected botfam root to exist at %s, but got error: %v", expectedRoot, err)
+	}
+}
+
+func TestIntegrationSessionsOverStdio(t *testing.T) {
+	root := t.TempDir()
+
+	// 1. Compile the real botfam binary to root/botfam
+	binPath := filepath.Join(root, "botfam")
+	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+	buildCmd.Dir = "."
+	var buildStderr bytes.Buffer
+	buildCmd.Stderr = &buildStderr
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
+	}
+
+	// Helper to start real botfam serve as a subprocess
+	startRealBot := func(actor string) *botClient {
+		cmd := exec.Command(binPath, "serve")
+		cmd.Env = append(os.Environ(),
+			"COLLAB_ROOT="+root,
+			"COLLAB_ACTOR="+actor,
+		)
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stderr := &bytes.Buffer{}
+		cmd.Stderr = stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		return &botClient{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: stderr, nextID: 1}
+	}
+
+	alice := startRealBot("alice")
+	bob := startRealBot("bob")
+	defer alice.Close(t)
+	defer bob.Close(t)
+
+	alice.Call(t, "initialize", map[string]any{})
+	bob.Call(t, "initialize", map[string]any{})
+
+	// Helper to call a tool that returns a JSON array
+	toolList := func(c *botClient, name string, args map[string]any) []map[string]any {
+		result := c.Call(t, "tools/call", map[string]any{"name": name, "arguments": args})
+		content := result["content"].([]any)
+		if len(content) != 1 {
+			t.Fatalf("tool %s content = %#v", name, content)
+		}
+		item := content[0].(map[string]any)
+		text := item["text"].(string)
+		if text == "null" {
+			return nil
+		}
+		var payload []map[string]any
+		if err := json.Unmarshal([]byte(text), &payload); err != nil {
+			t.Fatalf("tool %s payload %q: %v", name, text, err)
+		}
+		return payload
+	}
+
+	// 2. Kickoff session using CLI
+	cmd := exec.Command(binPath, "session", "new", "test-mcp-session", "--participants", "alice,bob")
+	cmd.Env = append(os.Environ(), "COLLAB_ROOT="+root)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("session new failed: %v; stderr:\n%s", err, stderr.String())
+	}
+
+	// 3. Alice appends to session
+	entry1 := alice.Tool(t, "session_append", map[string]any{
+		"session": "test-mcp-session",
+		"body":    "Hello from Alice",
+		"handoff": map[string]any{
+			"task":        "Review design",
+			"context":     "draft docs",
+			"deliverable": "approval",
+		},
+	})
+	if entry1["actor"] != "alice" || entry1["body"] != "Hello from Alice" {
+		t.Fatalf("unexpected entry1: %+v", entry1)
+	}
+
+	// 4. Bob reads session
+	entries := toolList(bob, "session_read", map[string]any{
+		"session": "test-mcp-session",
+	})
+	if len(entries) != 1 || entries[0]["id"] != entry1["id"] {
+		t.Fatalf("bob read entries = %+v, expected Alice's entry", entries)
+	}
+
+	// 5. Bob appends reply
+	entry2 := bob.Tool(t, "session_append", map[string]any{
+		"session": "test-mcp-session",
+		"body":    "Approved by Bob",
+	})
+
+	// 6. Alice reads all
+	entries2 := toolList(alice, "session_read", map[string]any{
+		"session": "test-mcp-session",
+	})
+	if len(entries2) != 2 || entries2[1]["id"] != entry2["id"] {
+		t.Fatalf("alice read entries = %+v, expected 2 entries with Bob's reply", entries2)
+	}
+
+	// 7. Close session using CLI
+	cmdClose := exec.Command(binPath, "session", "close", "test-mcp-session")
+	cmdClose.Env = append(os.Environ(), "COLLAB_ROOT="+root)
+	cmdClose.Dir = root
+	var stderrClose bytes.Buffer
+	cmdClose.Stderr = &stderrClose
+	if err := cmdClose.Run(); err != nil {
+		t.Fatalf("session close failed: %v; stderr:\n%s", err, stderrClose.String())
+	}
+
+	// Verify rendered session.md
+	expectedFile := filepath.Join(root, "doc", "collab", "sessions", "test-mcp-session", "session.md")
+	b, err := os.ReadFile(expectedFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rendered := string(b)
+	if !strings.Contains(rendered, "# Session: test-mcp-session") ||
+		!strings.Contains(rendered, "## [alice,") ||
+		!strings.Contains(rendered, "Hello from Alice") ||
+		!strings.Contains(rendered, "## [bob,") ||
+		!strings.Contains(rendered, "Approved by Bob") {
+		t.Fatalf("unexpected closed session markdown contents:\n%s", rendered)
 	}
 }
 

@@ -142,6 +142,22 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("session_append",
+		mcplib.WithDescription("Append an entry to a session log."),
+		mcplib.WithString("session", mcplib.Required()),
+		mcplib.WithString("body", mcplib.Required()),
+		mcplib.WithObject("handoff"),
+		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
+	))
+	add(mcplib.NewTool("session_read",
+		mcplib.WithDescription("Read entries from a session log."),
+		mcplib.WithString("session", mcplib.Required()),
+		mcplib.WithString("actor"),
+		mcplib.WithNumber("since_ts"),
+		mcplib.WithNumber("limit"),
+		mcplib.WithString("work_dir"),
+	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
@@ -257,6 +273,32 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, err
 		}
 		result = map[string]any{"swept": tasks}
+	case "session_append":
+		sessionName := argString(args, "session")
+		body := argString(args, "body")
+		var handoff *store.SessionHandoff
+		if hObj, ok := args["handoff"].(map[string]any); ok && len(hObj) > 0 {
+			handoff = &store.SessionHandoff{
+				Task:        argString(hObj, "task"),
+				Context:     argString(hObj, "context"),
+				Deliverable: argString(hObj, "deliverable"),
+			}
+		}
+		entry, err := st.SessionAppend(sessionName, actor, body, handoff)
+		if err != nil {
+			return nil, err
+		}
+		result = entry
+	case "session_read":
+		sessionName := argString(args, "session")
+		filterActor := argString(args, "actor")
+		sinceTS := argFloatDefault(args, "since_ts", 0)
+		limit := int(argFloatDefault(args, "limit", 0))
+		entries, err := st.SessionRead(sessionName, filterActor, sinceTS, limit)
+		if err != nil {
+			return nil, err
+		}
+		result = entries
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
 	}
