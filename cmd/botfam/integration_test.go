@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/rlupi/botfam/internal/fam"
 )
 
 func TestIntegrationTwoActorsOverStdio(t *testing.T) {
@@ -260,7 +262,7 @@ func (c *botClient) readResponse(t *testing.T) map[string]any {
 	}
 }
 
-func TestIntegrationDirectoryBasedResolution(t *testing.T) {
+func TestIntegrationWorktreeBasedResolution(t *testing.T) {
 	if os.Getenv("BOTFAM_TEST_HELPER") == "serve" {
 		os.Args = []string{"botfam", "serve"}
 		if err := run(); err != nil {
@@ -274,21 +276,32 @@ func TestIntegrationDirectoryBasedResolution(t *testing.T) {
 	homeDir := filepath.Join(tempDir, "home")
 	_ = os.MkdirAll(homeDir, 0o755)
 
-	// Create workspace directories with pattern FAMILY-ACTOR
-	aliceWorkspace := filepath.Join(tempDir, "myfam-alice")
+	gitDir := filepath.Join(tempDir, "myrepo")
+	if err := os.Mkdir(gitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, gitDir)
+
+	t.Setenv("HOME", homeDir)
+
+	t.Chdir(gitDir)
+	var setupOut bytes.Buffer
+	if err := fam.Setup([]string{"myproj", "--agents", "alice,bob"}, &setupOut); err != nil {
+		t.Fatalf("fam.Setup failed: %v", err)
+	}
+
+	aliceWorkspace := filepath.Join(gitDir, "wt-alice")
 	_ = os.MkdirAll(aliceWorkspace, 0o755)
 
-	bobWorkspace := filepath.Join(tempDir, "myfam-bob")
+	bobWorkspace := filepath.Join(gitDir, "wt-bob")
 	_ = os.MkdirAll(bobWorkspace, 0o755)
 
-	// Helper to start botClient with a specific working directory and HOME
 	startClient := func(workDir string) *botClient {
-		cmd := exec.Command(os.Args[0], "-test.run=TestIntegrationDirectoryBasedResolution")
+		cmd := exec.Command(os.Args[0], "-test.run=TestIntegrationWorktreeBasedResolution")
 		cmd.Env = append(os.Environ(),
 			"BOTFAM_TEST_HELPER=serve",
 			"HOME="+homeDir,
 		)
-		// Set working directory to the workspace
 		cmd.Dir = workDir
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
@@ -314,7 +327,6 @@ func TestIntegrationDirectoryBasedResolution(t *testing.T) {
 	alice.Call(t, "initialize", map[string]any{})
 	bob.Call(t, "initialize", map[string]any{})
 
-	// Alice sends a message to Bob. The actor names should be resolved automatically from directory name!
 	sent := alice.Tool(t, "send", map[string]any{
 		"to":   "bob",
 		"type": "hello",
@@ -322,7 +334,6 @@ func TestIntegrationDirectoryBasedResolution(t *testing.T) {
 	})
 	sentID := sent["id"].(string)
 
-	// Bob receives the message
 	got := bob.Tool(t, "try_recv", map[string]any{})
 	if got == nil {
 		t.Fatal("bob did not receive the message")
@@ -334,10 +345,13 @@ func TestIntegrationDirectoryBasedResolution(t *testing.T) {
 		t.Fatalf("unexpected envelope: %+v", got)
 	}
 
-	// Verify the root folder ~/.botfam/myfam was created
-	expectedRoot := filepath.Join(homeDir, ".botfam", "myfam")
-	if _, err := os.Stat(expectedRoot); err != nil {
-		t.Fatalf("expected botfam root to exist at %s, but got error: %v", expectedRoot, err)
+	r := fam.Resolver{WorkDir: gitDir}
+	info, err := r.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(info.Root); err != nil {
+		t.Fatalf("expected botfam root to exist at %s, but got error: %v", info.Root, err)
 	}
 }
 
@@ -451,7 +465,7 @@ func TestIntegrationSessionsOverStdio(t *testing.T) {
 
 	// 7. Close session using CLI
 	cmdClose := exec.Command(binPath, "session", "close", "test-mcp-session")
-	cmdClose.Env = append(os.Environ(), "COLLAB_ROOT="+root)
+	cmdClose.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_FORCE_CLOSE=1")
 	cmdClose.Dir = root
 	var stderrClose bytes.Buffer
 	cmdClose.Stderr = &stderrClose
@@ -473,5 +487,54 @@ func TestIntegrationSessionsOverStdio(t *testing.T) {
 		!strings.Contains(rendered, "Approved by Bob") {
 		t.Fatalf("unexpected closed session markdown contents:\n%s", rendered)
 	}
+}
+
+func TestIntegrationSessionCloseTTYGate(t *testing.T) {
+	root := t.TempDir()
+
+	binPath := filepath.Join(root, "botfam")
+	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+	buildCmd.Dir = "."
+	var buildStderr bytes.Buffer
+	buildCmd.Stderr = &buildStderr
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
+	}
+
+	cmdNew := exec.Command(binPath, "session", "new", "test-tty-session", "--participants", "alice")
+	cmdNew.Env = append(os.Environ(), "COLLAB_ROOT="+root)
+	if err := cmdNew.Run(); err != nil {
+		t.Fatalf("session new failed: %v", err)
+	}
+
+	cmdClose := exec.Command(binPath, "session", "close", "test-tty-session")
+	cmdClose.Env = append(os.Environ(), "COLLAB_ROOT="+root)
+	cmdClose.Dir = root
+	var stderr bytes.Buffer
+	cmdClose.Stderr = &stderr
+	err := cmdClose.Run()
+	if err == nil {
+		t.Fatal("session close succeeded unexpectedly without a TTY or BOTFAM_FORCE_CLOSE")
+	}
+
+	expectedErr := "session close is the operator's promotion gesture and requires a terminal; agents: write your closeout entry and hand back"
+	if !strings.Contains(stderr.String(), expectedErr) {
+		t.Errorf("expected error containing %q, got %q", expectedErr, stderr.String())
+	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runCmd := func(name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("failed to run %s %v: %v", name, args, err)
+		}
+	}
+	runCmd("git", "init")
+	runCmd("git", "config", "user.name", "test")
+	runCmd("git", "config", "user.email", "test@example.com")
+	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
 }
 

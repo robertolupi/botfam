@@ -7,8 +7,14 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/term"
+
 	"github.com/rlupi/botfam/internal/store"
 )
+
+var IsTerminal = func(fd int) bool {
+	return term.IsTerminal(fd)
+}
 
 // SessionCmd dispatches session CLI subcommands.
 func SessionCmd(args []string, out io.Writer) error {
@@ -137,6 +143,10 @@ func sessionClose(args []string, out io.Writer) error {
 		return errors.New("usage: botfam session close <slug>")
 	}
 	slug := args[0]
+
+	if os.Getenv("BOTFAM_FORCE_CLOSE") != "1" && !IsTerminal(int(os.Stdin.Fd())) {
+		return errors.New("session close is the operator's promotion gesture and requires a terminal; agents: write your closeout entry and hand back")
+	}
 
 	info, err := (Resolver{WorkDir: "."}).Resolve()
 	if err != nil {

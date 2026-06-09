@@ -49,29 +49,11 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		}, nil
 	}
 
-	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
-		base := filepath.Base(absDir)
-		if idx := strings.LastIndex(base, "-"); idx != -1 {
-			family := base[:idx]
-			actor := base[idx+1:]
-			if family != "" && actor != "" {
-				home, err := os.UserHomeDir()
-				if err != nil {
-					return RootInfo{}, err
-				}
-				return RootInfo{
-					Root:     filepath.Join(home, ".botfam", family),
-					Name:     family,
-					Explicit: true,
-					Actor:    actor,
-				}, nil
-			}
-		}
-	}
+
 
 	roots, err := gitLines(r.WorkDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
-		return RootInfo{}, errors.New("COLLAB_ROOT is unset and no git history could be used to derive a fam root; run botfam setup or set COLLAB_ROOT")
+		return RootInfo{}, makeNoGitHistoryError()
 	}
 	sort.Strings(roots)
 	sum := sha256.Sum256([]byte(strings.Join(roots, "\n")))
@@ -216,4 +198,44 @@ func unique(xs []string) []string {
 		}
 	}
 	return out
+}
+
+func makeNoGitHistoryError() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return errors.New("COLLAB_ROOT is unset and no git history could be used to derive a fam root; run botfam setup or set COLLAB_ROOT")
+	}
+	botfamDir := filepath.Join(home, ".botfam")
+	entries, err := os.ReadDir(botfamDir)
+	if err != nil {
+		return errors.New("COLLAB_ROOT is unset and no git history could be used to derive a fam root; run botfam setup or set COLLAB_ROOT")
+	}
+
+	var sb strings.Builder
+	sb.WriteString("COLLAB_ROOT is unset and no git history could be used to derive a fam root.\n")
+	sb.WriteString("To fix this, either run from a member worktree, or set COLLAB_ROOT explicitly:\n")
+	sb.WriteString("  COLLAB_ROOT=~/.botfam/<fam> botfam <command>\n\n")
+
+	var fams []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		tomlPath := filepath.Join(botfamDir, entry.Name(), "fam.toml")
+		if _, err := os.Stat(tomlPath); err == nil {
+			reg, err := ReadRegistry(tomlPath)
+			if err == nil {
+				fams = append(fams, fmt.Sprintf("  - %s (at ~/.botfam/%s)\n    Member repos:\n      * %s",
+					reg.Name, entry.Name(), strings.Join(reg.RepoPaths, "\n      * ")))
+			}
+		}
+	}
+
+	if len(fams) > 0 {
+		sb.WriteString("Available families under ~/.botfam:\n")
+		sb.WriteString(strings.Join(fams, "\n") + "\n")
+	} else {
+		sb.WriteString("No configured families found under ~/.botfam. Run 'botfam setup' to initialize one.\n")
+	}
+	return errors.New(strings.TrimSuffix(sb.String(), "\n"))
 }

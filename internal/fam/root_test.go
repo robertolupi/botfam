@@ -2,9 +2,26 @@ package fam
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runCmd := func(name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("failed to run %s %v: %v", name, args, err)
+		}
+	}
+	runCmd("git", "init")
+	runCmd("git", "config", "user.name", "test")
+	runCmd("git", "config", "user.email", "test@example.com")
+	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
+}
 
 func TestResolver(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "botfam-resolver-test")
@@ -30,25 +47,72 @@ func TestResolver(t *testing.T) {
 		t.Error("expected Explicit to be true")
 	}
 
-	// Case 2: Dir matches family-actor pattern (e.g. myfam-bob)
-	famActorDir := filepath.Join(tempDir, "myfam-bob")
-	if err := os.Mkdir(famActorDir, 0755); err != nil {
+	// Case 2: Inside a git repository
+	gitDir := filepath.Join(tempDir, "myrepo")
+	if err := os.Mkdir(gitDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	r2 := Resolver{
-		WorkDir: famActorDir,
+	initGitRepo(t, gitDir)
+
+	// A worktree subdirectory with actor suffix
+	wtDir := filepath.Join(gitDir, "wt-bob")
+	if err := os.Mkdir(wtDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolve from main checkout directory
+	rMain := Resolver{
+		WorkDir: gitDir,
 		Env:     []string{},
 	}
-	info2, err := r2.Resolve()
+	infoMain, err := rMain.Resolve()
 	if err != nil {
-		t.Fatalf("family-actor dir failed: %v", err)
+		t.Fatalf("resolve from main checkout failed: %v", err)
 	}
-	home, _ := os.UserHomeDir()
-	expectedRoot := filepath.Join(home, ".botfam", "myfam")
-	if info2.Root != expectedRoot {
-		t.Errorf("expected Root %q, got %q", expectedRoot, info2.Root)
+
+	// Resolve from worktree directory
+	rWt := Resolver{
+		WorkDir: wtDir,
+		Env:     []string{},
 	}
-	if info2.Actor != "bob" {
-		t.Errorf("expected Actor %q, got %q", "bob", info2.Actor)
+	infoWt, err := rWt.Resolve()
+	if err != nil {
+		t.Fatalf("resolve from worktree failed: %v", err)
+	}
+
+	// Assert they both resolved to the same root path!
+	if infoMain.Root != infoWt.Root {
+		t.Errorf("split brain! main resolved to %q, worktree resolved to %q", infoMain.Root, infoWt.Root)
+	}
+
+	// Assert actor parsing only happened in the worktree
+	if infoMain.Actor != "" {
+		t.Errorf("expected main Actor to be empty, got %q", infoMain.Actor)
+	}
+	if infoWt.Actor != "bob" {
+		t.Errorf("expected worktree Actor to be %q, got %q", "bob", infoWt.Actor)
+	}
+
+	// Assert the root is derived from git history (starts with fam-)
+	if !strings.HasPrefix(infoMain.Name, "fam-") {
+		t.Errorf("expected family name to start with 'fam-', got %q", infoMain.Name)
+	}
+
+	// Case 3: Outside a git repository
+	nonGitDir := filepath.Join(tempDir, "nongit")
+	if err := os.Mkdir(nonGitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	rNonGit := Resolver{
+		WorkDir: nonGitDir,
+		Env:     []string{},
+	}
+	_, err = rNonGit.Resolve()
+	if err == nil {
+		t.Fatal("expected resolve outside git repository to fail")
+	}
+	expectedErrSub := "COLLAB_ROOT is unset and no git history could be used to derive a fam root"
+	if !strings.Contains(err.Error(), expectedErrSub) {
+		t.Errorf("expected error containing %q, got %q", expectedErrSub, err.Error())
 	}
 }

@@ -153,7 +153,7 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 	add(mcplib.NewTool("session_read",
 		mcplib.WithDescription("Read entries from a session log."),
 		mcplib.WithString("session", mcplib.Required()),
-		mcplib.WithString("actor"),
+		mcplib.WithString("from"),
 		mcplib.WithNumber("since_ts"),
 		mcplib.WithNumber("limit"),
 		mcplib.WithString("work_dir"),
@@ -291,7 +291,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		result = entry
 	case "session_read":
 		sessionName := argString(args, "session")
-		filterActor := argString(args, "actor")
+		filterActor := argString(args, "from")
 		sinceTS := argFloatDefault(args, "since_ts", 0)
 		limit := int(argFloatDefault(args, "limit", 0))
 		entries, err := st.SessionRead(sessionName, filterActor, sinceTS, limit)

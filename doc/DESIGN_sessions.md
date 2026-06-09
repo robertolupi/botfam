@@ -99,7 +99,7 @@ project settings eliminated):
 | Tool | Behavior |
 |---|---|
 | `session_append(session, body, handoff?)` | append one entry under `flock`; server stamps `id`/`actor`/`ts`; returns the stamped entry |
-| `session_read(session, actor?, since_ts?, limit?)` | read-only: parse the log, optionally filter by actor / entries after `since_ts`; returns a JSON array of entries |
+| `session_read(session, from?, since_ts?, limit?)` | read-only: parse the log, optionally filter by actor (`from`) / entries after `since_ts`; returns a JSON array of entries |
 
 CLI subcommands (operator / session-closer actions, not hot-path):
 
