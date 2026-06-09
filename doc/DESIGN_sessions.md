@@ -108,7 +108,7 @@ CLI subcommands (operator / session-closer actions, not hot-path):
 | `botfam session new <slug> [--participants a,b]` | scaffold the session dir + `meta.json` |
 | `botfam session list` | active sessions (no `ARCHIVED`), most recent first |
 | `botfam session render <slug>` | project `session.jsonl` → markdown on stdout |
-| `botfam session close <slug>` | render and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`) |
+| `botfam session close <slug>` | render and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`); **refuses to run without a TTY on stdin** (§6) |
 
 `close` writes into the worktree but never commits — committing the promoted
 log follows the repo's normal rules (the operator asks). The fam discovers the
@@ -143,8 +143,15 @@ active session by convention: the kickoff `collab` message names it.
 3. Promotion (`session close` → repo → commit) is part of sign-off, not part
    of the agents' closeout.
 
-v0 enforces none of this in code (anyone *could* create the file); it is
-convention, like the v0 roster. Enforcement arrives with bottown's tokens.
+One mechanical guard exists in v0 (operator decision, Roberto 2026-06-10):
+**`session close` refuses to run unless stdin is a TTY.** Harness-driven agents
+have no TTY, so the promotion gesture cannot be performed by a bot; the human
+at a real terminal always can. It is a guardrail, not security — a determined
+process can fake a pty — consistent with the trusted-fam posture. `session
+render` (read-only, stdout) stays bot-callable; only the gesture that writes
+into the repo is gated. The `ARCHIVED` tombstone remains pure convention in
+v0 (anyone *could* create the file), like the roster. Real enforcement
+arrives with bottown's tokens.
 
 ## 7. Behavioral rules (the protocol half)
 
