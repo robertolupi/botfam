@@ -261,7 +261,11 @@ stored only in the *recipient's* mailbox, a two-party thread spans two
 mailboxes: in v0 `thread` may scan other actors' directories read-only — the
 same trusted-fam posture as `inbox(other)` (§12), revisited under bottown.
 Files that vanish mid-scan (rename races) are skipped; they reappear in the
-target directory on the next call.
+target directory on the next call. Descendant collection is O(total history) if
+unbounded, so the scan itself is capped, not just the result: by default only
+files younger than a scope bound (default 30 days) are examined, with a ceiling
+on total files scanned — filename timestamps make the age cut free, no file
+needs opening. Pass an explicit `since`/`scan_limit` to widen the window.
 
 Task queue:
 
