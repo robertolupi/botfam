@@ -1,3 +1,4 @@
 .gocache/
 .gomodcache/
 /botfam
+.claude/settings.local.json
