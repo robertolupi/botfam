@@ -1,6 +1,6 @@
 # botfam — v0 Design Spec
 
-Status: **Draft — review round 1 incorporated** · Transport: **stdio MCP** · Language: **Go**
+Status: **Approved** (agy + codex review; agy APPROVE on Option C, now incorporated) · Transport: **stdio MCP** · Language: **Go**
 
 A single Go binary that exposes a maildir-backed coordination plane to one agent
 over stdio. Run one process per agent; they share a state directory and talk
@@ -75,46 +75,57 @@ Grant `mcp__collab__*` once; no further prompts.
 
 ### Coordination root
 
-The maildir lives **outside any repo** — it is transient, must not be committed,
-and must be shared by every worktree/clone whose agents form one *fam*. A
-repo-local `.botfam/` fails that last point (worktrees wouldn't share it), so the
-default is **content-addressed by the repo's root commit** under
-`${BOTFAM_HOME:-~/.botfam}/`:
+The maildir lives **outside any repo** — transient, never committed, and shared by
+every worktree/clone whose agents form one *fam*. The fam directory is **named by
+history** but **gated by object-store membership** (review consensus — "Option C"):
 
 ```
-~/.botfam/fam-<rootcommit12>[-<BOTFAM_FAM>]/     authoritative dir
-~/.botfam/<name> -> fam-<rootcommit12>           cosmetic symlink (setup-created)
+~/.botfam/fam-<rootset12>[-<BOTFAM_FAM>]/     fam dir (name) + fam.toml (registry)
+~/.botfam/<name> -> fam-<rootset12>           cosmetic symlink (setup-created)
 ```
 
-- `<rootcommit12>` — first 12 of the **root commit** hash
-  (`git rev-list --max-parents=0 HEAD | tail -1`). Identical across every worktree
-  *and* clone of the same history, so linked worktrees and separate per-agent
-  clones (the scriba topology) all resolve to the **same** fam — the whole point.
-  (Earlier drafts keyed on a `<repo-slug>` from the local directory name; that
-  silently *broke* clone-sharing, since the dir name differs per clone.
-  Content-addressing fixes it.)
-- `<name>` is a human-readable symlink `botfam setup` creates for browsing; it is
-  **not** authoritative, so it cannot fork the fam.
+- **Namespace = history.** `<rootset12>` is a short hash of the **sorted set of
+  root commits** (`git rev-list --max-parents=0 HEAD`, sorted — a repo can have
+  several roots after an unrelated-history merge, so never just `tail -1`). It is
+  identical across every worktree and clone of the history, gives clean stable dir
+  names, and ports cleanly to bottown.
+- **Membership = object store.** "Clone-sharing" means **object-store sharing**, not
+  mere shared ancestry: only worktrees and `--shared`/`--reference` clones (which
+  physically share Git objects) auto-join. A fork or independent clone with the same
+  history does **not** silently join.
 
-Resolution order: `COLLAB_ROOT` (explicit, wins) › `fam-<rootcommit12>`, suffixed
-by `BOTFAM_FAM` if set. Keep all of these **out of `.mcp.json`** so a committed
-config stays machine-agnostic — ideally `.mcp.json` is just `{ "command": "botfam" }`.
+`fam.toml` (at the fam dir) is the **registry** of member **canonical object-store
+paths** (plus repo paths for humans, and `{name, root_set, origin?}`). Membership is
+matched on **Git object identity, not path strings** (codex): resolve
+`git rev-parse --git-common-dir`, then its object directory and any
+`objects/info/alternates` targets, to absolute `realpath`-cleaned paths — so a
+symlink, `..`, case folding, or a moved parent can neither spoof nor break a match.
+On startup the server computes the current repo's canonical object-store set and
+decides access **fail-closed**:
 
-**Collisions are caught at setup, not papered over at runtime.** Two unrelated
-repos can share a root commit (forks, or repos cut from one template). `botfam
-setup` writes `fam.toml` recording `{name, root_commit, origin?}`; if a fam already
-exists at that root commit under a *different* `name` (or a different git `origin`,
-when both have one), setup **refuses without `--force` or a distinct `BOTFAM_FAM`**.
-At runtime the server only *warns* (stderr) on an `origin` mismatch — never blocks.
-This keeps clone-sharing automatic while making accidental fork cross-talk loud and
-operator-gated. (`origin` is a disambiguation *hint* only; botfam still requires no
-remote.)
+1. A canonical object-store path of this repo is already registered → **grant**.
+2. Else if an `alternates` target resolves to a registered object store →
+   **register this repo and grant** — this is what makes the scriba `--shared`
+   sandboxes zero-config (their alternates point at the shared parent store).
+3. Else → **refuse**: the server fails MCP initialization / rejects tool calls with a
+   hard error, so an agent **cannot proceed while membership is unverified** (process
+   exit vs. init failure is an implementation detail). Join deliberately via
+   `COLLAB_ROOT`, `BOTFAM_FAM`, or `botfam setup [--force]`.
 
-With no git and no `COLLAB_ROOT` there is no stable key to derive, so `botfam
-setup` (or an explicit `COLLAB_ROOT`) is required.
+There is **no warn-only mode** — agents don't read stderr, so a warning *is* a
+silent collision. The dangerous case (unrelated fork/template, same history) hits
+step 3 and fails closed.
 
-> **F2 is under active review.** This content-addressed scheme is the author's
-> current answer to the clone-share / fork-isolate tension — see §11.
+**The one residual edge:** a repo deliberately `--shared`-cloned from the same
+parent *but meant to be a separate project* shares object storage, so step 2 would
+auto-join it. Resolve it explicitly with `BOTFAM_FAM`, which suffixes the dir
+(`fam-<rootset12>-fork`) to force isolation. Rare, and operator-driven.
+
+Resolution order: `COLLAB_ROOT` (explicit, wins) › `fam-<rootset12>` (+`BOTFAM_FAM`).
+Keep all of these **out of `.mcp.json`** so a committed config stays machine-agnostic
+— ideally `.mcp.json` is just `{ "command": "botfam" }`. With no git and no
+`COLLAB_ROOT` there is no key to derive, so `botfam setup` (or `COLLAB_ROOT`) is
+required.
 
 ### Identity modes
 
@@ -308,11 +319,14 @@ botfam setup <project> --agents alice,bob     # create the fam root + roster, pr
 No interpreter, no venv, no `PYTHONPATH`. Cross-compiles with `GOOS`/`GOARCH`.
 
 `botfam setup <project> --agents a,b,c` (run once per project, from inside the
-repo): resolve the content-addressed root (§3), create it, write `fam.toml`
-(`name`, `root_commit`, `origin?`, roster), make the `~/.botfam/<project>` symlink,
-and print the resolved path plus the per-agent `.mcp.json` snippet. It **refuses on
-a name/origin collision** (a different fam already at that root commit) unless given
-`--force` or a distinct `BOTFAM_FAM`. The roster is **advisory** in v0 — it
+repo): resolve the fam dir from the root-commit set (§3), create it, write
+`fam.toml` (`name`, `root_set`, `origin?`, the member **canonical object-store
+paths** + repo paths, roster), register *this* repo's object store as the first
+member, make the `~/.botfam/<project>` symlink,
+and print the resolved path plus the per-agent `.mcp.json` snippet. Membership
+afterward is automatic for object-store-linked clones (§3 step 2) and fail-closed
+otherwise; `--force` / `BOTFAM_FAM` handle the deliberate-fork edge. The roster is
+**advisory** in v0 — it
 documents the fam but does not gate delivery: `send` to an unlisted actor still
 works (lazy mailbox creation). Enforcement waits for bottown's tokens.
 
@@ -367,28 +381,18 @@ second tool surface, never in the messaging hot path.
 - CCREP gate categories → **rule-based detection**, never agent self-declaration
   (DESIGN_ccrep §8).
 
-**Still open — needs your adjudication:**
+- F2 fam keying → **consensus: Option C** (agy + codex). History-namespaced
+  (`fam-<rootset12>`, sorted root set — also fixes multi-root), membership gated on
+  **canonical Git object identity** (worktrees / `--shared` clones auto-join via
+  `realpath`-resolved `alternates`, not path strings), **fail-closed** otherwise (no
+  warn-only; agent can't proceed while unverified), deliberate-fork edge via
+  `BOTFAM_FAM` (§3). agy: **APPROVE** conditioned on this; codex: recommends C + the
+  canonicalization refinement, now incorporated.
 
-- **F2 — fam keying `[priority]`.** Both reviewers agree the current
-  *warn-only-at-runtime* fork/template collision (§3) is a real **silent-corruption**
-  hazard. They disagree on the fix, and that disagreement is the decision:
-  - **agy:** change the key to an *alternates-aware parent path* — auto-shares only
-    object-linked clones (`--shared`/`--reference`, i.e. the real scriba topology)
-    and worktrees, auto-isolates forks/independent clones. Zero-config, but redefines
-    "clone-sharing" and leans on git internals.
-  - **codex:** keep root-commit addressing (preserve all-clone sharing), but make a
-    missing/mismatched `fam.toml` a **hard runtime refusal** unless the operator opts
-    in (`COLLAB_ROOT` / `BOTFAM_FAM` / recorded override). Notes that without a remote
-    or declared namespace there is *no* automatic way to distinguish forks from clones.
-  - Author's lean: a hybrid — keep root-commit, replace warn-with-hard-refuse
-    (codex), and use agy's alternates signal to *auto-confirm* membership so the
-    `--shared` topology stays zero-config while forks fail closed.
-- **Multi-root histories (codex).** `git rev-list --max-parents=0 HEAD | tail -1`
-  is under-specified — a repo can have several root commits. Fold into the F2 fix:
-  hash the *sorted full root-commit set*, or reject multi-root and require explicit
-  `BOTFAM_FAM`/`COLLAB_ROOT`.
-- **Identity trust model.** Sticky bind + out-of-repo lock — right default, or
-  lock-on by default?
+**Still open (minor):**
+
+- **Identity trust model.** Sticky bind + out-of-repo lock as the *default*, or
+  lock-on by default? Low stakes — the cooperative default is fine for a trusted fam.
 
 ## 12. Known limitations (v0, accepted)
 
