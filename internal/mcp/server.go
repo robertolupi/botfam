@@ -14,34 +14,14 @@ import (
 	"sync"
 	"time"
 
+	mcplib "github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
+
 	"github.com/rlupi/botfam/internal/fam"
 	"github.com/rlupi/botfam/internal/store"
 )
 
-type request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      any             `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-type response struct {
-	JSONRPC string    `json:"jsonrpc"`
-	ID      any       `json:"id,omitempty"`
-	Result  any       `json:"result,omitempty"`
-	Error   *rpcError `json:"error,omitempty"`
-}
-
-type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
 type server struct {
-	in       *bufio.Reader
-	out      io.Writer
-	errout   io.Writer
-	writeMu  sync.Mutex
 	store    *store.Store
 	envActor string
 	lockMode bool
@@ -64,9 +44,6 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 		return err
 	}
 	s := &server{
-		in:       bufio.NewReader(in),
-		out:      out,
-		errout:   errout,
 		store:    st,
 		envActor: os.Getenv("COLLAB_ACTOR"),
 		lockMode: lockActorEnabled(),
@@ -76,55 +53,95 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 			_ = s.lock.Close()
 		}
 	}()
-	for {
-		req, err := readFrame(s.in)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-		if req.ID == nil {
-			continue
-		}
-		result, callErr := s.handle(context.Background(), req)
-		if callErr != nil {
-			_ = s.write(response{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: -32000, Message: callErr.Error()}})
-			continue
-		}
-		if err := s.write(response{JSONRPC: "2.0", ID: req.ID, Result: result}); err != nil {
-			return err
-		}
-	}
+
+	mcpSrv := mcpserver.NewMCPServer("botfam", "0.1.0", mcpserver.WithToolCapabilities(false))
+	s.registerTools(mcpSrv)
+	return serveContentLength(context.Background(), mcpSrv, in, out)
 }
 
-func (s *server) handle(ctx context.Context, req request) (any, error) {
-	switch req.Method {
-	case "initialize":
-		return map[string]any{
-			"protocolVersion": "2025-06-18",
-			"serverInfo":      map[string]any{"name": "botfam", "version": "0.1.0"},
-			"capabilities":    map[string]any{"tools": map[string]any{}},
-		}, nil
-	case "ping":
-		return map[string]any{}, nil
-	case "tools/list":
-		return map[string]any{"tools": tools()}, nil
-	case "tools/call":
-		var p struct {
-			Name      string         `json:"name"`
-			Arguments map[string]any `json:"arguments"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			return nil, err
-		}
-		return s.callTool(ctx, p.Name, p.Arguments)
-	default:
-		return nil, fmt.Errorf("unsupported method %s", req.Method)
+func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
+	add := func(tool mcplib.Tool) {
+		mcpSrv.AddTool(tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+			return s.callTool(ctx, req.Params.Name, req.GetArguments())
+		})
 	}
+
+	add(mcplib.NewTool("send",
+		mcplib.WithDescription("Send a message to another actor."),
+		mcplib.WithString("to", mcplib.Required()),
+		mcplib.WithString("type", mcplib.Required()),
+		mcplib.WithObject("payload"),
+		mcplib.WithString("in_reply_to"),
+		mcplib.WithNumber("expires_at"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("recv",
+		mcplib.WithDescription("Block until a message is reserved, or timeout."),
+		mcplib.WithString("match_type"),
+		mcplib.WithNumber("timeout_s"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("try_recv",
+		mcplib.WithDescription("Reserve the oldest matching message if present."),
+		mcplib.WithString("match_type"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("peek",
+		mcplib.WithDescription("Inspect the oldest matching message without reserving it."),
+		mcplib.WithString("match_type"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("ack",
+		mcplib.WithDescription("Ack a reserved message."),
+		mcplib.WithString("id", mcplib.Required()),
+		mcplib.WithObject("outcome"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("seen",
+		mcplib.WithDescription("Check whether a message id has been acked."),
+		mcplib.WithString("id", mcplib.Required()),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("inbox",
+		mcplib.WithDescription("Show mailbox and task counts."),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("post",
+		mcplib.WithDescription("Post a task."),
+		mcplib.WithString("type"),
+		mcplib.WithObject("payload"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("claim",
+		mcplib.WithDescription("Claim one open task."),
+		mcplib.WithNumber("lease_ttl"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("complete",
+		mcplib.WithDescription("Complete an owned task."),
+		mcplib.WithString("task_id", mcplib.Required()),
+		mcplib.WithObject("result"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("heartbeat",
+		mcplib.WithDescription("Extend an owned task lease."),
+		mcplib.WithString("task_id", mcplib.Required()),
+		mcplib.WithNumber("lease_ttl"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("abandon",
+		mcplib.WithDescription("Release an owned task back to open."),
+		mcplib.WithString("task_id", mcplib.Required()),
+		mcplib.WithString("reason"),
+		mcplib.WithString("actor"),
+	))
+	add(mcplib.NewTool("sweep",
+		mcplib.WithDescription("Return expired claimed tasks to open."),
+		mcplib.WithString("actor"),
+	))
 }
 
-func (s *server) callTool(ctx context.Context, name string, args map[string]any) (any, error) {
+func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
 	actor, err := s.resolveActor(argString(args, "actor"))
 	if err != nil {
 		return nil, err
@@ -279,56 +296,87 @@ func (s *server) ensureActorLock(actor string) error {
 	return s.store.RollbackProcessing(actor)
 }
 
-func toolResult(v any) (any, error) {
+func toolResult(v any) (*mcplib.CallToolResult, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"content": []map[string]any{{"type": "text", "text": string(b)}},
-	}, nil
+	return mcplib.NewToolResultText(string(b)), nil
 }
 
-func readFrame(r *bufio.Reader) (request, error) {
-	var contentLen int
+func serveContentLength(ctx context.Context, mcpSrv *mcpserver.MCPServer, in io.Reader, out io.Writer) error {
+	r := bufio.NewReader(in)
+	var writeMu sync.Mutex
+	for {
+		body, err := readFrame(r)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		resp := mcpSrv.HandleMessage(ctx, body)
+		if resp == nil {
+			continue
+		}
+		b, err := json.Marshal(resp)
+		if err != nil {
+			return err
+		}
+		writeMu.Lock()
+		_, err = fmt.Fprintf(out, "Content-Length: %d\r\n\r\n%s", len(b), b)
+		writeMu.Unlock()
+		if err != nil {
+			return err
+		}
+	}
+}
+
+func readFrame(r *bufio.Reader) ([]byte, error) {
 	for {
 		line, err := r.ReadString('\n')
-		if err != nil {
-			return request{}, err
+		if err != nil && !(errors.Is(err, io.EOF) && len(line) > 0) {
+			return nil, err
 		}
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			break
-		}
-		k, v, ok := strings.Cut(line, ":")
-		if ok && strings.EqualFold(strings.TrimSpace(k), "Content-Length") {
-			n, err := strconv.Atoi(strings.TrimSpace(v))
-			if err != nil {
-				return request{}, err
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if errors.Is(err, io.EOF) {
+				return nil, io.EOF
 			}
-			contentLen = n
+			continue
 		}
-	}
-	if contentLen <= 0 {
-		return request{}, errors.New("missing Content-Length")
-	}
-	body := make([]byte, contentLen)
-	if _, err := io.ReadFull(r, body); err != nil {
-		return request{}, err
-	}
-	var req request
-	return req, json.Unmarshal(body, &req)
-}
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			return []byte(trimmed), nil
+		}
 
-func (s *server) write(resp response) error {
-	body, err := json.Marshal(resp)
-	if err != nil {
-		return err
+		contentLen := 0
+		for {
+			k, v, ok := strings.Cut(trimmed, ":")
+			if ok && strings.EqualFold(strings.TrimSpace(k), "Content-Length") {
+				n, err := strconv.Atoi(strings.TrimSpace(v))
+				if err != nil {
+					return nil, err
+				}
+				contentLen = n
+			}
+			line, err = r.ReadString('\n')
+			if err != nil {
+				return nil, err
+			}
+			trimmed = strings.TrimSpace(line)
+			if trimmed == "" {
+				break
+			}
+		}
+		if contentLen <= 0 {
+			return nil, errors.New("missing Content-Length")
+		}
+		body := make([]byte, contentLen)
+		if _, err := io.ReadFull(r, body); err != nil {
+			return nil, err
+		}
+		return body, nil
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	_, err = fmt.Fprintf(s.out, "Content-Length: %d\r\n\r\n%s", len(body), body)
-	return err
 }
 
 func lockActorEnabled() bool {
