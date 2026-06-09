@@ -258,3 +258,85 @@ func (c *botClient) readResponse(t *testing.T) map[string]any {
 		return resp
 	}
 }
+
+func TestIntegrationDirectoryBasedResolution(t *testing.T) {
+	if os.Getenv("BOTFAM_TEST_HELPER") == "serve" {
+		os.Args = []string{"botfam", "serve"}
+		if err := run(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	tempDir := t.TempDir()
+	homeDir := filepath.Join(tempDir, "home")
+	_ = os.MkdirAll(homeDir, 0o755)
+
+	// Create workspace directories with pattern FAMILY-ACTOR
+	aliceWorkspace := filepath.Join(tempDir, "myfam-alice")
+	_ = os.MkdirAll(aliceWorkspace, 0o755)
+
+	bobWorkspace := filepath.Join(tempDir, "myfam-bob")
+	_ = os.MkdirAll(bobWorkspace, 0o755)
+
+	// Helper to start botClient with a specific working directory and HOME
+	startClient := func(workDir string) *botClient {
+		cmd := exec.Command(os.Args[0], "-test.run=TestIntegrationDirectoryBasedResolution")
+		cmd.Env = append(os.Environ(),
+			"BOTFAM_TEST_HELPER=serve",
+			"HOME="+homeDir,
+		)
+		// Set working directory to the workspace
+		cmd.Dir = workDir
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stderr := &bytes.Buffer{}
+		cmd.Stderr = stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		return &botClient{cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: stderr, nextID: 1}
+	}
+
+	alice := startClient(aliceWorkspace)
+	bob := startClient(bobWorkspace)
+	defer alice.Close(t)
+	defer bob.Close(t)
+
+	alice.Call(t, "initialize", map[string]any{})
+	bob.Call(t, "initialize", map[string]any{})
+
+	// Alice sends a message to Bob. The actor names should be resolved automatically from directory name!
+	sent := alice.Tool(t, "send", map[string]any{
+		"to":   "bob",
+		"type": "hello",
+		"payload": map[string]any{"msg": "hi"},
+	})
+	sentID := sent["id"].(string)
+
+	// Bob receives the message
+	got := bob.Tool(t, "try_recv", map[string]any{})
+	if got == nil {
+		t.Fatal("bob did not receive the message")
+	}
+	if got["id"] != sentID {
+		t.Fatalf("expected message ID %s, got %v", sentID, got["id"])
+	}
+	if got["from"] != "alice" || got["to"] != "bob" {
+		t.Fatalf("unexpected envelope: %+v", got)
+	}
+
+	// Verify the root folder ~/.botfam/myfam was created
+	expectedRoot := filepath.Join(homeDir, ".botfam", "myfam")
+	if _, err := os.Stat(expectedRoot); err != nil {
+		t.Fatalf("expected botfam root to exist at %s, but got error: %v", expectedRoot, err)
+	}
+}
+

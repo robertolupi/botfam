@@ -22,35 +22,25 @@ import (
 )
 
 type server struct {
-	store    *store.Store
 	envActor string
 	lockMode bool
 
-	actorMu sync.Mutex
-	actor   string
-	lock    *store.ActorLock
+	mu    sync.Mutex
+	actor string
+	locks map[string]*store.ActorLock
 }
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
-	info, err := (fam.Resolver{WorkDir: ".", Env: os.Environ()}).Resolve()
-	if err != nil {
-		return err
-	}
-	if err := fam.EnsureMembership(info.Root, info.Explicit, "."); err != nil {
-		return err
-	}
-	st := store.New(info.Root)
-	if err := st.Init(); err != nil {
-		return err
-	}
 	s := &server{
-		store:    st,
 		envActor: os.Getenv("COLLAB_ACTOR"),
 		lockMode: lockActorEnabled(),
+		locks:    make(map[string]*store.ActorLock),
 	}
 	defer func() {
-		if s.lock != nil {
-			_ = s.lock.Close()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for _, lock := range s.locks {
+			_ = lock.Close()
 		}
 	}()
 
@@ -74,75 +64,104 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithString("in_reply_to"),
 		mcplib.WithNumber("expires_at"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("recv",
 		mcplib.WithDescription("Block until a message is reserved, or timeout."),
 		mcplib.WithString("match_type"),
 		mcplib.WithNumber("timeout_s"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("try_recv",
 		mcplib.WithDescription("Reserve the oldest matching message if present."),
 		mcplib.WithString("match_type"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("peek",
 		mcplib.WithDescription("Inspect the oldest matching message without reserving it."),
 		mcplib.WithString("match_type"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("ack",
 		mcplib.WithDescription("Ack a reserved message."),
 		mcplib.WithString("id", mcplib.Required()),
 		mcplib.WithObject("outcome"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("seen",
 		mcplib.WithDescription("Check whether a message id has been acked."),
 		mcplib.WithString("id", mcplib.Required()),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("inbox",
 		mcplib.WithDescription("Show mailbox and task counts."),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("post",
 		mcplib.WithDescription("Post a task."),
 		mcplib.WithString("type"),
 		mcplib.WithObject("payload"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("claim",
 		mcplib.WithDescription("Claim one open task."),
 		mcplib.WithNumber("lease_ttl"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("complete",
 		mcplib.WithDescription("Complete an owned task."),
 		mcplib.WithString("task_id", mcplib.Required()),
 		mcplib.WithObject("result"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("heartbeat",
 		mcplib.WithDescription("Extend an owned task lease."),
 		mcplib.WithString("task_id", mcplib.Required()),
 		mcplib.WithNumber("lease_ttl"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("abandon",
 		mcplib.WithDescription("Release an owned task back to open."),
 		mcplib.WithString("task_id", mcplib.Required()),
 		mcplib.WithString("reason"),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 	add(mcplib.NewTool("sweep",
 		mcplib.WithDescription("Return expired claimed tasks to open."),
 		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
 	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
-	actor, err := s.resolveActor(argString(args, "actor"))
+	workDir := argString(args, "work_dir")
+	if workDir == "" {
+		workDir = "."
+	}
+	info, err := (fam.Resolver{WorkDir: workDir, Env: os.Environ()}).Resolve()
+	if err != nil {
+		return nil, err
+	}
+	if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
+		return nil, err
+	}
+	st := store.New(info.Root)
+	if err := st.Init(); err != nil {
+		return nil, err
+	}
+
+	actor, err := s.resolveActor(argString(args, "actor"), info.Actor)
 	if err != nil {
 		return nil, err
 	}
@@ -151,89 +170,89 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	case "send":
 		to := argString(args, "to")
 		typ := argString(args, "type")
-		msg, err := s.store.Send(actor, to, typ, argObject(args, "payload"), argString(args, "in_reply_to"), argFloatPtr(args, "expires_at"))
+		msg, err := st.Send(actor, to, typ, argObject(args, "payload"), argString(args, "in_reply_to"), argFloatPtr(args, "expires_at"))
 		result = msg
 		if err != nil {
 			return nil, err
 		}
 	case "recv":
-		if err := s.ensureActorLock(actor); err != nil {
+		if err := s.ensureActorLock(actor, st); err != nil {
 			return nil, err
 		}
 		timeout := time.Duration(argFloatDefault(args, "timeout_s", 120) * float64(time.Second))
-		msg, err := s.store.Recv(ctx, actor, argString(args, "match_type"), timeout)
+		msg, err := st.Recv(ctx, actor, argString(args, "match_type"), timeout)
 		if err != nil {
 			return nil, err
 		}
 		result = msg
 	case "try_recv":
-		if err := s.ensureActorLock(actor); err != nil {
+		if err := s.ensureActorLock(actor, st); err != nil {
 			return nil, err
 		}
-		msg, err := s.store.TryRecv(actor, argString(args, "match_type"))
+		msg, err := st.TryRecv(actor, argString(args, "match_type"))
 		if err != nil {
 			return nil, err
 		}
 		result = msg
 	case "peek":
-		msg, err := s.store.Peek(actor, argString(args, "match_type"))
+		msg, err := st.Peek(actor, argString(args, "match_type"))
 		if err != nil {
 			return nil, err
 		}
 		result = msg
 	case "ack":
-		if err := s.ensureActorLock(actor); err != nil {
+		if err := s.ensureActorLock(actor, st); err != nil {
 			return nil, err
 		}
-		msg, err := s.store.Ack(actor, argString(args, "id"), args["outcome"])
+		msg, err := st.Ack(actor, argString(args, "id"), args["outcome"])
 		if err != nil {
 			return nil, err
 		}
 		result = msg
 	case "seen":
-		seen, err := s.store.Seen(actor, argString(args, "id"))
+		seen, err := st.Seen(actor, argString(args, "id"))
 		if err != nil {
 			return nil, err
 		}
 		result = map[string]any{"seen": seen}
 	case "inbox":
-		snap, err := s.store.Inbox(actor)
+		snap, err := st.Inbox(actor)
 		if err != nil {
 			return nil, err
 		}
 		result = snap
 	case "post":
-		task, err := s.store.Post(actor, argStringDefault(args, "type", "task"), argObject(args, "payload"))
+		task, err := st.Post(actor, argStringDefault(args, "type", "task"), argObject(args, "payload"))
 		if err != nil {
 			return nil, err
 		}
 		result = task
 	case "claim":
-		task, err := s.store.Claim(actor, time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)))
+		task, err := st.Claim(actor, time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)))
 		if err != nil {
 			return nil, err
 		}
 		result = task
 	case "complete":
-		task, err := s.store.Complete(actor, argString(args, "task_id"), args["result"])
+		task, err := st.Complete(actor, argString(args, "task_id"), args["result"])
 		if err != nil {
 			return nil, err
 		}
 		result = task
 	case "heartbeat":
-		task, err := s.store.Heartbeat(actor, argString(args, "task_id"), time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)))
+		task, err := st.Heartbeat(actor, argString(args, "task_id"), time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)))
 		if err != nil {
 			return nil, err
 		}
 		result = task
 	case "abandon":
-		task, err := s.store.Abandon(actor, argString(args, "task_id"), argString(args, "reason"))
+		task, err := st.Abandon(actor, argString(args, "task_id"), argString(args, "reason"))
 		if err != nil {
 			return nil, err
 		}
 		result = task
 	case "sweep":
-		tasks, err := s.store.Sweep()
+		tasks, err := st.Sweep()
 		if err != nil {
 			return nil, err
 		}
@@ -244,9 +263,9 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	return toolResult(result)
 }
 
-func (s *server) resolveActor(callActor string) (string, error) {
-	s.actorMu.Lock()
-	defer s.actorMu.Unlock()
+func (s *server) resolveActor(callActor string, dirActor string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.lockMode {
 		if s.envActor == "" {
 			return "", errors.New("BOTFAM_LOCK_ACTOR is set but COLLAB_ACTOR is empty")
@@ -267,7 +286,10 @@ func (s *server) resolveActor(callActor string) (string, error) {
 		candidate = s.envActor
 	}
 	if candidate == "" {
-		return "", errors.New("identity required: pass actor or set COLLAB_ACTOR")
+		candidate = dirActor
+	}
+	if candidate == "" {
+		return "", errors.New("identity required: pass actor, set COLLAB_ACTOR, or run from a named worktree")
 	}
 	if err := store.ValidateName("actor", candidate); err != nil {
 		return "", err
@@ -282,18 +304,18 @@ func (s *server) resolveActor(callActor string) (string, error) {
 	return s.actor, nil
 }
 
-func (s *server) ensureActorLock(actor string) error {
-	s.actorMu.Lock()
-	defer s.actorMu.Unlock()
-	if s.lock != nil {
+func (s *server) ensureActorLock(actor string, st *store.Store) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.locks[st.Root] != nil {
 		return nil
 	}
-	lock, err := s.store.LockActor(actor)
+	lock, err := st.LockActor(actor)
 	if err != nil {
 		return err
 	}
-	s.lock = lock
-	return s.store.RollbackProcessing(actor)
+	s.locks[st.Root] = lock
+	return st.RollbackProcessing(actor)
 }
 
 func toolResult(v any) (*mcplib.CallToolResult, error) {

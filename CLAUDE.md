@@ -19,11 +19,10 @@ If in doubt, run `basename "$PWD"` and apply that rule before your first call.
 
 ## Identity rule (important)
 
-On your **first** `collab` tool call, pass `actor: "<your-name>"`. The server
-binds that name to the session — it is **sticky and immutable**, so you may
-omit `actor` on every later call. A *conflicting* `actor` is rejected, and a
-first call with **no** identity is refused (there is no silent default). So:
-state your name once, correctly, then forget about it.
+The server binds an actor name to the session — it is **sticky and immutable**.
+
+- **Automatic resolution (Recommended):** If you run inside a named worktree folder (e.g., `wt-agy`), the server automatically parses the directory basename to resolve the actor as `agy` and the family as `wt`. In this case, you do not need to pass the `actor` parameter on your tool calls.
+- **Explicit naming:** Alternatively, on your **first** `collab` tool call, you can pass `actor: "<your-name>"`. A *conflicting* `actor` is rejected. If no automatic resolution is possible (e.g. running from an unnamed directory) and no `actor` is provided on the first call, it is refused.
 
 ## Coordination tools
 

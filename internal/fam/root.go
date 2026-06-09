@@ -24,16 +24,51 @@ type RootInfo struct {
 	RootSet   []string
 	RootSetID string
 	Explicit  bool
+	Actor     string
 }
 
 func (r Resolver) Resolve() (RootInfo, error) {
+	var parsedActor string
+	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
+		base := filepath.Base(absDir)
+		if idx := strings.LastIndex(base, "-"); idx != -1 {
+			parsedActor = base[idx+1:]
+		}
+	}
+
 	if root := getenv(r.Env, "COLLAB_ROOT"); root != "" {
 		abs, err := filepath.Abs(root)
 		if err != nil {
 			return RootInfo{}, err
 		}
-		return RootInfo{Root: abs, Name: filepath.Base(abs), Explicit: true}, nil
+		return RootInfo{
+			Root:     abs,
+			Name:     filepath.Base(abs),
+			Explicit: true,
+			Actor:    parsedActor,
+		}, nil
 	}
+
+	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
+		base := filepath.Base(absDir)
+		if idx := strings.LastIndex(base, "-"); idx != -1 {
+			family := base[:idx]
+			actor := base[idx+1:]
+			if family != "" && actor != "" {
+				home, err := os.UserHomeDir()
+				if err != nil {
+					return RootInfo{}, err
+				}
+				return RootInfo{
+					Root:     filepath.Join(home, ".botfam", family),
+					Name:     family,
+					Explicit: true,
+					Actor:    actor,
+				}, nil
+			}
+		}
+	}
+
 	roots, err := gitLines(r.WorkDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		return RootInfo{}, errors.New("COLLAB_ROOT is unset and no git history could be used to derive a fam root; run botfam setup or set COLLAB_ROOT")
@@ -54,6 +89,7 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		Name:      name,
 		RootSet:   roots,
 		RootSetID: id,
+		Actor:     parsedActor,
 	}, nil
 }
 
