@@ -12,7 +12,9 @@ tool surface, maildir store, session identity binding, per-actor receive lock,
 setup command, and subprocess MCP integration tests. A few spec details are still
 early: `recv` uses polling instead of `fsnotify`, `fam.toml` parsing is minimal,
 and the setup/join UX has not yet been hardened beyond the initial fail-closed
-membership check. CCREP and bottown remain future phases.
+membership check. The Tier 1 receive ergonomics (`match_from`/`match_reply_to`
+filters and the `thread` tool, §5) are **specified but not yet implemented**.
+CCREP and bottown remain future phases.
 
 ---
 
@@ -195,7 +197,10 @@ chronological order.
   "payload": { }, "ts": 1733760000.0, "in_reply_to": "...", "expires_at": null }
 ```
 `in_reply_to` and `expires_at` are optional. `type` is free-form (`handoff`,
-`ack`, … — convention, not enforced). If `expires_at` is set and in the past when
+`ack`, … — convention, not enforced). One prefix is reserved *by convention*:
+`ccrep:*` (`ccrep:proposal`, `ccrep:critique`, `ccrep:evaluation`) is how Phase 2
+will be prototyped over plain messages before the dedicated ledger exists — the
+server treats it like any other type. If `expires_at` is set and in the past when
 a reader scans `new/`, the message is **not delivered** — it is moved to
 `<actor>/expired/` (a visible dead-letter, **not** mixed into `cur/`) so a stale
 handoff is never acted on late. Expiry is lazy: enforced on `recv`/`peek`/`try_recv`
@@ -218,9 +223,10 @@ Mailbox:
 | Tool | Blocking | Behavior |
 |---|---|---|
 | `send(to, type, payload, in_reply_to?)` | no | write-then-rename into `to`'s `new/`; returns the envelope |
-| `recv(match_type?, timeout_s=120)` | **yes** | block until a (matching) message lands in own `new/`, then **reserve** it (`new/→processing/`) and return it; return null on timeout |
-| `try_recv(match_type?)` | no | oldest matching message, reserved (`new/→processing/`), or null |
-| `peek(match_type?)` | no | oldest matching message **without reserving it** (stays in `new/`), or null |
+| `recv(match_type?, match_from?, match_reply_to?, timeout_s=120)` | **yes** | block until a **matching** message lands in own `new/`, then **reserve** it (`new/→processing/`) and return it; return null on timeout |
+| `try_recv(match_type?, match_from?, match_reply_to?)` | no | oldest matching message, reserved (`new/→processing/`), or null |
+| `peek(match_type?, match_from?, match_reply_to?)` | no | oldest matching message **without reserving it** (stays in `new/`), or null |
+| `thread(id, limit?)` | no | read-only: reconstruct the conversation containing `id` via `in_reply_to` links; reserves nothing |
 | `ack(id, outcome?)` | no | confirm a reserved message processed (`processing/→cur/`), recording optional `outcome`; without it the message is redelivered after a crash |
 | `seen(id)` | no | has this `id` already been acked? (durable dedup check against `cur/`) |
 | `inbox()` | no | read-only snapshot: pending `new/`, in-flight `processing/`, recent `cur/` (with ids), task counts |
@@ -236,6 +242,26 @@ consumer checks `seen(id)` before acting and `ack`s after. The one irreducible
 window — an *external* side effect performed, then a crash *before* `ack`, then
 redelivery — cannot be closed by any queue; make such effects idempotent by keying
 them on the message `id`. `peek` reserves nothing — look without taking.
+
+**Matching (Tier 1).** `match_type`, `match_from`, and `match_reply_to` AND
+together; the oldest message in `new/` satisfying *all* provided filters is
+taken, and non-matching mail is left untouched (a filtered wait neither blocks
+nor is blocked by unrelated deliveries). `match_reply_to` is the request/reply
+primitive: send a request, then `recv(match_reply_to=<request id>)` parks until
+*that* conversation advances instead of waking on every delivery — without it,
+two concurrent threads between the same actors cross (observed in the first
+dogfooded discussion). A blocked filtered `recv` re-checks all of `new/` on each
+wakeup, so a non-matching head never wedges the wait.
+
+**`thread(id, limit?)`** reconstructs a conversation: starting from any message
+`id`, follow `in_reply_to` ancestors and collect descendants, returning
+envelopes sorted by `ts` (oldest first, capped at `limit`). Read-only, like
+`peek` — it reserves nothing and never moves a file. Because an envelope is
+stored only in the *recipient's* mailbox, a two-party thread spans two
+mailboxes: in v0 `thread` may scan other actors' directories read-only — the
+same trusted-fam posture as `inbox(other)` (§12), revisited under bottown.
+Files that vanish mid-scan (rename races) are skipped; they reappear in the
+target directory on the next call.
 
 Task queue:
 
@@ -395,6 +421,16 @@ second tool surface, never in the messaging hot path.
   warn-only; agent can't proceed while unverified), deliberate-fork edge via
   `BOTFAM_FAM` (§3). agy: **APPROVE** conditioned on this; codex: recommends C + the
   canonicalization refinement, now incorporated.
+
+- **Tier 1 receive ergonomics** (claude + agy consensus, first dogfooded
+  discussion *over collab itself*, 2026-06): type-only filtering made an agent
+  awaiting a specific reply wake on every unrelated delivery, and two concurrent
+  threads between the same actors crossed. Added `match_from`/`match_reply_to`
+  and read-only `thread(id)` (§5) as prerequisites for prototyping CCREP over
+  collab, plus the `ccrep:*` type convention (§4). Deferred by the same
+  consensus: task dependency mapping (workflow-layer concern — the hydra
+  lesson), pub/sub topics (revisit as a broadcast recipient if a need shows up),
+  server-side auto-heartbeat (harness concern).
 
 **Still open (minor):**
 
