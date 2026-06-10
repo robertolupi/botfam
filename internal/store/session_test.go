@@ -252,6 +252,33 @@ func TestSessionAppendValidation(t *testing.T) {
 			},
 			wantErr: "invalid handoff: deliverable cannot be empty or whitespace only",
 		},
+		{
+			name: "whitespace task",
+			handoff: &SessionHandoff{
+				Task:        "   ",
+				Context:     "ctx",
+				Deliverable: "deliv",
+			},
+			wantErr: "invalid handoff: task cannot be empty or whitespace only",
+		},
+		{
+			name: "newline context",
+			handoff: &SessionHandoff{
+				Task:        "task",
+				Context:     "\n",
+				Deliverable: "deliv",
+			},
+			wantErr: "invalid handoff: context cannot be empty or whitespace only",
+		},
+		{
+			name: "carriage return deliverable",
+			handoff: &SessionHandoff{
+				Task:        "task",
+				Context:     "ctx",
+				Deliverable: "\r",
+			},
+			wantErr: "invalid handoff: deliverable cannot be empty or whitespace only",
+		},
 	}
 
 	for _, tc := range cases {

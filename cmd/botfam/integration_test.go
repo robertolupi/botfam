@@ -734,3 +734,325 @@ func TestIntegrationB_NarrowSafety(t *testing.T) {
 		t.Fatalf("unexpected legitimate append result entry: %+v", entry)
 	}
 }
+
+
+func TestIntegrationLifecycleInvariants(t *testing.T) {
+	root := t.TempDir()
+
+	binPath := filepath.Join(root, "botfam")
+	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+	buildCmd.Dir = "."
+	var buildStderr bytes.Buffer
+	buildCmd.Stderr = &buildStderr
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
+	}
+
+	gitDir := filepath.Join(root, "myrepo")
+	if err := os.Mkdir(gitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, gitDir)
+
+	homeDir := filepath.Join(root, "home")
+	_ = os.MkdirAll(homeDir, 0755)
+	t.Setenv("HOME", homeDir)
+
+	t.Chdir(gitDir)
+	var setupOut bytes.Buffer
+	if err := fam.Setup([]string{"myproj", "--agents", "alice,bob"}, &setupOut); err != nil {
+		t.Fatalf("fam.Setup failed: %v", err)
+	}
+
+	aliceWT := filepath.Join(gitDir, "wt-alice")
+	_ = os.MkdirAll(aliceWT, 0755)
+	bobWT := filepath.Join(gitDir, "wt-bob")
+	_ = os.MkdirAll(bobWT, 0755)
+
+	runMCPServer := func(workDir string, env []string, method string, params map[string]any) (map[string]any, string) {
+		cmd := exec.Command(binPath, "serve")
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(), "HOME="+homeDir)
+		cmd.Env = append(cmd.Env, env...)
+
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+
+		initReq := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+		fmt.Fprintln(stdin, initReq)
+
+		callReq := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      method,
+				"arguments": params,
+			},
+		}
+		reqBody, err := json.Marshal(callReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintln(stdin, string(reqBody))
+		_ = stdin.Close()
+
+		scanner := bufio.NewScanner(stdout)
+		var lastResult map[string]any
+		var lastError string
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(line), &resp); err != nil {
+				continue
+			}
+			if idFloat, ok := resp["id"].(float64); ok && idFloat == 2 {
+				if errObj, ok := resp["error"].(map[string]any); ok {
+					lastError, _ = errObj["message"].(string)
+				} else if resObj, ok := resp["result"].(map[string]any); ok {
+					lastResult = resObj
+				}
+			}
+		}
+
+		_ = cmd.Wait()
+		return lastResult, lastError
+	}
+
+	runMCPMulti := func(workDir string, env []string, calls []map[string]any) ([]map[string]any, []string) {
+		cmd := exec.Command(binPath, "serve")
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(), "HOME="+homeDir)
+		cmd.Env = append(cmd.Env, env...)
+
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+
+		initReq := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+		fmt.Fprintln(stdin, initReq)
+
+		for i, call := range calls {
+			callReq := map[string]any{
+				"jsonrpc": "2.0",
+				"id":      float64(i + 2),
+				"method":  "tools/call",
+				"params":  call,
+			}
+			reqBody, err := json.Marshal(callReq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fmt.Fprintln(stdin, string(reqBody))
+		}
+		_ = stdin.Close()
+
+		scanner := bufio.NewScanner(stdout)
+		results := make([]map[string]any, len(calls))
+		errors := make([]string, len(calls))
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(line), &resp); err != nil {
+				continue
+			}
+			if idFloat, ok := resp["id"].(float64); ok && idFloat >= 2 {
+				idx := int(idFloat) - 2
+				if idx >= 0 && idx < len(calls) {
+					if errObj, ok := resp["error"].(map[string]any); ok {
+						errors[idx], _ = errObj["message"].(string)
+					} else if resObj, ok := resp["result"].(map[string]any); ok {
+						results[idx] = resObj
+					}
+				}
+			}
+		}
+
+		_ = cmd.Wait()
+		return results, errors
+	}
+
+	parseResultAny := func(t *testing.T, res map[string]any) any {
+		t.Helper()
+		content, ok := res["content"].([]any)
+		if !ok || len(content) != 1 {
+			t.Fatalf("expected content array size 1, got %+v", res)
+		}
+		item := content[0].(map[string]any)
+		text := item["text"].(string)
+		if text == "null" {
+			return nil
+		}
+		var payload any
+		if err := json.Unmarshal([]byte(text), &payload); err != nil {
+			t.Fatalf("failed to unmarshal text %q: %v", text, err)
+		}
+		return payload
+	}
+
+	// A. Send -> Recv -> Ack
+	sendRes, errStr := runMCPServer(aliceWT, nil, "send", map[string]any{
+		"to":      "bob",
+		"type":    "handoff",
+		"payload": map[string]any{"x": 1},
+	})
+	if errStr != "" {
+		t.Fatalf("send failed: %s", errStr)
+	}
+	sendMsg := parseResultAny(t, sendRes).(map[string]any)
+	msgID := sendMsg["id"].(string)
+
+	results, errs := runMCPMulti(bobWT, nil, []map[string]any{
+		{"name": "try_recv", "arguments": map[string]any{}},
+		{"name": "ack", "arguments": map[string]any{"id": msgID, "outcome": map[string]any{"ok": true}}},
+	})
+	if errs[0] != "" {
+		t.Fatalf("try_recv failed: %s", errs[0])
+	}
+	if errs[1] != "" {
+		t.Fatalf("ack failed: %s", errs[1])
+	}
+	recvMsg := parseResultAny(t, results[0]).(map[string]any)
+	if recvMsg == nil || recvMsg["id"] != msgID {
+		t.Fatalf("expected to receive message %s, got %+v", msgID, recvMsg)
+	}
+	ackMsg := parseResultAny(t, results[1]).(map[string]any)
+	if ackMsg["id"] != msgID {
+		t.Fatalf("expected ack for msg %s, got %+v", msgID, ackMsg)
+	}
+
+	// B. Seen Dedup
+	seenRes, errStr := runMCPServer(bobWT, nil, "seen", map[string]any{"id": msgID})
+	if errStr != "" {
+		t.Fatalf("seen failed: %s", errStr)
+	}
+	seenMsg := parseResultAny(t, seenRes).(map[string]any)
+	if seenMsg["seen"] != true {
+		t.Fatalf("expected seen to be true, got %+v", seenMsg)
+	}
+
+	// C. Crash Redelivery (reserve, die, redeliver)
+	sendRes2, errStr := runMCPServer(aliceWT, nil, "send", map[string]any{
+		"to":      "bob",
+		"type":    "handoff2",
+		"payload": map[string]any{"x": 2},
+	})
+	if errStr != "" {
+		t.Fatalf("send2 failed: %s", errStr)
+	}
+	sendMsg2 := parseResultAny(t, sendRes2).(map[string]any)
+	msgID2 := sendMsg2["id"].(string)
+
+	recvRes2, errStr := runMCPServer(bobWT, nil, "try_recv", map[string]any{})
+	if errStr != "" {
+		t.Fatalf("try_recv2 failed: %s", errStr)
+	}
+	recvMsg2 := parseResultAny(t, recvRes2).(map[string]any)
+	if recvMsg2 == nil || recvMsg2["id"] != msgID2 {
+		t.Fatalf("expected msg %s, got %+v", msgID2, recvMsg2)
+	}
+
+	// Now start a new process to simulate Bob "dying" and starting fresh.
+	// We want to try_recv AND ack it so it does not clutter future test steps.
+	results, errs = runMCPMulti(bobWT, nil, []map[string]any{
+		{"name": "try_recv", "arguments": map[string]any{}},
+		{"name": "ack", "arguments": map[string]any{"id": msgID2, "outcome": map[string]any{"ok": true}}},
+	})
+	if errs[0] != "" {
+		t.Fatalf("try_recv3 failed: %s", errs[0])
+	}
+	if errs[1] != "" {
+		t.Fatalf("ack2 failed: %s", errs[1])
+	}
+	recvMsg3 := parseResultAny(t, results[0]).(map[string]any)
+	if recvMsg3 == nil || recvMsg3["id"] != msgID2 {
+		t.Fatalf("expected crash redelivery of msg %s, got %+v", msgID2, recvMsg3)
+	}
+
+	// D. expires_at dead-letter
+	pastTime := float64(time.Now().Add(-time.Hour).Unix())
+	_, errStr = runMCPServer(aliceWT, nil, "send", map[string]any{
+		"to":         "bob",
+		"type":       "expired-msg",
+		"payload":    map[string]any{"bad": true},
+		"expires_at": pastTime,
+	})
+	if errStr != "" {
+		t.Fatalf("expired send failed: %s", errStr)
+	}
+
+	recvResExpired, errStr := runMCPServer(bobWT, nil, "try_recv", map[string]any{})
+	if errStr != "" {
+		t.Fatalf("try_recv expired failed: %s", errStr)
+	}
+	recvMsgExpired := parseResultAny(t, recvResExpired)
+	if recvMsgExpired != nil {
+		t.Fatalf("unexpectedly received expired message: %+v", recvMsgExpired)
+	}
+
+	// E. Task lease expiry + sweep returns to open with swept_from
+	postRes, errStr := runMCPServer(aliceWT, nil, "post", map[string]any{
+		"payload": map[string]any{"job": "sweep-test"},
+	})
+	if errStr != "" {
+		t.Fatalf("post task failed: %s", errStr)
+	}
+	postedTask := parseResultAny(t, postRes).(map[string]any)
+	taskID := postedTask["id"].(string)
+
+	claimRes, errStr := runMCPServer(bobWT, nil, "claim", map[string]any{
+		"lease_ttl": -10,
+	})
+	if errStr != "" {
+		t.Fatalf("claim task failed: %s", errStr)
+	}
+	claimedTask := parseResultAny(t, claimRes).(map[string]any)
+	if claimedTask == nil || claimedTask["id"] != taskID {
+		t.Fatalf("expected claimed task %s, got %+v", taskID, claimedTask)
+	}
+
+	sweepRes, errStr := runMCPServer(bobWT, nil, "sweep", map[string]any{})
+	if errStr != "" {
+		t.Fatalf("sweep failed: %s", errStr)
+	}
+	sweptMap := parseResultAny(t, sweepRes).(map[string]any)
+	sweptList := sweptMap["swept"].([]any)
+	if len(sweptList) != 1 {
+		t.Fatalf("expected 1 swept task, got %+v", sweptList)
+	}
+	sweptTask := sweptList[0].(map[string]any)
+	if sweptTask["id"] != taskID || sweptTask["swept_from"] != "bob" {
+		t.Fatalf("unexpected swept task state: %+v", sweptTask)
+	}
+}
