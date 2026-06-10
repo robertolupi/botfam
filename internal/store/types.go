@@ -49,6 +49,12 @@ type TaskCounts struct {
 	Done    int            `json:"done"`
 }
 
+type ClaimOptions struct {
+	TaskID         string
+	Type           string
+	SuggestedOwner string
+}
+
 func unixFloat(t time.Time) float64 {
 	return float64(t.UnixNano()) / 1e9
 }
