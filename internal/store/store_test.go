@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -776,6 +778,71 @@ func TestTaskSweepConcurrency(t *testing.T) {
 		}
 		if !openExists && !claimedExists {
 			t.Fatal("task was lost during concurrent sweep and heartbeat")
+		}
+	}
+}
+
+func TestSweepClaimNoDuplicate(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		s := New(t.TempDir())
+		if err := s.Init(); err != nil {
+			t.Fatal(err)
+		}
+		task, err := s.Post("alice", "task", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := s.Claim("bob", -time.Second, ClaimOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c == nil {
+			t.Fatal("expected task to be claimed")
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, _ = s.Sweep()
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				got, err := s.Claim("carol", time.Minute, ClaimOptions{})
+				if err == nil && got != nil {
+					return
+				}
+			}
+		}()
+		wg.Wait()
+
+		// count files holding task.ID across tasks/open and tasks/claimed/*
+		openCount := 0
+		openFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "open"))
+		for _, f := range openFiles {
+			if strings.HasSuffix(f, "-"+task.ID+".json") {
+				openCount++
+			}
+		}
+
+		claimedCount := 0
+		claimedRoot := filepath.Join(s.Root, "tasks", "claimed")
+		actors, _ := os.ReadDir(claimedRoot)
+		for _, actorDir := range actors {
+			if actorDir.IsDir() {
+				cfiles, _ := listJSON(filepath.Join(claimedRoot, actorDir.Name()))
+				for _, f := range cfiles {
+					if strings.HasSuffix(f, "-"+task.ID+".json") {
+						claimedCount++
+					}
+				}
+			}
+		}
+
+		total := openCount + claimedCount
+		if total > 1 {
+			t.Fatalf("iteration %d: task duplicated in %d places (open: %d, claimed: %d)", i, total, openCount, claimedCount)
 		}
 	}
 }

@@ -476,6 +476,9 @@ func (s *Store) Complete(actor, taskID string, result any) (*Task, error) {
 		return nil, err
 	}
 
+	if err := os.MkdirAll(filepath.Join(s.Root, "tmp"), 0o755); err != nil {
+		return nil, err
+	}
 	tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
 	if err := os.Rename(path, tmpPath); err != nil {
 		return nil, fmt.Errorf("task lease lost or not found: %w", err)
@@ -507,6 +510,9 @@ func (s *Store) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*Task, 
 		return nil, err
 	}
 
+	if err := os.MkdirAll(filepath.Join(s.Root, "tmp"), 0o755); err != nil {
+		return nil, err
+	}
 	tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
 	if err := os.Rename(path, tmpPath); err != nil {
 		return nil, fmt.Errorf("task lease lost or not found: %w", err)
@@ -519,7 +525,6 @@ func (s *Store) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*Task, 
 		return nil, err
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Rename(tmpPath, path)
 		return nil, err
 	}
 	return &task, nil
@@ -531,6 +536,9 @@ func (s *Store) Abandon(actor, taskID, reason string) (*Task, error) {
 		return nil, err
 	}
 
+	if err := os.MkdirAll(filepath.Join(s.Root, "tmp"), 0o755); err != nil {
+		return nil, err
+	}
 	tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
 	if err := os.Rename(path, tmpPath); err != nil {
 		return nil, fmt.Errorf("task lease lost or not found: %w", err)
@@ -559,7 +567,67 @@ func (s *Store) Abandon(actor, taskID, reason string) (*Task, error) {
 	return &task, nil
 }
 
+func (s *Store) reapStaleTmpFiles() error {
+	tmpDir := filepath.Join(s.Root, "tmp")
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	now := time.Now().UTC()
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.Contains(name, ".json.tmp-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		// Stale if older than 5 minutes
+		if now.Sub(info.ModTime().UTC()) < 5*time.Minute {
+			continue
+		}
+		// Reclaim task
+		src := filepath.Join(tmpDir, name)
+		parts := strings.Split(name, ".json.tmp-")
+		if len(parts) < 1 {
+			continue
+		}
+		f := parts[0] + ".json"
+		task, err := readTask(src)
+		if err != nil {
+			// If completely unparseable, remove it to avoid leaking
+			_ = os.Remove(src)
+			continue
+		}
+		task.Status = "open"
+		task.Owner = ""
+		task.LeaseExpiresAt = nil
+		sweptAt := unixFloat(now)
+		task.SweptAt = &sweptAt
+		task.SweptFrom = "tmp-recovery"
+
+		if err := writeJSON(src, task); err != nil {
+			continue
+		}
+		dst := filepath.Join(s.Root, "tasks", "open", f)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			continue
+		}
+		_ = os.Rename(src, dst)
+	}
+	return nil
+}
+
 func (s *Store) Sweep() ([]Task, error) {
+	_ = s.reapStaleTmpFiles()
+
 	root := filepath.Join(s.Root, "tasks", "claimed")
 	actors, err := os.ReadDir(root)
 	if err != nil {
@@ -582,22 +650,36 @@ func (s *Store) Sweep() ([]Task, error) {
 			if err != nil || task.LeaseExpiresAt == nil || *task.LeaseExpiresAt > now {
 				continue
 			}
-			dst := filepath.Join(s.Root, "tasks", "open", f)
-			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+
+			if err := os.MkdirAll(filepath.Join(s.Root, "tmp"), 0o755); err != nil {
 				return out, err
 			}
-			if err := os.Rename(path, dst); err != nil {
+			tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
+			if err := os.Rename(path, tmpPath); err != nil {
 				if errors.Is(err, fs.ErrNotExist) {
 					continue
 				}
 				return out, err
 			}
+
 			task.Status = "open"
 			task.SweptAt = &now
 			task.SweptFrom = actor
 			task.Owner = ""
 			task.LeaseExpiresAt = nil
-			if err := s.writeJSONAtomic(dst, task); err != nil {
+
+			if err := writeJSON(tmpPath, task); err != nil {
+				_ = os.Rename(tmpPath, path)
+				return out, err
+			}
+
+			dst := filepath.Join(s.Root, "tasks", "open", f)
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				_ = os.Rename(tmpPath, path)
+				return out, err
+			}
+			if err := os.Rename(tmpPath, dst); err != nil {
+				_ = os.Rename(tmpPath, path)
 				return out, err
 			}
 			out = append(out, task)
