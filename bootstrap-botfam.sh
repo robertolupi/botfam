@@ -221,10 +221,19 @@ Configured roster: $agents
 If in doubt, run \`basename "\$PWD"\` and apply that rule before your first
 collab call.
 
-## Identity rule
+## Identity rule (important)
 
-On your first \`collab\` tool call, pass \`actor: "<your-name>"\`. The server
-binds that name to the session. You may omit \`actor\` on later calls.
+The server binds an actor name to the session — it is sticky and immutable.
+
+- Automatic resolution (recommended): if you run inside a named worktree folder
+  such as \`wt-agy\`, the server parses the directory basename to resolve the
+  actor as \`agy\`. The family root is derived from repository git history, so
+  every worktree and the main checkout share one coordination plane. In this
+  case, you do not need to pass \`actor\` on tool calls.
+- Explicit naming: alternatively, on your first \`collab\` tool call, pass
+  \`actor: "<your-name>"\`. A conflicting \`actor\` is rejected. If no automatic
+  resolution is possible and no \`actor\` is provided on the first call, the call
+  is refused.
 
 ## Coordination tools
 
