@@ -1,112 +1,79 @@
 # botfam
 
-A tiny, single-binary **stdio MCP server** that lets a small family of AI agents
-coordinate over a shared filesystem: send messages, block cheaply until one
-arrives, and hand work back and forth through a lease-based task queue.
+A tiny, single-binary **stdio MCP server** that enables a "family" of AI agents to coordinate seamlessly over a shared filesystem. It provides maildir-backed messaging (with cheap blocking receive) and a lease-based task queue to let agents hand work back and forth safely.
 
-botfam is the lightweight successor to a line of multi-agent coordination
-experiments (`deep-cuts/collab` → `hydra` → `scriba`). It keeps the one idea
-that proved out — a maildir-backed mailbox with a *blocking* receive — and drops
-everything that turned out to be cruft: no Gitea, no per-bot SSH keys, no
-Python/venv, no consensus ledger in the hot path.
+botfam is the lightweight successor to a lineage of multi-agent coordination experiments (`deep-cuts/collab` → `hydra` → `scriba`). It keeps the core idea that proved out—filesystem-backed mailboxes and task lists—while stripping away all the operational cruft (no databases, no background daemons, no SSH keys, and no Python dependencies).
 
-- **Transport:** stdio MCP, one server process per agent.
-- **Identity:** cooperative by default — a call may carry an `actor`, the first
-  one a process sees sticks (so a shared `.mcp.json` across a worktree still
-  works), and `COLLAB_ACTOR` is the fallback. An out-of-repo lock pins identity
-  to `COLLAB_ACTOR` and forbids overrides for strict one-process-per-agent setups.
-- **State:** a maildir tree under `~/.botfam/<project>/`, outside any repo and
-  shared across that project's worktrees and clones. Atomic `rename`, no daemon,
-  no DB. `botfam setup` creates it.
-- **Language:** Go. One static binary; nothing to install, nothing to activate.
+---
 
-See [doc/DESIGN.md](doc/DESIGN.md) for the full v0 spec.
+## Why botfam?
 
-## Implementation status
+1. **Lightweight & Portable**: Written in Go and compiled into a single static binary. Nothing to install, no virtual environments to activate.
+2. **Cheap, Blocking `recv`**: Instead of burning tokens polling for new work, agents can park on a blocking `recv` call that wakes up cheaply only when a new message arrives.
+3. **Lease-Based Task Queue**: Agents claim work from a shared pool. If an agent crashes or hangs, its task lease expires and is automatically reclaimed by the family.
+4. **Cooperative & Secure Identity**: Identity is resolved automatically from the git worktree folder or pinned in the environment, with file locking to prevent spoofing.
+5. **Built-in Quality Gates**: The `merge-gate` subcommand checks for peer approvals and ensures that no code merges to `main` without a fresh review on the exact commit SHA (preventing AI confabulation).
 
-The repository now contains an initial Go implementation of the Phase 1
-coordination layer:
+---
 
-- `botfam` runs a dependency-free stdio MCP server by default.
-- `botfam setup <project> --agents alice,bob` creates the fam root, registry,
-  mailboxes, task directories, and project symlink.
-- Mailbox tools are implemented: `send`, `recv`, `try_recv`, `peek`, `ack`,
-  `seen`, and `inbox`.
-- Task queue tools are implemented: `post`, `claim`, `complete`, `heartbeat`,
-  `abandon`, and `sweep`.
-- Identity is sticky per stdio session, with optional actor locking via
-  `BOTFAM_LOCK_ACTOR=1` or the out-of-repo botfam config.
-- Integration tests launch multiple real `botfam serve` subprocesses over stdio
-  with separate actors and a shared temporary `COLLAB_ROOT`.
+## Architecture at a Glance
 
-Still future or incomplete:
-
-- `recv` currently uses a short polling loop rather than `fsnotify`.
-- `fam.toml` handling is intentionally minimal and only parses the shape botfam
-  writes itself.
-- CCREP is not implemented; it remains Phase 2.
-- bottown is not implemented; it remains the future networked sibling.
-
-## Developer quickstart
-
-Bootstrap a repo for a small fam of agents:
-
-```bash
-./bootstrap-botfam.sh /path/to/repo --agents agy,codex,claude
+```
+Agent A (wt-agy)    ──stdio MCP──> botfam serve ─┐
+                                                  ├─> ~/.botfam/fam-<project-hash>/ (Mailbox & Tasks)
+Agent B (wt-claude) ──stdio MCP──> botfam serve ─┘
 ```
 
-The bootstrap command is the one-shot setup path for day-to-day use. It:
+* **One Process per Agent**: Each agent's editor or harness spawns its own stdio `botfam` server via `.mcp.json`.
+* **State on Disk**: All communication and task leasing is implemented as atomic `os.Rename` operations within a local maildir-style state directory outside the git repository.
+* **Consensus-Driven Merges**: Merges to `main` are validated by checking session logs and mailbox messages for review verdicts.
 
-- locates `botfam` or builds it to `~/bin/botfam`;
-- runs `botfam setup <repo-name> --agents ...`;
-- creates sibling worktrees named `wt-<agent>` on branches `agent/<agent>`;
-- writes MCP config for generic, Claude, Codex, and `.agents`-style harnesses;
-- writes shared `AGENTS.md`/`CLAUDE.md` instructions when needed.
+---
 
-The generated MCP configs do not set `COLLAB_ACTOR`. Agents identify themselves
-from the worktree name (`wt-codex` -> `codex`) or by passing `actor` on the first
-collab call. Restart any already-running harness after bootstrapping so it
-reloads MCP config.
+## Feature Status
 
-On macOS, the bootstrap signs a newly built `~/bin/botfam` with ad-hoc
-`codesign` when available. If you replace that binary manually, sign it again:
+We have completed the **Wave 1** implementation of the coordination and safety layer:
+
+* **Mailbox Messaging**: Functional `send`, `recv`, `try_recv`, `peek`, `ack`, `seen`, and `inbox` tools.
+* **Task Queue**: Functional `post`, `claim`, `complete`, `heartbeat`, `abandon`, and `sweep` tools, with **claim ergonomics** (targeted claim-by-id and type/suggested-owner filters).
+* **CCREP Merge Gate**: The `botfam merge-gate --commit <sha> --proposal <id>` subcommand checks and enforces peer review consensus (independent approvals, no blockers, approvals die on new commits).
+* **Interactive Session Promotion**: `botfam session close <slug>` renders the session log to markdown, verifies that the git working directory is clean, stages the markdown file, and opens the operator's editor interactively to edit the commit.
+* **Integration Testing**: End-to-end integration tests spin up multiple stdio server subprocesses exchanging messages and completing tasks.
+
+---
+
+## Developer Quickstart
+
+### 1. Bootstrap a Multi-Agent Workspace
+Initialize a repository with a roster of agent worktrees (e.g. `wt-agy`, `wt-claude`, `wt-codex`):
 
 ```bash
-codesign --force --sign - ~/bin/botfam
+./bootstrap-botfam.sh /path/to/repo --agents agy,claude,codex
 ```
 
-Run tests with Go's default cache if your environment allows it:
+This script will:
+* Build the `botfam` binary to `~/bin/botfam` and codesign it on macOS.
+* Set up the shared `~/.botfam/` project directories.
+* Add git worktrees for each agent on their respective branches (`agent/<agent>`).
+* Generate the `.mcp.json` and harness configs.
+
+### 2. Run Tests
+Ensure everything is green. If you are running in a restricted sandbox, use the local cache flag:
 
 ```bash
+# Standard test run
 go test ./...
-```
 
-In restricted sandboxes, keep Go caches inside the workspace:
-
-```bash
+# Sandbox-isolated cache run
 env GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache go test ./...
 ```
 
-Build the binary:
-
+### 3. Build the Binary
 ```bash
 go build ./cmd/botfam
 ```
 
-Set up a fam from inside a git repository:
-
-```bash
-botfam setup my-project --agents alice,bob
-```
-
-Run the stdio MCP server:
-
-```bash
-botfam
-```
-
-> botfam is the stdio iteration. A later networked sibling — **bottown** — serves
-> agents that don't share a filesystem via a small **REST** service: an explicit
-> `topic` namespace, bearer-token identity, and long-poll for blocking `recv`. The
-> agent-facing MCP tools stay identical; only the backend swaps. botfam ships
-> first — see [doc/DESIGN_bottown.md](doc/DESIGN_bottown.md).
+### 4. Interactive Operator Commands
+* **List active sessions**: `botfam session list`
+* **Render a session log to markdown**: `botfam session render <slug>`
+* **Close and commit a session**: `botfam session close <slug>`
