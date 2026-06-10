@@ -116,3 +116,40 @@ Docs and findings committed on one agent's branch (e.g. this file, born on `agen
 ### Mitigation
 - Durable cross-fam facts belong in the shared session log first (`session_append`), with the doc commit as the promoted artifact.
 - Convention: after committing fam-relevant docs, announce the branch/commit on the mailbox so others can merge promptly; land doc-only commits on `main` quickly.
+
+---
+
+## 11. CCREP Execution Ownership Is Unspecified (Double-Execution Risk)
+
+### Problem
+The `ccrep:*` message convention defines `proposal` / `critique` / `evaluation` but says nothing about **who executes** an approved proposal. Observed twice on 2026-06-10:
+- Proposal `main-ff-78ea190`: the proposer (claude) declared "I'll execute on approval"; the approver (agy) executed the merge immediately *while approving*.
+- Earlier the same day, claude and codex independently fast-forwarded `agent/codex` within minutes of each other.
+
+Both collisions were harmless only because fast-forward merges are idempotent. For non-idempotent actions (rebase, push, file rewrites, store migrations) concurrent execution corrupts state.
+
+### Mitigation
+- **Convention (now):** every `ccrep:proposal` payload MUST carry an `executor` field naming exactly one actor. Evaluators reply with verdicts only and never act. After acting, the executor reports a `ccrep:executed` message (and/or session entry) with the resulting state — e.g. the commit hash — so everyone can verify instead of re-doing.
+- **Code (Phase 2):** route execution through the leased task queue: approval `post`s an execution task, the executor `claim`s it. The lease gives mutual exclusion for free, and `sweep` recovers from a dead executor.
+
+---
+
+## 12. CCREP Consent Semantics Are Undefined (Quorum and Silence)
+
+### Problem
+Nothing defines how many evaluations approve a proposal, or what silence means. In `main-ff-78ea190` the proposer executed after one approval out of two evaluators, and improvised "silence within a few minutes = no objection" — but a parked or offline agent cannot object, so silence is ambiguous between consent and absence.
+
+### Mitigation
+- **Convention (now):** the proposal payload states `quorum` (`all`, `majority`, or `any`) and a `deadline`; set the message's `expires_at` to the deadline so a stale proposal dead-letters instead of being acted on late. At the deadline the executor records which consents were explicit and which lapsed-to-default in the `ccrep:executed` report.
+- **Code (Phase 2):** the CCREP ledger records evaluations as events and computes quorum mechanically; the MCP layer can refuse `ccrep:executed` for proposals that never met quorum.
+
+---
+
+## 13. Cross-Worktree Mutation by Other Actors
+
+### Problem
+Nothing prevents an actor from running git operations inside another actor's worktree, and it happened in practice (claude fast-forwarded `agent/codex` while the codex session was live). It worked because the tree was clean and the operation was a fast-forward — but the owner may have uncommitted state, an editor mid-write, or its own git operation in flight; git does not serialize a visitor against the owner's session.
+
+### Mitigation
+- **Convention (now):** treat another actor's worktree as read-only. To update it, send the owner a message and let them pull; only perform the operation yourself when the owner is known-offline, the tree is clean, the operation is a pure fast-forward, and you announce it on the mailbox immediately.
+- **Code (Phase 2):** `botfam doctor` flags dirty/diverged worktrees; consider an advisory per-worktree lock file that fam-aware tooling checks before mutating.
