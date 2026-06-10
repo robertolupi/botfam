@@ -45,19 +45,35 @@ split_agents() {
   printf '%s' "$1" | tr ',' ' '
 }
 
+validate_name() {
+  kind=$1
+  name=$2
+  case "$name" in
+    '') die "$kind name is empty" ;;
+    *[!A-Za-z0-9_-]*) die "invalid $kind name '$name': use only letters, digits, underscore, or dash" ;;
+  esac
+}
+
+is_git_tracked() {
+  checkout=$1
+  path=$2
+  rel=${path#"$checkout"/}
+  git -C "$checkout" ls-files --error-unmatch "$rel" >/dev/null 2>&1
+}
+
 write_json_mcp_config() {
   path=$1
-  bin=$2
+  command_name=$2
   mkdir -p "$(dirname "$path")"
   tmp="${path}.tmp.$$"
   if [ -f "$path" ]; then
     if command -v jq >/dev/null 2>&1; then
-      jq --arg command "$bin" '
+      jq --arg command "$command_name" '
         .mcpServers = (.mcpServers // {}) |
         .mcpServers.collab = {"command": $command}
       ' "$path" > "$tmp"
     elif [ "$force" -eq 1 ]; then
-      command_json=$(json_string "$bin")
+      command_json=$(json_string "$command_name")
       cat > "$tmp" <<EOF
 {
   "mcpServers": {
@@ -71,7 +87,7 @@ EOF
       die "$path exists and jq is unavailable; install jq or rerun with --force to overwrite it"
     fi
   else
-    command_json=$(json_string "$bin")
+    command_json=$(json_string "$command_name")
     cat > "$tmp" <<EOF
 {
   "mcpServers": {
@@ -194,7 +210,17 @@ EOF
 write_agent_doc() {
   path=$1
   agents=$2
+  template=$3
   if [ -f "$path" ] && grep -q 'botfam fam member' "$path"; then
+    return
+  fi
+  if [ -f "$template" ]; then
+    if [ -f "$path" ]; then
+      printf '\n' >> "$path"
+      cat "$template" >> "$path"
+    else
+      cp "$template" "$path"
+    fi
     return
   fi
   if [ -f "$path" ]; then
@@ -275,7 +301,7 @@ ensure_botfam_bin() {
   note "building botfam binary at $install_bin"
   (cd "$script_dir" && go build -o "$install_bin" ./cmd/botfam)
   if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
-    codesign --force --sign - "$install_bin" >/dev/null 2>&1 || note "codesign failed; macOS may block $install_bin"
+    codesign --force --sign - "$install_bin" >/dev/null 2>&1 || die "codesign failed for $install_bin; macOS may block unsigned MCP binaries"
   fi
   abs_path "$install_bin"
 }
@@ -371,8 +397,13 @@ git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a git
 script_dir=$(cd "$(dirname "$0")" && pwd -P)
 botfam_bin=$(ensure_botfam_bin "$botfam_bin_arg" "$install_bin" "$script_dir")
 project=${project:-$(basename "$repo")}
+validate_name "project" "$project"
 worktree_dir=${worktree_dir:-$(dirname "$repo")}
 worktree_dir=$(abs_path "$worktree_dir")
+
+for agent in $(split_agents "$agents"); do
+  validate_name "agent" "$agent"
+done
 
 setup_args="setup $project --agents $agents"
 if [ "$force" -eq 1 ]; then
@@ -386,6 +417,7 @@ note "setting up project '$project' for agents: $agents"
 
 all_checkouts=$repo
 worktree_summary=
+repo_common=$(cd "$repo" && git rev-parse --path-format=absolute --git-common-dir)
 if [ "$create_worktrees" -eq 1 ]; then
   mkdir -p "$worktree_dir"
   for agent in $(split_agents "$agents"); do
@@ -393,6 +425,10 @@ if [ "$create_worktrees" -eq 1 ]; then
     branch="agent/$agent"
     if [ -d "$wt" ]; then
       if git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        wt_common=$(cd "$wt" && git rev-parse --path-format=absolute --git-common-dir)
+        [ "$wt_common" = "$repo_common" ] || die "existing worktree $wt does not belong to $repo"
+        wt_branch=$(git -C "$wt" branch --show-current)
+        [ "$wt_branch" = "$branch" ] || die "existing worktree $wt is on branch $wt_branch, expected $branch"
         note "worktree exists: $wt"
       else
         die "path exists but is not a git worktree: $wt"
@@ -412,13 +448,16 @@ fi
 
 for checkout in $all_checkouts; do
   note "writing harness config in $checkout"
-  write_json_mcp_config "$checkout/.mcp.json" "$botfam_bin"
-  write_json_mcp_config "$checkout/.agents/mcp_config.json" "$botfam_bin"
+  write_json_mcp_config "$checkout/.mcp.json" "botfam"
+  write_json_mcp_config "$checkout/.agents/mcp_config.json" "botfam"
+  if is_git_tracked "$checkout" "$checkout/.codex/config.toml" && [ "$force" -ne 1 ]; then
+    die "$checkout/.codex/config.toml is tracked; refusing to write an absolute local botfam path without --force"
+  fi
   write_codex_config "$checkout/.codex/config.toml" "$botfam_bin"
   write_claude_settings "$checkout/.claude/settings.json"
-  write_agent_doc "$checkout/AGENTS.md" "$agents"
+  write_agent_doc "$checkout/AGENTS.md" "$agents" "$script_dir/AGENTS.md"
   if [ ! -f "$checkout/CLAUDE.md" ]; then
-    write_agent_doc "$checkout/CLAUDE.md" "$agents"
+    write_agent_doc "$checkout/CLAUDE.md" "$agents" "$script_dir/CLAUDE.md"
   fi
 done
 

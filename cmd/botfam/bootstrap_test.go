@@ -39,9 +39,9 @@ func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
 		if got := strings.TrimSpace(string(runCmdOutput(t, wt, "git", "branch", "--show-current"))); got != "agent/"+agent {
 			t.Fatalf("%s branch = %q, want %q", wt, got, "agent/"+agent)
 		}
-		assertFileContains(t, filepath.Join(wt, ".mcp.json"), `"command": "`+bin+`"`)
+		assertFileContains(t, filepath.Join(wt, ".mcp.json"), `"command": "botfam"`)
 		assertFileContains(t, filepath.Join(wt, ".codex", "config.toml"), `command = "`+bin+`"`)
-		assertFileContains(t, filepath.Join(wt, ".agents", "mcp_config.json"), `"command": "`+bin+`"`)
+		assertFileContains(t, filepath.Join(wt, ".agents", "mcp_config.json"), `"command": "botfam"`)
 		assertFileContains(t, filepath.Join(wt, ".claude", "settings.json"), `"mcp__collab__*"`)
 		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "wt-"+agent)
 	}
@@ -61,6 +61,43 @@ func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
 	}
 }
 
+func TestBootstrapScriptRejectsUnsafeInputs(t *testing.T) {
+	repoRoot, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	temp := t.TempDir()
+	bin := filepath.Join(temp, "botfam")
+	runCmd(t, repoRoot, "go", "build", "-o", bin, "./cmd/botfam")
+
+	target := filepath.Join(temp, "repo")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, target)
+
+	script := filepath.Join(repoRoot, "bootstrap-botfam.sh")
+	home := filepath.Join(temp, "home")
+	if out := runBootstrapError(t, home, script, target, "--agents", "../agy", "--botfam-bin", bin); !strings.Contains(out, "invalid agent name") {
+		t.Fatalf("unsafe agent output = %q, want invalid agent name", out)
+	}
+
+	if err := os.Mkdir(filepath.Join(target, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, ".codex", "config.toml"), []byte("[mcp_servers.other]\ncommand = \"other\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd(t, target, "git", "add", ".codex/config.toml")
+	runCmd(t, target, "git", "commit", "-m", "track codex config")
+
+	out := runBootstrapError(t, home, script, target, "--agents", "agy", "--botfam-bin", bin, "--no-worktrees")
+	if !strings.Contains(out, "refusing to write an absolute local botfam path") {
+		t.Fatalf("tracked codex output = %q, want tracked config refusal", out)
+	}
+}
+
 func runBootstrap(t *testing.T, home, script, repo string, args ...string) {
 	t.Helper()
 	allArgs := append([]string{script, repo}, args...)
@@ -72,6 +109,20 @@ func runBootstrap(t *testing.T, home, script, repo string, args ...string) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s failed: %v\n%s", strings.Join(cmd.Args, " "), err, out.String())
 	}
+}
+
+func runBootstrapError(t *testing.T, home, script, repo string, args ...string) string {
+	t.Helper()
+	allArgs := append([]string{script, repo}, args...)
+	cmd := exec.Command("sh", allArgs...)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err == nil {
+		t.Fatalf("%s succeeded unexpectedly\n%s", strings.Join(cmd.Args, " "), out.String())
+	}
+	return out.String()
 }
 
 func runCmd(t *testing.T, dir, name string, args ...string) {
