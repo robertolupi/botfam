@@ -11,6 +11,7 @@ type Message struct {
 	TS        float64        `json:"ts"`
 	InReplyTo string         `json:"in_reply_to,omitempty"`
 	ExpiresAt *float64       `json:"expires_at,omitempty"`
+	Outcome   any            `json:"outcome,omitempty"`
 
 	filename string
 }
