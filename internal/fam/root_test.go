@@ -23,7 +23,34 @@ func initGitRepo(t *testing.T, dir string) {
 	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
 }
 
+func TestParseActor(t *testing.T) {
+	cases := []struct {
+		base string
+		want string
+	}{
+		{"wt-claude", "claude"},
+		{"botfam-codex", "codex"},
+		{"wt-my-agent", "my-agent"},
+		{"deep-cuts", ""}, // no wt-/botfam- prefix: fail closed, no actor
+		{"myrepo", ""},
+		{"wt-", ""}, // empty remainder after prefix: no actor
+		{"botfam-", ""},
+		{"wt-bad.name", ""}, // remainder fails the store name validator
+	}
+	for _, tc := range cases {
+		if got := parseActor(tc.base); got != tc.want {
+			t.Errorf("parseActor(%q) = %q, want %q", tc.base, got, tc.want)
+		}
+	}
+}
+
 func TestResolver(t *testing.T) {
+	// The Resolver getenv falls back to os.Getenv even when Env is non-nil
+	// (known issue L2); pin process env so the test is deterministic.
+	t.Setenv("COLLAB_ROOT", "")
+	t.Setenv("COLLAB_ACTOR", "")
+	t.Setenv("BOTFAM_FAM", "")
+
 	tempDir, err := os.MkdirTemp("", "botfam-resolver-test")
 	if err != nil {
 		t.Fatal(err)
