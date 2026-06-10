@@ -540,15 +540,6 @@ func initGitRepo(t *testing.T, dir string) {
 
 
 func TestIntegrationB_NarrowSafety(t *testing.T) {
-	if os.Getenv("BOTFAM_TEST_HELPER") == "serve" {
-		os.Args = []string{"botfam", "serve"}
-		if err := run(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		return
-	}
-
 	root := t.TempDir()
 
 	// 1. Compile the real botfam binary to root/botfam
@@ -585,10 +576,9 @@ func TestIntegrationB_NarrowSafety(t *testing.T) {
 
 	// Helper to run MCP server stdio in a specific workdir with env
 	runMCPServer := func(workDir string, env []string, method string, params map[string]any) (map[string]any, string) {
-		cmd := exec.Command(os.Args[0], "-test.run=TestIntegrationB_NarrowSafety")
+		cmd := exec.Command(binPath, "serve")
 		cmd.Dir = workDir
 		cmd.Env = append(os.Environ(),
-			"BOTFAM_TEST_HELPER=serve",
 			"HOME="+homeDir,
 		)
 		cmd.Env = append(cmd.Env, env...)
