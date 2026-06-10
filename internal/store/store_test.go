@@ -851,3 +851,74 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	tmpDir := filepath.Join(s.Root, "tmp")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Write a Message JSON to tmp/
+	msgPath := filepath.Join(tmpDir, "msg-1.json.tmp-123456")
+	msgJSON := `{"id":"msg-1","from":"alice","to":"bob","type":"ccrep:proposal","ts":1781109776.9}`
+	if err := os.WriteFile(msgPath, []byte(msgJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Write a valid Task JSON to tmp/
+	taskPath := filepath.Join(tmpDir, "task-1.json.tmp-789012")
+	taskJSON := `{"id":"task-1","type":"wave-2","status":"claimed","created_at":1781107907.0}`
+	if err := os.WriteFile(taskPath, []byte(taskJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backdate both to be older than 5 minutes (e.g. 6 minutes ago)
+	staleTime := time.Now().Add(-6 * time.Minute)
+	if err := os.Chtimes(msgPath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(taskPath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run sweep which triggers reapStaleTmpFiles
+	if _, err := s.Sweep(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify that the message tmp file was deleted and NOT recovered as a task
+	if fileExists(msgPath) {
+		t.Error("expected message tmp file to be deleted")
+	}
+	recoveredMsgPath := filepath.Join(s.Root, "tasks", "open", "msg-1.json")
+	if fileExists(recoveredMsgPath) {
+		t.Error("expected message NOT to be recovered as a task in tasks/open/")
+	}
+
+	// Verify that the task tmp file was recovered as a task in tasks/open/
+	if fileExists(taskPath) {
+		t.Error("expected task tmp file to be removed from tmp/")
+	}
+	recoveredTaskPath := filepath.Join(s.Root, "tasks", "open", "task-1.json")
+	if !fileExists(recoveredTaskPath) {
+		t.Fatal("expected task to be recovered to tasks/open/")
+	}
+
+	// Verify the recovered task content
+	recoveredTask, err := readTask(recoveredTaskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recoveredTask.Status != "open" {
+		t.Errorf("expected recovered task status to be 'open', got %q", recoveredTask.Status)
+	}
+	if recoveredTask.ID != "task-1" {
+		t.Errorf("expected recovered task ID to be 'task-1', got %q", recoveredTask.ID)
+	}
+}
+

@@ -606,6 +606,11 @@ func (s *Store) reapStaleTmpFiles() error {
 			_ = os.Remove(src)
 			continue
 		}
+		if task.ID == "" || (task.Status != "open" && task.Status != "claimed" && task.Status != "done") {
+			// If it is a message or other invalid/non-task JSON, remove it to avoid leaking
+			_ = os.Remove(src)
+			continue
+		}
 		task.Status = "open"
 		task.Owner = ""
 		task.LeaseExpiresAt = nil
