@@ -700,4 +700,37 @@ func TestIntegrationB_NarrowSafety(t *testing.T) {
 	if errStr == "" || !strings.Contains(errStr, "invalid handoff: context cannot be empty or whitespace only") {
 		t.Fatalf("expected context empty error, got: %s", errStr)
 	}
+
+	// 4. Test legitimate append and read flow from aliceWT (acting as alice)
+	res, errStr := runMCPServer(aliceWT, nil, "session_append", map[string]any{
+		"session": "test-safety-session",
+		"body":    "Legitimate append",
+		"handoff": map[string]any{
+			"task":        "task",
+			"context":     "ctx",
+			"deliverable": "deliv",
+		},
+	})
+	if errStr != "" {
+		t.Fatalf("expected legitimate append to succeed, got error: %s", errStr)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected content array of size 1, got: %+v", res["content"])
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected content item to be object, got: %+v", content[0])
+	}
+	text, ok := item["text"].(string)
+	if !ok {
+		t.Fatalf("expected text property to be string, got: %+v", item["text"])
+	}
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(text), &entry); err != nil {
+		t.Fatalf("failed to unmarshal text: %v", err)
+	}
+	if entry["actor"] != "alice" || entry["body"] != "Legitimate append" {
+		t.Fatalf("unexpected legitimate append result entry: %+v", entry)
+	}
 }
