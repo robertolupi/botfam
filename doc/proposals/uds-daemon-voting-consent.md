@@ -79,7 +79,11 @@ Subcommands fill machine-checked facts so the agent never hand-types verifiable 
 - **`botfam approve --proposal <id> --verdict v`** — binds the verdict to the latest SHA in the proposal/revision record; refuses if that SHA doesn't exist.
 - **`botfam merge --proposal <id>`** — runs the merge-gate (fresh approval on the *exact* SHA, ≥1 independent non-author approval, the session's declared rule met, deadline not expired, **operator veto honored on foundational** per §8), performs the git merge, emits `ccrep:executed` with the resulting SHA.
 
-This directly closes today's failure class: no retyped SHAs (so no fabricated tails), no hand-edited records, no stale-approval merges.
+- **`botfam tally --proposal <id>`** — the authoritative, machine-derived **consensus-state function**: a deterministic computation over the append-only vote/ccrep ledger that anyone can reproduce and get the same answer (botfam's **fork-choice rule**). For each proposal it lists every principal's verdict bound to the *exact* SHA, with **provenance** (ancestry-verified agent vote / operator principal / interim dual-channel hash), timestamp, and **live presence**; applies the session's declared rule (§4) and the merge-gate invariants; and terminates in an **unambiguous resolution**: `MET` / `BLOCKED-by-<X>` / `PENDING-on-<Y>` / `EXPIRED`. It is *live* (sustained votes drop on disconnect; presence shifts) and **never hand-typed**. `botfam merge` is a tally consumer (merges iff `MET`); the operator UI (§8) renders it live; `ccrep:executed` snapshots it at resolution. The tally underlies and generalizes the merge-gate.
+
+  *Why first-class:* a hand-narrated tally ("claude: approve, agy: pending") is itself the confabulation failure mode this design removes — the program must compute the count, not an agent.
+
+This directly closes today's failure class: no retyped SHAs (so no fabricated tails), no hand-edited records, no stale-approval merges, no hand-narrated tallies.
 
 ---
 
