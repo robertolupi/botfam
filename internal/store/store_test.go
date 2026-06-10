@@ -870,19 +870,29 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 2. Write a valid Task JSON to tmp/
+	// 2. Write a valid claimed Task JSON to tmp/
 	taskPath := filepath.Join(tmpDir, "task-1.json.tmp-789012")
 	taskJSON := `{"id":"task-1","type":"wave-2","status":"claimed","created_at":1781107907.0}`
 	if err := os.WriteFile(taskPath, []byte(taskJSON), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Backdate both to be older than 5 minutes (e.g. 6 minutes ago)
+	// 3. Write a completed (done) Task JSON to tmp/
+	donePath := filepath.Join(tmpDir, "task-done.json.tmp-345678")
+	doneJSON := `{"id":"task-done","type":"wave-2","status":"done","result":{"outcome":"success"},"completed_at":1781107907.0}`
+	if err := os.WriteFile(donePath, []byte(doneJSON), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Backdate all three to be older than 5 minutes (e.g. 6 minutes ago)
 	staleTime := time.Now().Add(-6 * time.Minute)
 	if err := os.Chtimes(msgPath, staleTime, staleTime); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chtimes(taskPath, staleTime, staleTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(donePath, staleTime, staleTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -900,7 +910,7 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 		t.Error("expected message NOT to be recovered as a task in tasks/open/")
 	}
 
-	// Verify that the task tmp file was recovered as a task in tasks/open/
+	// Verify that the claimed task tmp file was recovered as a task in tasks/open/
 	if fileExists(taskPath) {
 		t.Error("expected task tmp file to be removed from tmp/")
 	}
@@ -919,6 +929,38 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 	}
 	if recoveredTask.ID != "task-1" {
 		t.Errorf("expected recovered task ID to be 'task-1', got %q", recoveredTask.ID)
+	}
+
+	// Verify that the completed (done) task tmp file was recovered in tasks/done/
+	if fileExists(donePath) {
+		t.Error("expected done task tmp file to be removed from tmp/")
+	}
+	recoveredDonePath := filepath.Join(s.Root, "tasks", "done", "task-done.json")
+	if !fileExists(recoveredDonePath) {
+		t.Fatal("expected done task to be recovered to tasks/done/")
+	}
+	recoveredOpenDonePath := filepath.Join(s.Root, "tasks", "open", "task-done.json")
+	if fileExists(recoveredOpenDonePath) {
+		t.Error("expected done task NOT to be recovered to tasks/open/")
+	}
+
+	// Verify the recovered done task content and preserved result/completed_at
+	recoveredDone, err := readTask(recoveredDonePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recoveredDone.Status != "done" {
+		t.Errorf("expected recovered task status to be 'done', got %q", recoveredDone.Status)
+	}
+	if recoveredDone.ID != "task-done" {
+		t.Errorf("expected recovered task ID to be 'task-done', got %q", recoveredDone.ID)
+	}
+	resObj, ok := recoveredDone.Result.(map[string]any)
+	if !ok || resObj["outcome"] != "success" {
+		t.Errorf("expected recovered task result to preserve outcome=success, got: %+v", recoveredDone.Result)
+	}
+	if recoveredDone.CompletedAt == nil || *recoveredDone.CompletedAt != 1781107907.0 {
+		t.Errorf("expected recovered task CompletedAt to be preserved, got %v", recoveredDone.CompletedAt)
 	}
 }
 

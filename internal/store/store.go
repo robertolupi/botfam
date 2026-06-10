@@ -607,21 +607,29 @@ func (s *Store) reapStaleTmpFiles() error {
 			continue
 		}
 		if task.ID == "" || (task.Status != "open" && task.Status != "claimed" && task.Status != "done") {
-			// If it is a message or other invalid/non-task JSON, remove it to avoid leaking
+			// Silent os.Remove of unknown-status JSON is fine for message strands:
+			// the original message file in new/ or processing/ persists, so only the
+			// un-renamed atomic update in tmp/ is lost and can be safely discarded.
 			_ = os.Remove(src)
 			continue
 		}
-		task.Status = "open"
-		task.Owner = ""
-		task.LeaseExpiresAt = nil
-		sweptAt := unixFloat(now)
-		task.SweptAt = &sweptAt
-		task.SweptFrom = "tmp-recovery"
 
-		if err := writeJSON(src, task); err != nil {
-			continue
+		var dst string
+		if task.Status == "done" {
+			dst = filepath.Join(s.Root, "tasks", "done", f)
+		} else {
+			task.Status = "open"
+			task.Owner = ""
+			task.LeaseExpiresAt = nil
+			sweptAt := unixFloat(now)
+			task.SweptAt = &sweptAt
+			task.SweptFrom = "tmp-recovery"
+			if err := writeJSON(src, task); err != nil {
+				continue
+			}
+			dst = filepath.Join(s.Root, "tasks", "open", f)
 		}
-		dst := filepath.Join(s.Root, "tasks", "open", f)
+
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			continue
 		}
