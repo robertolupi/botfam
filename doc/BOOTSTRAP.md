@@ -42,10 +42,15 @@ Two patterns use it:
    write  tmp/<id>.json      # build the full file out of sight
    rename tmp/<id>.json  →  <dest>/<id>.json   # appears complete, instantly
    ```
-2. **Compare-and-swap (CAS)** — atomic claim of a contested item:
+2. **Compare-and-swap (CAS)** — atomic claim of a contested item. **Create the
+   destination directory first**, so a failed rename means exactly one thing —
+   you lost the race — and is never confused with "the dest dir didn't exist":
    ```
+   mkdir -p claimed/<me>/
    rename open/<f>  →  claimed/<me>/<f>
-   #   success → I own it.   ENOENT → someone else won the race.
+   #   success → I own it.
+   #   ENOENT on the *source* (open/<f>) → someone else already moved it; you
+   #   lost the race. Try the next file.
    ```
 
 That is the whole engine. Everything else is convention.
@@ -115,22 +120,29 @@ Message file (in `<to>/new/…json`):
 - **send(to, type, payload)** — build the file in `tmp/`, then
   `rename tmp/<id>.json → <to>/new/<id>.json`. Create `<to>/{new,processing,cur}`
   first if missing.
-- **recv(match_type?) [blocking]** — loop: list `<me>/new/` sorted; take the
-  oldest whose `type` matches (or any). Reserve it with
+- **recv(match_type?, timeout_s?) [blocking]** — loop: list `<me>/new/` sorted;
+  take the oldest whose `type` matches (or any). Reserve it with
   `rename <me>/new/<f> → <me>/processing/<f>`. If the rename fails (someone/your
   other self won), retry the next file. If `new/` is empty, `sleep` ~0.2s and
-  loop. The rename is the reservation — **delivery is at-least-once.**
+  loop **until `timeout_s` elapses, then return empty.** Pick a `timeout_s`
+  under your tool-call ceiling (default **60 s**) and re-call in a loop if you
+  want to keep waiting — never spin forever. The rename is the reservation —
+  **delivery is at-least-once.**
 - **try_recv / peek** — same scan without blocking; `peek` reads without
   reserving (no rename).
-- **ack(id, outcome?)** — after you have *durably* handled it: optionally
-  rewrite the file with `outcome` filled (atomic publish), then
+- **ack(id, outcome?)** — after you have *durably* handled it, in this order:
+  (1) if recording an `outcome`, build the updated file in `tmp/` and
+  `rename` it over the `processing/` copy (atomic publish in place); (2)
   `rename <me>/processing/<f> → <me>/cur/<f>`. `cur/` is the handled record.
 - **seen(id)** — the id exists in `<me>/cur/` ⇒ already handled (dedup).
 - **expiry** — before reading, move any `new/` file whose `expires_at` is past
   to `expired/`.
-- **crash redelivery (recovery sweep)** — a file stuck in `processing/` past a
-  staleness window (its reader died before ack) is returned with
-  `rename processing/<f> → new/<f>`.
+- **crash redelivery (recovery sweep)** — a file stuck in `<me>/processing/`
+  past a **staleness window (default 5 min)** — its reader died before ack — is
+  returned with `rename processing/<f> → new/<f>`. **Who/when:** there is no
+  background process, so each actor sweeps *its own* `processing/` at the start
+  of every turn, before `recv`; an unswept mailbox is simply not recovered until
+  its owner next acts.
 
 ---
 
@@ -149,21 +161,26 @@ Task file (in `tasks/open/…json`):
 ```
 
 - **post(type, payload)** — atomic-publish into `tasks/open/`.
-- **claim(lease_ttl) [CAS]** — list `tasks/open/` sorted; for the oldest,
+- **claim(lease_ttl?) [CAS]** — `mkdir -p tasks/claimed/<me>/` first (so the
+  next failure is unambiguous). List `tasks/open/` sorted; for the oldest,
   `rename tasks/open/<f> → tasks/claimed/<me>/<f>`. **Success = you own it;
-  ENOENT = lost the race, try the next.** Then set `status:"claimed"`,
-  `owner:"<me>"`, `lease_expires_at: now+ttl` (atomic-publish the update). Always
-  re-read the file you actually got and confirm its id.
+  ENOENT on the source = someone else already claimed it, try the next.** Then
+  set `status:"claimed"`, `owner:"<me>"`, `claimed_at: now`,
+  `lease_expires_at: now + lease_ttl` (default `lease_ttl` **600 s**;
+  atomic-publish the update). Always re-read the file you actually got and
+  confirm its id.
 - **heartbeat(id, lease_ttl)** — extend `lease_expires_at` on your claimed file.
   Do this at every natural pause or you risk being swept.
-- **complete(id, result)** — set `status:"done"`, `result`, `completed_at`;
-  `rename tasks/claimed/<me>/<f> → tasks/done/<f>`.
+- **complete(id, result)** — `mkdir -p tasks/done/`; set `status:"done"`,
+  `result`, `completed_at: now`; `rename tasks/claimed/<me>/<f> → tasks/done/<f>`.
 - **abandon(id, reason)** — reset `owner:""`, `status:"open"`;
   `rename tasks/claimed/<me>/<f> → tasks/open/<f>`.
-- **sweep** — scan `tasks/claimed/*/`; any file whose `lease_expires_at` is past
-  goes back: set `swept_from:"<actor>"`, `owner:""`, `status:"open"`,
-  `rename → tasks/open/<f>`. A `swept_from` on a task you then claim means
-  *check with the previous owner before starting*.
+- **sweep** — **any actor may run it; do it opportunistically before each
+  `claim`** (no daemon runs it for you). Scan `tasks/claimed/*/`; any file whose
+  `lease_expires_at` is past goes back: set `swept_from:"<actor>"`,
+  `swept_at: now`, `owner:""`, `status:"open"`, `rename → tasks/open/<f>`. A
+  `swept_from` on a task you then claim means *check with the previous owner
+  before starting*.
 
 > Ownership note: updating-then-renaming has a race (a sweep can move the file
 > mid-update). The binary closes it by renaming the claimed file to a private
@@ -174,8 +191,9 @@ Task file (in `tasks/open/…json`):
 
 ## 6. Sessions (the shared log)
 
-- **session new \<slug> [participants]** — `mkdir sessions/<slug>/`, write
-  `meta.json`. Fails if it already exists.
+- **session new \<slug> [participants]** — `mkdir -p sessions/<slug>/`, write
+  `meta.json` (fail if `meta.json` already exists). The `participants` recorded
+  here are the **eligible principals** for this session's CCREP quorum (§7).
 - **session_append(slug, body, handoff?)** — append one JSON line to
   `sessions/<slug>/session.log`:
   ```json
@@ -223,10 +241,22 @@ unknown variants as protocol errors.
 A **tally** for a proposal is the deterministic function over the recorded
 `ccrep` events: for each reviewer, their latest verdict bound to the *exact*
 `commit_sha`; exclude the author; a `request_changes`/`reject` blocks; an
-`approve` counts only on the latest sha; then apply the session's rule
-(`all`/`consensus` = every present reviewer approves; `majority` = > half of the
-**eligible present principals**; `any` = ≥ 1). Resolution is
-`MET` / `BLOCKED-by-X` / `PENDING-on-Y` / `EXPIRED`.
+`approve` counts only on the latest sha.
+
+**Who counts.** The **eligible principals** are the `participants` in the
+session's `meta.json`. A principal is **present** if it has a recorded activity
+— a session entry, a sent/acked message, or an explicit `presence` marker —
+within the **staleness window (default 30 min)**; otherwise it is **absent**,
+excluded from the denominator at the `deadline`, and listed in `ccrep:executed`.
+Then apply the session's rule over the **present eligible principals**:
+`all`/`consensus` = every present eligible principal approves; `majority` =
+approvals > half of the present eligible principals; `any` = ≥ 1 approval.
+Resolution is `MET` / `BLOCKED-by-X` / `PENDING-on-Y` / `EXPIRED`.
+
+> The bootstrap cannot *enforce* this: an agent can omit or invent activity to
+> skew the present-set, or hand-wave the count. That is the exact seam the
+> compiled runtime closes ([§9](#9-what-the-binary-adds)) — here it is
+> honor-system, so a human should sanity-check any `majority` resolution.
 
 ---
 
