@@ -44,6 +44,9 @@ func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
 		assertFileContains(t, filepath.Join(wt, ".agents", "mcp_config.json"), `"command": "botfam"`)
 		assertFileContains(t, filepath.Join(wt, ".claude", "settings.json"), `"mcp__collab__*"`)
 		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "doc/collab/PROTOCOL.md")
+		assertFileContains(t, filepath.Join(wt, "CLAUDE.md"), "doc/collab/PROTOCOL.md")
+		assertFileContains(t, filepath.Join(wt, "GEMINI.md"), "doc/collab/PROTOCOL.md")
+		assertFileContains(t, filepath.Join(wt, "doc/collab/PROTOCOL.md"), "botfam Coordination Protocol")
 	}
 
 	send := callBotfamTool(t, home, filepath.Join(worktrees, "wt-codex"), bin, "send", map[string]any{
@@ -99,6 +102,9 @@ func TestBootstrapScriptRejectsUnsafeInputs(t *testing.T) {
 	assertFileContains(t, filepath.Join(target, ".codex", "config.toml"), `command = "botfam"`)
 	assertFileNotContains(t, filepath.Join(target, ".codex", "config.toml"), bin)
 	assertFileContains(t, filepath.Join(target, "AGENTS.md"), "doc/collab/PROTOCOL.md")
+	assertFileContains(t, filepath.Join(target, "CLAUDE.md"), "doc/collab/PROTOCOL.md")
+	assertFileContains(t, filepath.Join(target, "GEMINI.md"), "doc/collab/PROTOCOL.md")
+	assertFileContains(t, filepath.Join(target, "doc/collab/PROTOCOL.md"), "botfam Coordination Protocol")
 	assertFileNotContains(t, filepath.Join(target, "AGENTS.md"), "old identity text")
 }
 
