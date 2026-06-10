@@ -63,3 +63,56 @@ Malformed or incomplete handoff data (e.g., empty strings for `task`, `context`,
 
 ### Resolution
 Embed structural schema-shape validation directly into the `session_append` tool backend. Reject any appends containing malformed handoff objects, while keeping style/convention checks as warnings in the `botfam doctor` command.
+
+---
+
+## 6. Recursive Test Harness Deadlocks
+
+### Problem
+Tests that spawn child processes via `os.Args[0]` re-execute the `go test` harness itself inside the child, which recursively runs the test suite and deadlocks (or hangs until timeout). This was hit while testing the stdio server end-to-end.
+
+### Resolution
+Inside the test, build a real binary to a temp path with `go build -o <temp_path> ./cmd/botfam` and exec that binary directly. Never re-exec `os.Args[0]` under `go test`. (The integration tests in `cmd/botfam/integration_test.go` follow this pattern.)
+
+---
+
+## 7. MCP Client Connection Is Unrecoverable After Server Crash
+
+### Problem
+If the `botfam` MCP server process dies mid-session (crash, SIGKILL from Gatekeeper, recompile-under-it), the host editor's MCP client sees EOF and will not reconnect for the remainder of the session — every subsequent `mcp__collab__*` call fails. The agent loses its coordination channel without losing its session.
+
+### Mitigation
+- Agents should fall back to out-of-band access: the `botfam` CLI against the same store, or a temporary Go script using `store.New(...)`.
+- Longer term: the host-side story needs either MCP client reconnect support or a documented CLI-fallback convention in CLAUDE.md/AGENTS.md (partially done).
+
+---
+
+## 8. Uneven Harness Coverage — Only Claude Is Zero-Config
+
+### Problem
+The committed `.mcp.json` + `.claude/settings.json` make Claude Code worktrees zero-config, but other harnesses are not covered: the Codex CLI session reported having no `collab` MCP namespace registered and had to drive the repo stdio server by hand (observed 2026-06-10); agy needed a hand-rolled workspace MCP config (commit `e09c4f9`). Setup effort is per-harness and undocumented.
+
+### Resolution
+`bootstrap-botfam.sh` (in progress, session `2026-06-10-bootstrap-botfam`) should emit per-harness config for every agent in the roster — `.claude/` for Claude Code, `.codex/` for Codex, the Antigravity workspace MCP config for agy — not just the Claude files.
+
+---
+
+## 9. `recv` Long-Poll vs. Harness Tool-Call Ceilings
+
+### Problem
+`recv` blocks until a message arrives or `timeout_s` elapses. Every agent harness imposes its own tool-call timeout, and a `recv` that outlives it is killed by the host, which can look like a server failure. There is no push/wake channel, so idle agents must burn a tool call per poll interval.
+
+### Mitigation
+- Convention: pick `timeout_s` comfortably under the harness ceiling and re-invoke `recv` in a loop (documented in CLAUDE.md).
+- Planned: an out-of-band wake channel so a parked agent can be woken without polling (discussed in the collab-improvements review; not yet specified).
+
+---
+
+## 10. Per-Agent-Branch Docs Don't Propagate Until Merged
+
+### Problem
+Docs and findings committed on one agent's branch (e.g. this file, born on `agent/agy`) are invisible to the other fam members' worktrees until someone merges or the change reaches `main`. A "committed" finding can therefore be silently unknown to half the fam, while the session log and mailbox are shared instantly.
+
+### Mitigation
+- Durable cross-fam facts belong in the shared session log first (`session_append`), with the doc commit as the promoted artifact.
+- Convention: after committing fam-relevant docs, announce the branch/commit on the mailbox so others can merge promptly; land doc-only commits on `main` quickly.
