@@ -21,6 +21,20 @@ import (
 	"github.com/rlupi/botfam/internal/store"
 )
 
+// errIdentityRequired signals that no actor identity could be resolved from
+// any source (call arg, bound session, env, worktree directory).
+var errIdentityRequired = errors.New("identity required: pass actor, set COLLAB_ACTOR, or run from a named worktree")
+
+// identityOptionalTools are tools whose handlers never use the calling actor:
+// session_read filters by the explicit "from" argument only, and sweep calls
+// store.Sweep(), which takes no actor. For these, a missing identity is
+// tolerated; identity conflicts are still rejected and a resolved identity
+// still binds the session as usual.
+var identityOptionalTools = map[string]bool{
+	"session_read": true,
+	"sweep":        true,
+}
+
 type server struct {
 	envActor string
 	lockMode bool
@@ -182,7 +196,13 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 
 	actor, err := s.resolveActor(argString(args, "actor"), info.Actor)
 	if err != nil {
-		return nil, err
+		// Identity-optional tools never use the calling actor; tolerate the
+		// absence of an identity for them, but still surface conflict errors
+		// (and still bind normally above when an identity IS resolvable).
+		if !identityOptionalTools[name] || !errors.Is(err, errIdentityRequired) {
+			return nil, err
+		}
+		actor = ""
 	}
 	var result any
 	switch name {
@@ -325,6 +345,9 @@ func (s *server) resolveActor(callActor string, dirActor string) (string, error)
 		if s.envActor != "" && s.envActor != dirActor {
 			return "", fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", s.envActor, dirActor)
 		}
+		if s.actor != "" && s.actor != dirActor {
+			return "", fmt.Errorf("bound session actor %q conflicts with resolved directory actor %q", s.actor, dirActor)
+		}
 	}
 	if s.lockMode {
 		if s.envActor == "" {
@@ -349,7 +372,7 @@ func (s *server) resolveActor(callActor string, dirActor string) (string, error)
 		candidate = dirActor
 	}
 	if candidate == "" {
-		return "", errors.New("identity required: pass actor, set COLLAB_ACTOR, or run from a named worktree")
+		return "", errIdentityRequired
 	}
 	if err := store.ValidateName("actor", candidate); err != nil {
 		return "", err

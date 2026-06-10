@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/rlupi/botfam/internal/store"
 )
 
 type Resolver struct {
@@ -30,10 +32,7 @@ type RootInfo struct {
 func (r Resolver) Resolve() (RootInfo, error) {
 	var parsedActor string
 	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
-		base := filepath.Base(absDir)
-		if idx := strings.LastIndex(base, "-"); idx != -1 {
-			parsedActor = base[idx+1:]
-		}
+		parsedActor = parseActor(filepath.Base(absDir))
 	}
 
 	if envActor := getenv(r.Env, "COLLAB_ACTOR"); parsedActor != "" && envActor != "" && envActor != parsedActor {
@@ -52,8 +51,6 @@ func (r Resolver) Resolve() (RootInfo, error) {
 			Actor:    parsedActor,
 		}, nil
 	}
-
-
 
 	roots, err := gitLines(r.WorkDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
@@ -77,6 +74,26 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		RootSetID: id,
 		Actor:     parsedActor,
 	}, nil
+}
+
+// parseActor derives an actor name from a worktree directory basename per
+// doc/collab/PROTOCOL.md §1: the actor is the basename with a leading "wt-"
+// or "botfam-" prefix stripped. Basenames without one of those prefixes yield
+// no actor (fail closed); callers fall back to their existing "no actor" paths.
+func parseActor(base string) string {
+	var actor string
+	switch {
+	case strings.HasPrefix(base, "wt-"):
+		actor = strings.TrimPrefix(base, "wt-")
+	case strings.HasPrefix(base, "botfam-"):
+		actor = strings.TrimPrefix(base, "botfam-")
+	default:
+		return ""
+	}
+	if actor == "" || store.ValidateName("actor", actor) != nil {
+		return ""
+	}
+	return actor
 }
 
 func GitObjectStores(workDir string) ([]string, error) {
