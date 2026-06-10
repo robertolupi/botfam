@@ -518,8 +518,12 @@ for checkout in $all_checkouts; do
     write_agent_doc "$checkout/GEMINI.md" "$agents" "$script_dir/GEMINI.md"
   fi
   if [ -f "$script_dir/doc/collab/PROTOCOL.md" ]; then
-    mkdir -p "$checkout/doc/collab"
-    cp "$script_dir/doc/collab/PROTOCOL.md" "$checkout/doc/collab/PROTOCOL.md"
+    if ! is_git_tracked "$checkout" "$checkout/doc/collab/PROTOCOL.md"; then
+      if [ ! -f "$checkout/doc/collab/PROTOCOL.md" ] || ! cmp -s "$script_dir/doc/collab/PROTOCOL.md" "$checkout/doc/collab/PROTOCOL.md"; then
+        mkdir -p "$checkout/doc/collab"
+        cp "$script_dir/doc/collab/PROTOCOL.md" "$checkout/doc/collab/PROTOCOL.md"
+      fi
+    fi
   fi
 done
 
