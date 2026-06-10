@@ -131,8 +131,15 @@ func MergeGateCmd(args []string, out io.Writer) error {
 			independentApprovals = append(independentApprovals, app)
 		}
 	}
-
 	// Consensus check:
+	// NOTE: The current merge gate logic has the following gaps which are acceptable
+	// for Wave 1 but should be noted:
+	// - It does NOT enforce proposal deadlines/expires_at fields.
+	// - It does NOT enforce quorum types (e.g., all vs majority vs any).
+	// Currently, it accepts any consensus that has >= 1 independent approval and
+	// no active blockers (request_changes or reject verdicts). Fuller enforcement
+	// is deferred to the Phase 2 ledger.
+	//
 	// 1. Must have at least one independent approval
 	if len(independentApprovals) == 0 {
 		return fmt.Errorf("proposal %s commit %s has no independent approvals (author: %q)", proposalID, commitSHA, author)
