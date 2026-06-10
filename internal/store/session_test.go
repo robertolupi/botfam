@@ -25,6 +25,10 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 
 	// 3. Append entries
+	lockAlice, err := s.LockActor("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
 	entry1, err := s.SessionAppend(slug, "alice", "Hello this is Alice.", &SessionHandoff{
 		Task:        "Review Alice's proposal",
 		Context:     "doc/DESIGN_sessions.md",
@@ -36,13 +40,19 @@ func TestSessionLifecycle(t *testing.T) {
 	if entry1.Actor != "alice" || entry1.Body != "Hello this is Alice." {
 		t.Fatalf("unexpected entry1: %+v", entry1)
 	}
+	_ = lockAlice.Close()
 
 	time.Sleep(10 * time.Millisecond) // Ensure distinct timestamps
 
+	lockBob, err := s.LockActor("bob")
+	if err != nil {
+		t.Fatal(err)
+	}
 	entry2, err := s.SessionAppend(slug, "bob", "Ack, reviewing now.", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = lockBob.Close()
 
 	// 4. Read entries
 	entries, err := s.SessionRead(slug, "", 0, 0)
@@ -145,6 +155,12 @@ func TestSessionTornLineTolerant(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	lock, err := s.LockActor("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
 	// Append valid entry
 	entry, err := s.SessionAppend(slug, "alice", "Entry 1", nil)
 	if err != nil {
@@ -181,3 +197,70 @@ func TestSessionTornLineTolerant(t *testing.T) {
 		t.Fatalf("returned incorrect entries: %+v", entries)
 	}
 }
+
+func TestSessionAppendValidation(t *testing.T) {
+	temp := t.TempDir()
+	s := New(temp)
+
+	slug := "val-session"
+	if err := s.SessionNew(slug, []string{"alice"}, "operator"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Try appending without lock -> fails
+	_, err := s.SessionAppend(slug, "alice", "No lock", nil)
+	if err == nil || !strings.Contains(err.Error(), "not locked") {
+		t.Fatalf("expected error because actor is not locked, got: %v", err)
+	}
+
+	lock, err := s.LockActor("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+
+	// Try appending with invalid handoffs
+	cases := []struct {
+		name    string
+		handoff *SessionHandoff
+		wantErr string
+	}{
+		{
+			name: "empty task",
+			handoff: &SessionHandoff{
+				Task:        "",
+				Context:     "ctx",
+				Deliverable: "deliv",
+			},
+			wantErr: "invalid handoff: task cannot be empty or whitespace only",
+		},
+		{
+			name: "whitespace-only context",
+			handoff: &SessionHandoff{
+				Task:        "task",
+				Context:     "   ",
+				Deliverable: "deliv",
+			},
+			wantErr: "invalid handoff: context cannot be empty or whitespace only",
+		},
+		{
+			name: "whitespace-only deliverable",
+			handoff: &SessionHandoff{
+				Task:        "task",
+				Context:     "ctx",
+				Deliverable: "\t\n",
+			},
+			wantErr: "invalid handoff: deliverable cannot be empty or whitespace only",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := s.SessionAppend(slug, "alice", "body", tc.handoff)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("expected error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+

@@ -11,9 +11,23 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"syscall"
 	"time"
 )
+
+var (
+	activeLocksMu sync.Mutex
+	activeLocks   = make(map[string]bool)
+)
+
+func lockKey(root, actor string) string {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		absRoot = root
+	}
+	return filepath.Clean(filepath.Join(absRoot, actor, ".lock"))
+}
 
 type Store struct {
 	Root string
@@ -21,6 +35,14 @@ type Store struct {
 
 type ActorLock struct {
 	file *os.File
+	key  string
+}
+
+func (s *Store) IsActorLocked(actor string) bool {
+	key := lockKey(s.Root, actor)
+	activeLocksMu.Lock()
+	defer activeLocksMu.Unlock()
+	return activeLocks[key]
 }
 
 func New(root string) *Store {
@@ -60,12 +82,21 @@ func (s *Store) LockActor(actor string) (*ActorLock, error) {
 		_ = f.Close()
 		return nil, fmt.Errorf("actor %q is already locked by another botfam process", actor)
 	}
-	return &ActorLock{file: f}, nil
+	key := lockKey(s.Root, actor)
+	activeLocksMu.Lock()
+	activeLocks[key] = true
+	activeLocksMu.Unlock()
+	return &ActorLock{file: f, key: key}, nil
 }
 
 func (l *ActorLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil
+	}
+	if l.key != "" {
+		activeLocksMu.Lock()
+		delete(activeLocks, l.key)
+		activeLocksMu.Unlock()
 	}
 	_ = syscall.Flock(int(l.file.Fd()), syscall.LOCK_UN)
 	return l.file.Close()

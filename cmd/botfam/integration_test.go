@@ -538,3 +538,199 @@ func initGitRepo(t *testing.T, dir string) {
 	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
 }
 
+
+func TestIntegrationB_NarrowSafety(t *testing.T) {
+	root := t.TempDir()
+
+	// 1. Compile the real botfam binary to root/botfam
+	binPath := filepath.Join(root, "botfam")
+	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+	buildCmd.Dir = "."
+	var buildStderr bytes.Buffer
+	buildCmd.Stderr = &buildStderr
+	if err := buildCmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
+	}
+
+	// Initialize the git repo in root
+	gitDir := filepath.Join(root, "myrepo")
+	if err := os.Mkdir(gitDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, gitDir)
+
+	// Setup family
+	homeDir := filepath.Join(root, "home")
+	_ = os.MkdirAll(homeDir, 0o755)
+	t.Setenv("HOME", homeDir)
+
+	t.Chdir(gitDir)
+	var setupOut bytes.Buffer
+	if err := fam.Setup([]string{"myproj", "--agents", "alice,bob"}, &setupOut); err != nil {
+		t.Fatalf("fam.Setup failed: %v", err)
+	}
+
+	// Create named worktrees
+	aliceWT := filepath.Join(gitDir, "wt-alice")
+	_ = os.MkdirAll(aliceWT, 0o755)
+
+	// Helper to run MCP server stdio in a specific workdir with env
+	runMCPServer := func(workDir string, env []string, method string, params map[string]any) (map[string]any, string) {
+		cmd := exec.Command(binPath, "serve")
+		cmd.Dir = workDir
+		cmd.Env = append(os.Environ(),
+			"HOME="+homeDir,
+		)
+		cmd.Env = append(cmd.Env, env...)
+
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+
+		// Write initialize request
+		initReq := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+		fmt.Fprintln(stdin, initReq)
+
+		// Write tools/call request
+		callReq := map[string]any{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"method":  "tools/call",
+			"params": map[string]any{
+				"name":      method,
+				"arguments": params,
+			},
+		}
+		reqBody, err := json.Marshal(callReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintln(stdin, string(reqBody))
+		_ = stdin.Close()
+
+		// Read responses
+		scanner := bufio.NewScanner(stdout)
+		var lastResult map[string]any
+		var lastError string
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var resp map[string]any
+			if err := json.Unmarshal([]byte(line), &resp); err != nil {
+				continue
+			}
+			if idFloat, ok := resp["id"].(float64); ok && idFloat == 2 {
+				if errObj, ok := resp["error"].(map[string]any); ok {
+					lastError, _ = errObj["message"].(string)
+				} else if resObj, ok := resp["result"].(map[string]any); ok {
+					lastResult = resObj
+				}
+			}
+		}
+
+		_ = cmd.Wait()
+		return lastResult, lastError
+	}
+
+	// 1. Conflict check: try to masquerade as bob from wt-alice directory using COLLAB_ACTOR
+	_, errStr := runMCPServer(aliceWT, []string{"COLLAB_ACTOR=bob"}, "session_append", map[string]any{
+		"session": "test-session",
+		"body":    "hi",
+	})
+	if errStr == "" || !strings.Contains(errStr, "conflicts with resolved directory actor") {
+		t.Fatalf("expected conflict error for mismatched COLLAB_ACTOR, got: %s", errStr)
+	}
+
+	// 2. Conflict check: try to masquerade as bob from wt-alice directory using explicit actor argument
+	_, errStr = runMCPServer(aliceWT, nil, "session_append", map[string]any{
+		"actor":   "bob",
+		"session": "test-session",
+		"body":    "hi",
+	})
+	if errStr == "" || !strings.Contains(errStr, "conflicts with resolved directory actor") {
+		t.Fatalf("expected conflict error for mismatched explicit actor, got: %s", errStr)
+	}
+
+	// 3. Test Session Handoff validation
+	// Let's create a session first via CLI
+	cmdNew := exec.Command(binPath, "session", "new", "test-safety-session", "--participants", "alice,bob")
+	cmdNew.Env = append(os.Environ(), "HOME="+homeDir)
+	cmdNew.Dir = aliceWT
+	if err := cmdNew.Run(); err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	// Try appending with invalid handoffs from aliceWT (acting as alice)
+	_, errStr = runMCPServer(aliceWT, nil, "session_append", map[string]any{
+		"session": "test-safety-session",
+		"body":    "my body",
+		"handoff": map[string]any{
+			"task":        "",
+			"context":     "ctx",
+			"deliverable": "deliv",
+		},
+	})
+	if errStr == "" || !strings.Contains(errStr, "invalid handoff: task cannot be empty or whitespace only") {
+		t.Fatalf("expected task empty error, got: %s", errStr)
+	}
+
+	_, errStr = runMCPServer(aliceWT, nil, "session_append", map[string]any{
+		"session": "test-safety-session",
+		"body":    "my body",
+		"handoff": map[string]any{
+			"task":        "task",
+			"context":     "  ",
+			"deliverable": "deliv",
+		},
+	})
+	if errStr == "" || !strings.Contains(errStr, "invalid handoff: context cannot be empty or whitespace only") {
+		t.Fatalf("expected context empty error, got: %s", errStr)
+	}
+
+	// 4. Test legitimate append and read flow from aliceWT (acting as alice)
+	res, errStr := runMCPServer(aliceWT, nil, "session_append", map[string]any{
+		"session": "test-safety-session",
+		"body":    "Legitimate append",
+		"handoff": map[string]any{
+			"task":        "task",
+			"context":     "ctx",
+			"deliverable": "deliv",
+		},
+	})
+	if errStr != "" {
+		t.Fatalf("expected legitimate append to succeed, got error: %s", errStr)
+	}
+	content, ok := res["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("expected content array of size 1, got: %+v", res["content"])
+	}
+	item, ok := content[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected content item to be object, got: %+v", content[0])
+	}
+	text, ok := item["text"].(string)
+	if !ok {
+		t.Fatalf("expected text property to be string, got: %+v", item["text"])
+	}
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(text), &entry); err != nil {
+		t.Fatalf("failed to unmarshal text: %v", err)
+	}
+	if entry["actor"] != "alice" || entry["body"] != "Legitimate append" {
+		t.Fatalf("unexpected legitimate append result entry: %+v", entry)
+	}
+}
