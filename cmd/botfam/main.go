@@ -22,6 +22,8 @@ func run() error {
 			return fam.Setup(os.Args[2:], os.Stdout)
 		case "session":
 			return fam.SessionCmd(os.Args[2:], os.Stdout)
+		case "merge-gate":
+			return fam.MergeGateCmd(os.Args[2:], os.Stdout)
 		case "serve":
 			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
 		case "-h", "--help", "help":
@@ -42,5 +44,6 @@ Usage:
   botfam serve            run stdio MCP server
   botfam setup <project> --agents alice,bob [--force]
   botfam session <subcommand>
+  botfam merge-gate --commit <sha> --proposal <id>
 `)
 }

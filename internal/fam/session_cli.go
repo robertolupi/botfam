@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/term"
@@ -155,10 +157,42 @@ func sessionClose(args []string, out io.Writer) error {
 	st := store.New(info.Root)
 
 	repoRoot := RepoPath(".")
+
+	// Verify git working directory is clean (skipped if BOTFAM_FORCE_CLOSE=1)
+	if os.Getenv("BOTFAM_FORCE_CLOSE") != "1" {
+		statusOut, err := gitOutput(repoRoot, "status", "--porcelain")
+		if err != nil {
+			return fmt.Errorf("checking git status: %w", err)
+		}
+		if len(strings.TrimSpace(string(statusOut))) > 0 {
+			return errors.New("git working directory is not clean; please commit or stash your changes before closing the session")
+		}
+	}
+
 	if err := st.SessionClose(slug, repoRoot); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "Closed and rendered session %q to doc/collab/sessions/%s/session.md\n", slug, slug)
+	// Stage and commit the rendered file (skipped if BOTFAM_FORCE_CLOSE=1)
+	if os.Getenv("BOTFAM_FORCE_CLOSE") != "1" {
+		relFile := filepath.Join("doc", "collab", "sessions", slug, "session.md")
+		if _, err := gitOutput(repoRoot, "add", relFile); err != nil {
+			return fmt.Errorf("staging session markdown: %w", err)
+		}
+
+		// Commit interactively, allowing editing of the pre-populated commit message
+		commitCmd := exec.Command("git", "commit", "-e", "-m", fmt.Sprintf("archive: close session %s", slug))
+		commitCmd.Dir = repoRoot
+		commitCmd.Stdin = os.Stdin
+		commitCmd.Stdout = os.Stdout
+		commitCmd.Stderr = os.Stderr
+		if err := commitCmd.Run(); err != nil {
+			return fmt.Errorf("git commit: %w", err)
+		}
+
+		fmt.Fprintf(out, "Closed, rendered, and committed session %q to doc/collab/sessions/%s/session.md\n", slug, slug)
+	} else {
+		fmt.Fprintf(out, "Closed and rendered session %q to doc/collab/sessions/%s/session.md\n", slug, slug)
+	}
 	return nil
 }

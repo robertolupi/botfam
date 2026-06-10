@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -132,6 +133,344 @@ func TestSweepExpiredLease(t *testing.T) {
 	if claimed == nil || claimed.ID != task.ID {
 		t.Fatalf("reclaimed task got %v, want %s", claimed, task.ID)
 	}
+}
+
+func TestMessageLifecycleSendRecvAckSeen(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	payload := map[string]any{"key": "value"}
+	msg, err := s.Send("alice", "bob", "handoff", payload, "reply123", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.From != "alice" || msg.To != "bob" || msg.Type != "handoff" || msg.InReplyTo != "reply123" {
+		t.Fatalf("unexpected sent message fields: %+v", msg)
+	}
+	if msg.Payload["key"] != "value" {
+		t.Fatalf("expected payload key=value, got: %+v", msg.Payload)
+	}
+
+	// Verify it is in the new folder
+	newFiles, err := listJSON(filepath.Join(s.Root, "bob", "new"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(newFiles) != 1 {
+		t.Fatalf("expected 1 new message, got: %d", len(newFiles))
+	}
+
+	// Peek should see it
+	peeked, err := s.Peek("bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peeked == nil || peeked.ID != msg.ID {
+		t.Fatalf("expected to peek message %s, got: %v", msg.ID, peeked)
+	}
+
+	// Receive it
+	got, err := s.TryRecv("bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.ID != msg.ID {
+		t.Fatalf("expected to receive message %s, got: %v", msg.ID, got)
+	}
+
+	// Verify processing
+	procFiles, err := listJSON(filepath.Join(s.Root, "bob", "processing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(procFiles) != 1 {
+		t.Fatalf("expected 1 processing message, got: %d", len(procFiles))
+	}
+
+	// Peek should no longer see it
+	peeked, err = s.Peek("bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if peeked != nil {
+		t.Fatalf("peek saw reserved message: %v", peeked)
+	}
+
+	// Seen should be false
+	seen, err := s.Seen("bob", msg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen {
+		t.Fatal("message marked seen before ack")
+	}
+
+	// Ack it
+	outcome := map[string]any{"success": true}
+	acked, err := s.Ack("bob", msg.ID, outcome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acked == nil || acked.ID != msg.ID {
+		t.Fatalf("expected to ack message %s, got: %v", msg.ID, acked)
+	}
+
+	// Verify cur
+	curFiles, err := listJSON(filepath.Join(s.Root, "bob", "cur"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(curFiles) != 1 {
+		t.Fatalf("expected 1 cur message, got: %d", len(curFiles))
+	}
+
+	// Seen should be true
+	seen, err = s.Seen("bob", msg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !seen {
+		t.Fatal("expected message to be seen after ack")
+	}
+}
+
+func TestMessageCrashRedelivery(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := s.Send("alice", "bob", "handoff", nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.TryRecv("bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.ID != msg.ID {
+		t.Fatalf("expected to reserve message, got: %v", got)
+	}
+
+	procFiles, _ := listJSON(filepath.Join(s.Root, "bob", "processing"))
+	if len(procFiles) != 1 {
+		t.Fatalf("expected message to be in processing, got %d files", len(procFiles))
+	}
+
+	if err := s.RollbackProcessing("bob"); err != nil {
+		t.Fatal(err)
+	}
+
+	procFiles, _ = listJSON(filepath.Join(s.Root, "bob", "processing"))
+	if len(procFiles) != 0 {
+		t.Fatalf("expected processing to be empty, got %d files", len(procFiles))
+	}
+	newFiles, _ := listJSON(filepath.Join(s.Root, "bob", "new"))
+	if len(newFiles) != 1 {
+		t.Fatalf("expected message to return to new, got %d files", len(newFiles))
+	}
+
+	got2, err := s.TryRecv("bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2 == nil || got2.ID != msg.ID {
+		t.Fatalf("expected redelivery, got: %v", got2)
+	}
+}
+
+func TestMessageSeenDedup(t *testing.T) {
+	s := New(t.TempDir())
+	msg, err := s.Send("alice", "bob", "handoff", nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen, err := s.Seen("bob", msg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen {
+		t.Fatal("expected Seen to return false for unsent/un-acked message")
+	}
+
+	seenNone, err := s.Seen("bob", "nonexistent-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seenNone {
+		t.Fatal("expected Seen to return false for nonexistent message")
+	}
+
+	_, err = s.TryRecv("bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Ack("bob", msg.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seenAfter, err := s.Seen("bob", msg.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !seenAfter {
+		t.Fatal("expected Seen to return true after Ack")
+	}
+}
+
+func TestMessageExpiryDeadLetter(t *testing.T) {
+	s := New(t.TempDir())
+	pastTime := unixFloat(time.Now().Add(-time.Hour))
+	_, err := s.Send("alice", "bob", "handoff", nil, "", &pastTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.TryRecv("bob", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("received expired message: %v", got)
+	}
+
+	expiredFiles, err := listJSON(filepath.Join(s.Root, "bob", "expired"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(expiredFiles) != 1 {
+		t.Fatalf("expected 1 file in expired, got: %d", len(expiredFiles))
+	}
+
+	newFiles, _ := listJSON(filepath.Join(s.Root, "bob", "new"))
+	if len(newFiles) != 0 {
+		t.Fatalf("expected 0 files in new, got: %d", len(newFiles))
+	}
+}
+
+func TestTaskLifecyclePostClaimHeartbeatComplete(t *testing.T) {
+	s := New(t.TempDir())
+	payload := map[string]any{"taskData": "run"}
+	task, err := s.Post("alice", "test-task", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "open" || task.Type != "test-task" || task.Payload["taskData"] != "run" {
+		t.Fatalf("unexpected task state: %+v", task)
+	}
+
+	openFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "open"))
+	if len(openFiles) != 1 {
+		t.Fatalf("expected 1 open task file, got: %d", len(openFiles))
+	}
+
+	claimed, err := s.Claim("bob", time.Minute, ClaimOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil || claimed.ID != task.ID || claimed.Status != "claimed" || claimed.Owner != "bob" {
+		t.Fatalf("unexpected claimed task: %+v", claimed)
+	}
+	if claimed.ClaimedAt == nil || claimed.LeaseExpiresAt == nil {
+		t.Fatal("expected ClaimedAt and LeaseExpiresAt to be set")
+	}
+
+	initialLease := *claimed.LeaseExpiresAt
+	time.Sleep(10 * time.Millisecond)
+	heartbeated, err := s.Heartbeat("bob", task.ID, 2*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if heartbeated.LeaseExpiresAt == nil || *heartbeated.LeaseExpiresAt <= initialLease {
+		t.Fatalf("expected lease extension, got lease: %v, initial: %v", heartbeated.LeaseExpiresAt, initialLease)
+	}
+
+	result := map[string]any{"outcome": "ok"}
+	completed, err := s.Complete("bob", task.ID, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != "done" || completed.CompletedAt == nil {
+		t.Fatalf("expected done status, got completed: %+v", completed)
+	}
+	if completed.Result.(map[string]any)["outcome"] != "ok" {
+		t.Fatalf("expected result outcome=ok, got: %+v", completed.Result)
+	}
+
+	doneFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "done"))
+	if len(doneFiles) != 1 {
+		t.Fatalf("expected 1 done task file, got: %d", len(doneFiles))
+	}
+}
+
+func TestTaskLeaseExpirySweep(t *testing.T) {
+	s := New(t.TempDir())
+	task, err := s.Post("alice", "test-task", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := s.Claim("bob", -time.Second, ClaimOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil {
+		t.Fatal("failed to claim task")
+	}
+
+	swept, err := s.Sweep()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(swept) != 1 || swept[0].ID != task.ID {
+		t.Fatalf("expected to sweep task %s, got: %v", task.ID, swept)
+	}
+
+	sweptTask := swept[0]
+	if sweptTask.Status != "open" || sweptTask.Owner != "" {
+		t.Fatalf("expected swept task to be open with no owner, got: %+v", sweptTask)
+	}
+	if sweptTask.SweptFrom != "bob" || sweptTask.SweptAt == nil {
+		t.Fatalf("expected SweptFrom='bob' and SweptAt set, got: %+v", sweptTask)
+	}
+
+	openFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "open"))
+	if len(openFiles) != 1 {
+		t.Fatalf("expected task to return to open, got: %d files", len(openFiles))
+	}
+}
+
+func TestActorDoubleLock(t *testing.T) {
+	s := New(t.TempDir())
+	lock1, err := s.LockActor("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lock1 == nil {
+		t.Fatal("expected lock to be acquired")
+	}
+
+	lock2, err := s.LockActor("alice")
+	if err == nil {
+		_ = lock2.Close()
+		t.Fatal("expected double lock for actor 'alice' to fail")
+	}
+
+	if err := lock1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lock3, err := s.LockActor("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lock3 == nil {
+		t.Fatal("expected lock to succeed after first lock closed")
+	}
+	_ = lock3.Close()
 }
 
 func TestClaimErgonomics(t *testing.T) {
