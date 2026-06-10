@@ -274,6 +274,9 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		}
 		result = map[string]any{"swept": tasks}
 	case "session_append":
+		if err := s.ensureActorLock(actor, st); err != nil {
+			return nil, err
+		}
 		sessionName := argString(args, "session")
 		body := argString(args, "body")
 		var handoff *store.SessionHandoff
@@ -308,6 +311,14 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 func (s *server) resolveActor(callActor string, dirActor string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if dirActor != "" {
+		if callActor != "" && callActor != dirActor {
+			return "", fmt.Errorf("actor %q conflicts with resolved directory actor %q", callActor, dirActor)
+		}
+		if s.envActor != "" && s.envActor != dirActor {
+			return "", fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", s.envActor, dirActor)
+		}
+	}
 	if s.lockMode {
 		if s.envActor == "" {
 			return "", errors.New("BOTFAM_LOCK_ACTOR is set but COLLAB_ACTOR is empty")

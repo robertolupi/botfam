@@ -36,6 +36,10 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		}
 	}
 
+	if envActor := getenv(r.Env, "COLLAB_ACTOR"); parsedActor != "" && envActor != "" && envActor != parsedActor {
+		return RootInfo{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, parsedActor)
+	}
+
 	if root := getenv(r.Env, "COLLAB_ROOT"); root != "" {
 		abs, err := filepath.Abs(root)
 		if err != nil {

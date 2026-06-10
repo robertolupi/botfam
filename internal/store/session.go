@@ -75,6 +75,21 @@ func (s *Store) SessionAppend(slug, actor, body string, handoff *SessionHandoff)
 	if err := ValidateName("actor", actor); err != nil {
 		return SessionEntry{}, err
 	}
+	if !s.IsActorLocked(actor) {
+		return SessionEntry{}, fmt.Errorf("actor %q is not locked by this process", actor)
+	}
+	if handoff != nil {
+		if strings.TrimSpace(handoff.Task) == "" {
+			return SessionEntry{}, errors.New("invalid handoff: task cannot be empty or whitespace only")
+		}
+		if strings.TrimSpace(handoff.Context) == "" {
+			return SessionEntry{}, errors.New("invalid handoff: context cannot be empty or whitespace only")
+		}
+		if strings.TrimSpace(handoff.Deliverable) == "" {
+			return SessionEntry{}, errors.New("invalid handoff: deliverable cannot be empty or whitespace only")
+		}
+	}
+
 	dir := filepath.Join(s.Root, "sessions", slug)
 	metaPath := filepath.Join(dir, "meta.json")
 	if _, err := os.Stat(metaPath); err != nil {
