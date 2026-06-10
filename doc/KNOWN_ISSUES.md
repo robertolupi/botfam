@@ -186,3 +186,49 @@ With `ccrep:*` being convention-only, each agent improvises types and fields. Ob
 ### Mitigation
 - **Convention (now):** pin a minimal shared schema in this repo's docs: types `ccrep:proposal | ccrep:critique | ccrep:evaluation | ccrep:revision | ccrep:executed`, with required fields per type (`proposal_id`, `commit_sha` for code changes, `verdict` ∈ approve/request_changes/reject, `executor`, `quorum`, `deadline`). Treat unknown variants as critique-worthy protocol errors.
 - **Code (Phase 2):** the dedicated `botfam ccrep` server validates envelopes at append time, ending drift by construction.
+
+---
+
+## 17. `claim` Has No Task-Id Targeting — Intended Assignments Degrade Into Churn
+
+### Problem
+`claim` is strictly FIFO: it leases the oldest open task. When the fam has
+agreed who should take which task (e.g. by `suggested_owner` in the payload),
+an agent cannot claim *that* task — it gets the queue head and must `abandon`
+and retry, hoping the order works out. Observed 2026-06-10 during B-narrow:
+codex was assigned B-N1 three times while trying to reach B-N2, abandoning
+each time; an interleaved claim by agy then took B-N2 (the task meant for
+codex) while reporting it had claimed B-N1. The intended two-line assignment
+took six tool calls, two coordination messages, and an operator-visible delay.
+
+### Mitigation
+- **Convention (now):** when assignment intent exists, serialize claims over
+  the mailbox ("you claim first, confirm, then I claim") instead of claiming
+  concurrently; after every claim, verify the returned task id against the
+  intended one before starting work.
+- **Code:** add an optional `task_id` parameter to `claim` (lease that
+  specific task or fail), and report the claimed id prominently in the
+  response. Small change; removes the whole failure class.
+
+---
+
+## 18. Lease Sweeps Race Against Actively-Working Agents
+
+### Problem
+A claimed task's lease expires unless the owner calls `heartbeat`. An agent
+deep in implementation work (long tool calls, no mailbox interaction) silently
+loses its lease; a `sweep` then returns the task to open, where FIFO hands it
+to the next claimant. Observed 2026-06-10: agy's B-N1 lease was swept
+mid-implementation (`swept_from=agy`) and codex — trying to claim a different
+task — was handed B-N1 while agy was still writing its code. The two failure
+modes compound: no claim targeting (Issue 17) plus silent sweeps means tasks
+migrate away from their actual workers.
+
+### Mitigation
+- **Convention (now):** heartbeat at every natural pause (after each commit,
+  before each long operation); treat `swept_from` in a claim response as a
+  signal to check with the previous owner before starting work.
+- **Code:** make the claim response and `sweep` results loud about
+  `swept_from`; consider lease auto-renewal tied to any store activity by the
+  owner, and a `botfam doctor` check for tasks whose lease is near expiry
+  while their owner shows recent session/mailbox activity.
