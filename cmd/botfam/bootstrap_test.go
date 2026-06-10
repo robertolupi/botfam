@@ -92,10 +92,14 @@ func TestBootstrapScriptRejectsUnsafeInputs(t *testing.T) {
 	runCmd(t, target, "git", "add", ".codex/config.toml")
 	runCmd(t, target, "git", "commit", "-m", "track codex config")
 
-	out := runBootstrapError(t, home, script, target, "--agents", "agy", "--botfam-bin", bin, "--no-worktrees")
-	if !strings.Contains(out, "refusing to write an absolute local botfam path") {
-		t.Fatalf("tracked codex output = %q, want tracked config refusal", out)
+	if err := os.WriteFile(filepath.Join(target, "AGENTS.md"), []byte("# botfam fam member — read this first\n\nold identity text\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	runBootstrap(t, home, script, target, "--agents", "agy", "--botfam-bin", bin, "--no-worktrees")
+	assertFileContains(t, filepath.Join(target, ".codex", "config.toml"), `command = "botfam"`)
+	assertFileNotContains(t, filepath.Join(target, ".codex", "config.toml"), bin)
+	assertFileContains(t, filepath.Join(target, "AGENTS.md"), "Automatic resolution")
+	assertFileNotContains(t, filepath.Join(target, "AGENTS.md"), "old identity text")
 }
 
 func runBootstrap(t *testing.T, home, script, repo string, args ...string) {
@@ -158,6 +162,17 @@ func assertFileContains(t *testing.T, path, want string) {
 	}
 	if !strings.Contains(string(b), want) {
 		t.Fatalf("%s does not contain %q:\n%s", path, want, string(b))
+	}
+}
+
+func assertFileNotContains(t *testing.T, path, unwanted string) {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), unwanted) {
+		t.Fatalf("%s contains unwanted %q:\n%s", path, unwanted, string(b))
 	}
 }
 

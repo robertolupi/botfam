@@ -103,7 +103,7 @@ EOF
 
 write_codex_config() {
   path=$1
-  bin=$2
+  command_name=$2
   mkdir -p "$(dirname "$path")"
   tmp="${path}.tmp.$$"
   if [ -f "$path" ]; then
@@ -118,7 +118,7 @@ write_codex_config() {
   else
     : > "$tmp"
   fi
-  printf '[mcp_servers.collab]\ncommand = "%s"\n' "$(printf '%s' "$bin" | sed 's/\\/\\\\/g; s/"/\\"/g')" >> "$tmp"
+  printf '[mcp_servers.collab]\ncommand = "%s"\n' "$(printf '%s' "$command_name" | sed 's/\\/\\\\/g; s/"/\\"/g')" >> "$tmp"
   mv "$tmp" "$path"
 }
 
@@ -211,10 +211,14 @@ write_agent_doc() {
   path=$1
   agents=$2
   template=$3
-  if [ -f "$path" ] && grep -q 'botfam fam member' "$path"; then
-    return
-  fi
   if [ -f "$template" ]; then
+    if [ "$(abs_path "$path")" = "$(abs_path "$template")" ]; then
+      return
+    fi
+    if [ -f "$path" ] && grep -q 'botfam fam member' "$path"; then
+      cp "$template" "$path"
+      return
+    fi
     if [ -f "$path" ]; then
       printf '\n' >> "$path"
       cat "$template" >> "$path"
@@ -224,6 +228,55 @@ write_agent_doc() {
     return
   fi
   if [ -f "$path" ]; then
+    if grep -q 'botfam fam member' "$path"; then
+      tmp="${path}.tmp.$$"
+      cat > "$tmp" <<EOF
+# botfam fam member — read this first
+
+This checkout is one agent's worktree in a botfam coordination fam. Every
+agent works in its own worktree of this repo, shares a maildir under
+\`~/.botfam/\`, and talks through the \`collab\` MCP server.
+
+## Your name
+
+Your actor name is this worktree's directory basename, with any leading
+\`wt-\` or \`botfam-\` stripped:
+
+- \`wt-claude\` -> \`claude\`
+- \`wt-codex\` -> \`codex\`
+- \`wt-agy\` -> \`agy\`
+
+Configured roster: $agents
+
+If in doubt, run \`basename "\$PWD"\` and apply that rule before your first
+collab call.
+
+## Identity rule (important)
+
+The server binds an actor name to the session — it is sticky and immutable.
+
+- Automatic resolution (recommended): if you run inside a named worktree folder
+  such as \`wt-agy\`, the server parses the directory basename to resolve the
+  actor as \`agy\`. The family root is derived from repository git history, so
+  every worktree and the main checkout share one coordination plane. In this
+  case, you do not need to pass \`actor\` on tool calls.
+- Explicit naming: alternatively, on your first \`collab\` tool call, pass
+  \`actor: "<your-name>"\`. A conflicting \`actor\` is rejected. If no automatic
+  resolution is possible and no \`actor\` is provided on the first call, the call
+  is refused.
+
+## Coordination tools
+
+- Messaging: \`send\`, \`recv\`, \`try_recv\`, \`peek\`, \`ack\`, \`seen\`, \`inbox\`
+- Task queue: \`post\`, \`claim\`, \`complete\`, \`heartbeat\`, \`abandon\`, \`sweep\`
+
+\`recv\` blocks cheaply until a message arrives. Delivery is at-least-once:
+\`ack(id)\` after you durably handle a message, and use \`seen(id)\` to dedup
+when needed.
+EOF
+      mv "$tmp" "$path"
+      return
+    fi
     printf '\n' >> "$path"
   fi
   cat >> "$path" <<EOF
@@ -450,10 +503,12 @@ for checkout in $all_checkouts; do
   note "writing harness config in $checkout"
   write_json_mcp_config "$checkout/.mcp.json" "botfam"
   write_json_mcp_config "$checkout/.agents/mcp_config.json" "botfam"
-  if is_git_tracked "$checkout" "$checkout/.codex/config.toml" && [ "$force" -ne 1 ]; then
-    die "$checkout/.codex/config.toml is tracked; refusing to write an absolute local botfam path without --force"
+  codex_command=$botfam_bin
+  if is_git_tracked "$checkout" "$checkout/.codex/config.toml"; then
+    codex_command=botfam
+    note "$checkout/.codex/config.toml is tracked; writing portable command 'botfam' instead of an absolute local path"
   fi
-  write_codex_config "$checkout/.codex/config.toml" "$botfam_bin"
+  write_codex_config "$checkout/.codex/config.toml" "$codex_command"
   write_claude_settings "$checkout/.claude/settings.json"
   write_agent_doc "$checkout/AGENTS.md" "$agents" "$script_dir/AGENTS.md"
   if [ ! -f "$checkout/CLAUDE.md" ]; then
@@ -474,5 +529,6 @@ Worktrees:$worktree_summary
 Next steps:
   1. Open each harness in its worktree, for example $worktree_dir/wt-codex.
   2. Restart any already-running harness so MCP config is reloaded.
-  3. On the first collab call, pass actor matching the worktree name, e.g. codex.
+  3. Run collab tools from the named worktree; actor identity resolves from the
+     worktree basename, e.g. wt-codex -> codex.
 EOF
