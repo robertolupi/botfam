@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -621,4 +623,164 @@ func TestClaimErgonomics(t *testing.T) {
 	if reclaimed.SweptFrom != "eve" {
 		t.Fatalf("expected reclaimed task swept_from to be 'eve', got %q", reclaimed.SweptFrom)
 	}
+}
+
+func TestTaskAbandon(t *testing.T) {
+	s := New(t.TempDir())
+	task, err := s.Post("alice", "task", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.Claim("bob", time.Minute, ClaimOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil {
+		t.Fatal("expected task to be claimed")
+	}
+
+	abandoned, err := s.Abandon("bob", task.ID, "need help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abandoned == nil || abandoned.Status != "open" || abandoned.Owner != "" {
+		t.Fatalf("unexpected abandoned task: %+v", abandoned)
+	}
+	if abandoned.AbandonedReason != "need help" || abandoned.AbandonedBy != "bob" {
+		t.Fatalf("unexpected abandon metadata: %+v", abandoned)
+	}
+
+	// Verify it can be claimed again
+	reclaimed, err := s.Claim("carol", time.Minute, ClaimOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reclaimed == nil || reclaimed.ID != task.ID {
+		t.Fatalf("expected task to be reclaimed, got %v", reclaimed)
+	}
+}
+
+func TestTaskClaimConcurrency(t *testing.T) {
+	s := New(t.TempDir())
+	task, err := s.Post("alice", "task", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Spin up multiple goroutines attempting to claim the same task concurrently
+	const goroutines = 10
+	errChan := make(chan error, goroutines)
+	claimChan := make(chan *Task, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func(id int) {
+			actor := fmt.Sprintf("actor-%d", id)
+			// Claim by ID to target the exact task
+			claimed, err := s.Claim(actor, time.Minute, ClaimOptions{TaskID: task.ID})
+			if err != nil {
+				errChan <- err
+				return
+			}
+			if claimed != nil {
+				claimChan <- claimed
+			} else {
+				claimChan <- nil
+			}
+		}(i)
+	}
+
+	// Gather results
+	claims := 0
+	for i := 0; i < goroutines; i++ {
+		select {
+		case err := <-errChan:
+			// Mismatch/already-claimed errors are expected for losers
+			_ = err
+		case claimed := <-claimChan:
+			if claimed != nil {
+				claims++
+			}
+		}
+	}
+
+	if claims != 1 {
+		t.Fatalf("expected exactly 1 worker to claim the task, got %d", claims)
+	}
+}
+
+func TestTaskSweepConcurrency(t *testing.T) {
+	s := New(t.TempDir())
+	task, err := s.Post("alice", "task", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Claim with negative TTL so it is immediately expirable
+	claimed, err := s.Claim("bob", -time.Second, ClaimOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed == nil {
+		t.Fatal("expected task to be claimed")
+	}
+
+	// Run concurrent Sweep and Heartbeat operations
+	const iterations = 50
+	for i := 0; i < iterations; i++ {
+		// Reset task to claimed-expired state
+		exp := unixFloat(time.Now().Add(-time.Second))
+		claimed.Status = "claimed"
+		claimed.Owner = "bob"
+		claimed.LeaseExpiresAt = &exp
+		claimed.ClaimedAt = &exp
+		claimed.SweptAt = nil
+		claimed.SweptFrom = ""
+
+		path := filepath.Join(s.Root, "tasks", "claimed", "bob", claimed.filename)
+		// Clean folders
+		_ = os.Remove(filepath.Join(s.Root, "tasks", "open", claimed.filename))
+		_ = os.Remove(filepath.Join(s.Root, "tasks", "done", claimed.filename))
+		_ = os.MkdirAll(filepath.Dir(path), 0755)
+		if err := writeJSON(path, claimed); err != nil {
+			t.Fatal(err)
+		}
+
+		errChan := make(chan error, 2)
+		go func() {
+			_, err := s.Sweep()
+			errChan <- err
+		}()
+
+		go func() {
+			_, err := s.Heartbeat("bob", task.ID, time.Minute)
+			errChan <- err
+		}()
+
+		// Wait for both goroutines
+		for j := 0; j < 2; j++ {
+			if err := <-errChan; err != nil {
+				// We expect some operations to fail because of the race, e.g.
+				// heartbeat might fail if swept, which returns "task lease lost".
+				// This is correct! We just want to verify we don't crash, deadlock,
+				// or end up with multiple files (duplicate task).
+				_ = err
+			}
+		}
+
+		// Verify that the file exists in exactly one place (either open or claimed)
+		openExists := fileExists(filepath.Join(s.Root, "tasks", "open", claimed.filename))
+		claimedExists := fileExists(filepath.Join(s.Root, "tasks", "claimed", "bob", claimed.filename))
+
+		if openExists && claimedExists {
+			t.Fatal("task exists concurrently in both open and claimed folders (race condition caused duplicate task file)")
+		}
+		if !openExists && !claimedExists {
+			t.Fatal("task was lost during concurrent sweep and heartbeat")
+		}
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

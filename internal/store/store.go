@@ -244,12 +244,9 @@ func (s *Store) Ack(actor, msgID string, outcome any) (*Message, error) {
 			continue
 		}
 		if outcome != nil {
-			if msg.Payload == nil {
-				msg.Payload = map[string]any{}
-			}
-			msg.Payload["_ack_outcome"] = outcome
+			msg.Outcome = outcome
 		}
-		if err := writeJSON(src, msg); err != nil {
+		if err := s.writeJSONAtomic(src, msg); err != nil {
 			return nil, err
 		}
 		dst := filepath.Join(s.Root, actor, "cur", f)
@@ -371,8 +368,16 @@ func (s *Store) Claim(actor string, leaseTTL time.Duration, opts ClaimOptions) (
 					task.Owner = actor
 					task.ClaimedAt = &now
 					task.LeaseExpiresAt = &exp
-					if err := writeJSON(dst, task); err != nil {
-						return nil, err
+
+					tmpPath := filepath.Join(s.Root, "tmp", foundFile+".tmp-"+id())
+					if err := writeJSON(tmpPath, task); err != nil {
+						_ = os.Rename(dst, src)
+						return nil, fmt.Errorf("failed to write updated task: %w", err)
+					}
+					if err := os.Rename(tmpPath, dst); err != nil {
+						_ = os.Remove(tmpPath)
+						_ = os.Rename(dst, src)
+						return nil, fmt.Errorf("failed to rename updated task: %w", err)
 					}
 					task.filename = foundFile
 					return &task, nil
@@ -448,8 +453,16 @@ func (s *Store) Claim(actor string, leaseTTL time.Duration, opts ClaimOptions) (
 		task.Owner = actor
 		task.ClaimedAt = &now
 		task.LeaseExpiresAt = &exp
-		if err := writeJSON(dst, task); err != nil {
-			return nil, err
+
+		tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
+		if err := writeJSON(tmpPath, task); err != nil {
+			_ = os.Rename(dst, src)
+			return nil, fmt.Errorf("failed to write updated task: %w", err)
+		}
+		if err := os.Rename(tmpPath, dst); err != nil {
+			_ = os.Remove(tmpPath)
+			_ = os.Rename(dst, src)
+			return nil, fmt.Errorf("failed to rename updated task: %w", err)
 		}
 		task.filename = f
 		return &task, nil
@@ -462,31 +475,54 @@ func (s *Store) Complete(actor, taskID string, result any) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
+	if err := os.Rename(path, tmpPath); err != nil {
+		return nil, fmt.Errorf("task lease lost or not found: %w", err)
+	}
+
 	now := unixFloat(time.Now().UTC())
 	task.Status = "done"
 	task.Result = result
 	task.CompletedAt = &now
-	if err := writeJSON(path, task); err != nil {
+	if err := writeJSON(tmpPath, task); err != nil {
+		_ = os.Rename(tmpPath, path)
 		return nil, err
 	}
 	dst := filepath.Join(s.Root, "tasks", "done", f)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		_ = os.Rename(tmpPath, path)
 		return nil, err
 	}
-	if err := os.Rename(path, dst); err != nil {
+	if err := os.Rename(tmpPath, dst); err != nil {
+		_ = os.Rename(tmpPath, path)
 		return nil, err
 	}
 	return &task, nil
 }
 
 func (s *Store) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*Task, error) {
-	path, _, task, err := s.findClaimed(actor, taskID)
+	path, f, task, err := s.findClaimed(actor, taskID)
 	if err != nil {
 		return nil, err
 	}
+
+	tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
+	if err := os.Rename(path, tmpPath); err != nil {
+		return nil, fmt.Errorf("task lease lost or not found: %w", err)
+	}
+
 	exp := unixFloat(time.Now().UTC().Add(leaseTTL))
 	task.LeaseExpiresAt = &exp
-	return &task, writeJSON(path, task)
+	if err := writeJSON(tmpPath, task); err != nil {
+		_ = os.Rename(tmpPath, path)
+		return nil, err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Rename(tmpPath, path)
+		return nil, err
+	}
+	return &task, nil
 }
 
 func (s *Store) Abandon(actor, taskID, reason string) (*Task, error) {
@@ -494,6 +530,12 @@ func (s *Store) Abandon(actor, taskID, reason string) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	tmpPath := filepath.Join(s.Root, "tmp", f+".tmp-"+id())
+	if err := os.Rename(path, tmpPath); err != nil {
+		return nil, fmt.Errorf("task lease lost or not found: %w", err)
+	}
+
 	now := unixFloat(time.Now().UTC())
 	task.Status = "open"
 	task.Owner = ""
@@ -501,14 +543,17 @@ func (s *Store) Abandon(actor, taskID, reason string) (*Task, error) {
 	task.AbandonedAt = &now
 	task.AbandonedBy = actor
 	task.AbandonedReason = reason
-	if err := writeJSON(path, task); err != nil {
+	if err := writeJSON(tmpPath, task); err != nil {
+		_ = os.Rename(tmpPath, path)
 		return nil, err
 	}
 	dst := filepath.Join(s.Root, "tasks", "open", f)
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		_ = os.Rename(tmpPath, path)
 		return nil, err
 	}
-	if err := os.Rename(path, dst); err != nil {
+	if err := os.Rename(tmpPath, dst); err != nil {
+		_ = os.Rename(tmpPath, path)
 		return nil, err
 	}
 	return &task, nil
@@ -537,19 +582,22 @@ func (s *Store) Sweep() ([]Task, error) {
 			if err != nil || task.LeaseExpiresAt == nil || *task.LeaseExpiresAt > now {
 				continue
 			}
-			task.Status = "open"
-			task.SweptAt = &now
-			task.SweptFrom = actor
-			task.Owner = ""
-			task.LeaseExpiresAt = nil
-			if err := writeJSON(path, task); err != nil {
-				return out, err
-			}
 			dst := filepath.Join(s.Root, "tasks", "open", f)
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				return out, err
 			}
 			if err := os.Rename(path, dst); err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return out, err
+			}
+			task.Status = "open"
+			task.SweptAt = &now
+			task.SweptFrom = actor
+			task.Owner = ""
+			task.LeaseExpiresAt = nil
+			if err := s.writeJSONAtomic(dst, task); err != nil {
 				return out, err
 			}
 			out = append(out, task)
