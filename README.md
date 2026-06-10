@@ -49,6 +49,32 @@ Still future or incomplete:
 
 ## Developer quickstart
 
+Bootstrap a repo for a small fam of agents:
+
+```bash
+./bootstrap-botfam.sh /path/to/repo --agents agy,codex,claude
+```
+
+The bootstrap command is the one-shot setup path for day-to-day use. It:
+
+- locates `botfam` or builds it to `~/bin/botfam`;
+- runs `botfam setup <repo-name> --agents ...`;
+- creates sibling worktrees named `wt-<agent>` on branches `agent/<agent>`;
+- writes MCP config for generic, Claude, Codex, and `.agents`-style harnesses;
+- writes shared `AGENTS.md`/`CLAUDE.md` instructions when needed.
+
+The generated MCP configs do not set `COLLAB_ACTOR`. Agents identify themselves
+from the worktree name (`wt-codex` -> `codex`) or by passing `actor` on the first
+collab call. Restart any already-running harness after bootstrapping so it
+reloads MCP config.
+
+On macOS, the bootstrap signs a newly built `~/bin/botfam` with ad-hoc
+`codesign` when available. If you replace that binary manually, sign it again:
+
+```bash
+codesign --force --sign - ~/bin/botfam
+```
+
 Run tests with Go's default cache if your environment allows it:
 
 ```bash
