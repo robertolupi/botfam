@@ -153,3 +153,17 @@ Nothing prevents an actor from running git operations inside another actor's wor
 ### Mitigation
 - **Convention (now):** treat another actor's worktree as read-only. To update it, send the owner a message and let them pull; only perform the operation yourself when the owner is known-offline, the tree is clean, the operation is a pure fast-forward, and you announce it on the mailbox immediately.
 - **Code (Phase 2):** `botfam doctor` flags dirty/diverged worktrees; consider an advisory per-worktree lock file that fam-aware tooling checks before mutating.
+
+---
+
+## 14. Simultaneous Critique-Proposal Race
+
+### Problem
+When multiple agents collaborate asynchronously, an evaluator might post a review/critique inside the session while the author is simultaneously committing and proposing a new revision. If the timing overlaps closely, the author's proposal commit is generated without incorporating the evaluator's critique, leading to a mismatched revision loop where the feedback applies to the base revision but the new proposal is already submitted.
+
+This occurred on 2026-06-10 where `agy` posted an evaluation/critique on the session, but `codex` submitted the `bootstrap-botfam-88a726f` proposal commit almost simultaneously, meaning the critique's recommendation was not included in that commit despite the approval.
+
+### Mitigation
+- **Convention (now):** Evaluators should check the mailbox/session for any new proposals before finalizing critiques, and authors should check the session for pending reviews/comments immediately before running `git commit` and proposing.
+- **Code (Phase 2):** When a proposal is submitted, it registers the target commit. If critiques or evaluations are filed against that commit, they are pinned to it. Subsequent revision submissions invalidate/supersede the previous proposal and clear approval state, forcing a clean re-eval.
+
