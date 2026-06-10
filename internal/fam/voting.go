@@ -41,6 +41,78 @@ func sendDaemonRequest(ctx context.Context, endpoint string, reqPayload any, res
 		return err
 	}
 
+	if endpoint == "vote" {
+		conn, err := net.Dial("unix", udsPath)
+		if err != nil {
+			return fmt.Errorf("error dialing UDS daemon: %w", err)
+		}
+		defer conn.Close()
+
+		bodyBytes, err := json.Marshal(reqPayload)
+		if err != nil {
+			return err
+		}
+
+		reqStr := fmt.Sprintf("POST /%s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n%s",
+			endpoint, len(bodyBytes), string(bodyBytes))
+		_, err = conn.Write([]byte(reqStr))
+		if err != nil {
+			return fmt.Errorf("failed to write request: %w", err)
+		}
+
+		respBuf := make([]byte, 1024)
+		n, err := conn.Read(respBuf)
+		if err != nil {
+			return fmt.Errorf("failed to read response from daemon: %w", err)
+		}
+		respStr := string(respBuf[:n])
+
+		if !strings.Contains(respStr, "200 OK") {
+			// Try to extract error
+			parts := strings.SplitN(respStr, "\r\n\r\n", 2)
+			if len(parts) == 2 {
+				var errResp struct {
+					Error string `json:"error"`
+				}
+				if json.Unmarshal([]byte(parts[1]), &errResp) == nil && errResp.Error != "" {
+					return errors.New(errResp.Error)
+				}
+			}
+			return fmt.Errorf("daemon endpoint %q returned error: %s", endpoint, respStr)
+		}
+
+		if respVal != nil {
+			parts := strings.SplitN(respStr, "\r\n\r\n", 2)
+			if len(parts) == 2 {
+				if err := json.Unmarshal([]byte(parts[1]), respVal); err != nil {
+					return fmt.Errorf("failed to decode response body: %w", err)
+				}
+			}
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			buf := make([]byte, 1024)
+			for {
+				_, err := conn.Read(buf)
+				if err != nil {
+					done <- err
+					return
+				}
+			}
+		}()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-done:
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			DialContext: func(dialCtx context.Context, _, _ string) (net.Conn, error) {
@@ -83,6 +155,7 @@ func sendDaemonRequest(ctx context.Context, endpoint string, reqPayload any, res
 			return fmt.Errorf("failed to decode daemon response: %w", err)
 		}
 	}
+
 	return nil
 }
 
@@ -404,31 +477,24 @@ func ApproveCmd(args []string, out io.Writer) error {
 		return fmt.Errorf("no active proposal found for id %q; cannot approve", proposalID)
 	}
 
-	bodyMap := map[string]any{
-		"type":        "ccrep:evaluation",
+	payload := map[string]any{
+		"work_dir":    info.Root,
+		"actor":       actor,
 		"proposal_id": proposalID,
-		"commit_sha":  tallyResult.LatestSHA,
 		"verdict":     verdict,
-		"reviewer":    actor,
+		"commit_sha":  tallyResult.LatestSHA,
 	}
 
-	bodyBytes, err := json.Marshal(bodyMap)
-	if err != nil {
+	fmt.Fprintf(out, "Casting approval %q on proposal %q (commit %s) as actor %q...\n", verdict, proposalID, tallyResult.LatestSHA, actor)
+
+	var result struct {
+		Status string `json:"status"`
+	}
+	if err := sendDaemonRequest(context.Background(), "vote", payload, &result); err != nil {
 		return err
 	}
 
-	appendPayload := map[string]any{
-		"work_dir": info.Root,
-		"actor":    actor,
-		"session":  proposalID,
-		"body":     string(bodyBytes),
-	}
-
-	if err := sendDaemonRequest(context.Background(), "session_append", appendPayload, nil); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(out, "Approved commit %s for proposal %q as actor %q\n", tallyResult.LatestSHA, proposalID, actor)
+	fmt.Fprintf(out, "Approval connection released: status %s\n", result.Status)
 	return nil
 }
 

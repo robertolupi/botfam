@@ -32,7 +32,7 @@ type RootInfo struct {
 func (r Resolver) Resolve() (RootInfo, error) {
 	var parsedActor string
 	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
-		parsedActor = parseActor(filepath.Base(absDir))
+		parsedActor = ParseActor(filepath.Base(absDir))
 	}
 
 	if envActor := getenv(r.Env, "COLLAB_ACTOR"); parsedActor != "" && envActor != "" && envActor != parsedActor {
@@ -76,11 +76,11 @@ func (r Resolver) Resolve() (RootInfo, error) {
 	}, nil
 }
 
-// parseActor derives an actor name from a worktree directory basename per
+// ParseActor derives an actor name from a worktree directory basename per
 // doc/collab/PROTOCOL.md §1: the actor is the basename with a leading "wt-"
 // or "botfam-" prefix stripped. Basenames without one of those prefixes yield
 // no actor (fail closed); callers fall back to their existing "no actor" paths.
-func parseActor(base string) string {
+func ParseActor(base string) string {
 	var actor string
 	switch {
 	case strings.HasPrefix(base, "wt-"):

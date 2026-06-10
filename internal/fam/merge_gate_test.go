@@ -343,7 +343,7 @@ func TestMergeGateSessionSourcedEvents(t *testing.T) {
 	proposalID := "prop-session"
 	commit1 := "commit-1111111111111111111111111111111111111111"
 
-	if err := st.SessionNew(proposalID, []string{"alice", "bob"}, "alice"); err != nil {
+	if err := st.SessionNew(proposalID, []string{"alice", "bob"}, "alice", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	aliceLock, err := st.LockActor("alice")

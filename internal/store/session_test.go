@@ -15,12 +15,12 @@ func TestSessionLifecycle(t *testing.T) {
 	// 1. Session New
 	slug := "test-session"
 	participants := []string{"alice", "bob"}
-	if err := s.SessionNew(slug, participants, "operator"); err != nil {
+	if err := s.SessionNew(slug, participants, "operator", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// 2. Duplicate Session New fails
-	if err := s.SessionNew(slug, participants, "operator"); err == nil {
+	if err := s.SessionNew(slug, participants, "operator", "", nil, nil); err == nil {
 		t.Fatal("expected error creating duplicate session")
 	}
 
@@ -151,7 +151,7 @@ func TestSessionTornLineTolerant(t *testing.T) {
 	s := New(temp)
 
 	slug := "torn-session"
-	if err := s.SessionNew(slug, []string{"alice"}, "operator"); err != nil {
+	if err := s.SessionNew(slug, []string{"alice"}, "operator", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,7 +203,7 @@ func TestSessionAppendValidation(t *testing.T) {
 	s := New(temp)
 
 	slug := "val-session"
-	if err := s.SessionNew(slug, []string{"alice"}, "operator"); err != nil {
+	if err := s.SessionNew(slug, []string{"alice"}, "operator", "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 

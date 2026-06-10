@@ -19,6 +19,7 @@ func newTestServer(t *testing.T) (*server, string) {
 	t.Setenv("COLLAB_ROOT", root)
 	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_LOCK_ACTOR", "")
+	t.Setenv("BOTFAM_TESTING", "1")
 
 	// Use scratch directory to ensure socket path is short (Darwin 104 char limit)
 	absScratch, err := filepath.Abs("../../scratch")

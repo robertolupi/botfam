@@ -38,8 +38,8 @@ func TestParseActor(t *testing.T) {
 		{"wt-bad.name", ""}, // remainder fails the store name validator
 	}
 	for _, tc := range cases {
-		if got := parseActor(tc.base); got != tc.want {
-			t.Errorf("parseActor(%q) = %q, want %q", tc.base, got, tc.want)
+		if got := ParseActor(tc.base); got != tc.want {
+			t.Errorf("ParseActor(%q) = %q, want %q", tc.base, got, tc.want)
 		}
 	}
 }

@@ -43,7 +43,7 @@ func SessionCmd(args []string, out io.Writer) error {
 
 func printSessionHelp(out io.Writer) error {
 	fmt.Fprint(out, `Usage:
-  botfam session new <slug> [--participants a,b]
+  botfam session new <slug> [--participants a,b] [--rule consensus|majority|all|any] [--goals g1,g2] [--guardrails r1,r2]
   botfam session list
   botfam session render <slug>
   botfam session close <slug>
@@ -53,10 +53,13 @@ func printSessionHelp(out io.Writer) error {
 
 func sessionNew(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: botfam session new <slug> [--participants a,b]")
+		return errors.New("usage: botfam session new <slug> [--participants a,b] [--rule <rule>] [--goals <goals>] [--guardrails <guardrails>]")
 	}
 	slug := args[0]
 	participants := []string{}
+	rule := ""
+	goals := []string{}
+	guardrails := []string{}
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		if strings.HasPrefix(arg, "--participants=") {
@@ -67,6 +70,30 @@ func sessionNew(args []string, out io.Writer) error {
 				return errors.New("--participants requires a value")
 			}
 			participants = splitCSV(args[i])
+		} else if strings.HasPrefix(arg, "--rule=") {
+			rule = strings.TrimPrefix(arg, "--rule=")
+		} else if arg == "--rule" {
+			i++
+			if i >= len(args) {
+				return errors.New("--rule requires a value")
+			}
+			rule = args[i]
+		} else if strings.HasPrefix(arg, "--goals=") {
+			goals = splitCSV(strings.TrimPrefix(arg, "--goals="))
+		} else if arg == "--goals" {
+			i++
+			if i >= len(args) {
+				return errors.New("--goals requires a value")
+			}
+			goals = splitCSV(args[i])
+		} else if strings.HasPrefix(arg, "--guardrails=") {
+			guardrails = splitCSV(strings.TrimPrefix(arg, "--guardrails="))
+		} else if arg == "--guardrails" {
+			i++
+			if i >= len(args) {
+				return errors.New("--guardrails requires a value")
+			}
+			guardrails = splitCSV(args[i])
 		} else {
 			return fmt.Errorf("unknown argument %q", arg)
 		}
@@ -89,7 +116,7 @@ func sessionNew(args []string, out io.Writer) error {
 		creator = "operator"
 	}
 
-	if err := st.SessionNew(slug, participants, creator); err != nil {
+	if err := st.SessionNew(slug, participants, creator, rule, goals, guardrails); err != nil {
 		return err
 	}
 

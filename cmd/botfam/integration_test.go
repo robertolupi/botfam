@@ -1110,3 +1110,374 @@ func buildBotfam(t *testing.T, binPath string) {
 	}
 }
 
+func setupTestRepoAndWorktrees(t *testing.T, gitDir string, agents []string) {
+	t.Helper()
+	os.MkdirAll(gitDir, 0755)
+	initGitRepo(t, gitDir)
+	for _, agent := range agents {
+		cmd := exec.Command("git", "worktree", "add", "wt-"+agent)
+		cmd.Dir = gitDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("failed to create worktree wt-%s: %v, output: %s", agent, err, string(out))
+		}
+	}
+}
+
+func TestIntegrationSustainedVoteLiveness(t *testing.T) {
+	t.Setenv("BOTFAM_TESTING", "")
+
+	root := t.TempDir()
+	binPath := filepath.Join(root, "botfam")
+	buildBotfam(t, binPath)
+
+	gitDir := filepath.Join(root, "myrepo")
+	setupTestRepoAndWorktrees(t, gitDir, []string{"alice", "bob"})
+	aliceWT := filepath.Join(gitDir, "wt-alice")
+
+	udsPath := filepath.Join("/tmp", fmt.Sprintf("bf-int-s1-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(udsPath)
+	t.Cleanup(func() { _ = os.Remove(udsPath) })
+	srv := server.NewServer(udsPath, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+
+	var dialErr error
+	for i := 0; i < 50; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err := net.Dial("unix", udsPath)
+		if err == nil {
+			conn.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		t.Fatalf("failed to start UDS server: %v", dialErr)
+	}
+
+	cmdNew := exec.Command(binPath, "session", "new", "prop1", "--participants", "alice,bob")
+	cmdNew.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdNew.Dir = gitDir
+	if err := cmdNew.Run(); err != nil {
+		t.Fatalf("session new failed: %v", err)
+	}
+
+	bobWT := filepath.Join(gitDir, "wt-bob")
+	cmdProp := exec.Command(binPath, "propose", "--proposal", "prop1", "--quorum", "majority")
+	cmdProp.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=bob")
+	cmdProp.Dir = bobWT
+	if err := cmdProp.Run(); err != nil {
+		t.Fatalf("propose failed: %v", err)
+	}
+
+	cmdVote := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "approve")
+	cmdVote.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=alice")
+	cmdVote.Dir = aliceWT
+	var voteOut bytes.Buffer
+	cmdVote.Stdout = &voteOut
+	cmdVote.Stderr = &voteOut
+
+	if err := cmdVote.Start(); err != nil {
+		t.Fatalf("failed to start vote cmd: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	cmdTally := exec.Command(binPath, "tally", "--proposal", "prop1")
+	cmdTally.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdTally.Dir = gitDir
+	tallyBytes, err := cmdTally.Output()
+	if err != nil {
+		t.Fatalf("tally failed: %v, output: %s", err, string(tallyBytes))
+	}
+	tallyStr := string(tallyBytes)
+	if !strings.Contains(tallyStr, "alice: approve") {
+		t.Fatalf("expected alice's approval in tally, got:\n%s", tallyStr)
+	}
+
+	_ = cmdVote.Process.Kill()
+	_ = cmdVote.Wait()
+
+	time.Sleep(300 * time.Millisecond)
+
+	cmdTally2 := exec.Command(binPath, "tally", "--proposal", "prop1")
+	cmdTally2.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdTally2.Dir = gitDir
+	tallyBytes2, err := cmdTally2.Output()
+	if err != nil {
+		t.Fatalf("tally failed: %v", err)
+	}
+	tallyStr2 := string(tallyBytes2)
+	if strings.Contains(tallyStr2, "alice: approve") {
+		t.Fatalf("expected alice's approval to be withdrawn, but still present in tally:\n%s", tallyStr2)
+	}
+}
+
+func TestIntegrationReconnectReplacement(t *testing.T) {
+	t.Setenv("BOTFAM_TESTING", "")
+
+	root := t.TempDir()
+	binPath := filepath.Join(root, "botfam")
+	buildBotfam(t, binPath)
+
+	gitDir := filepath.Join(root, "myrepo")
+	setupTestRepoAndWorktrees(t, gitDir, []string{"alice", "bob"})
+	aliceWT := filepath.Join(gitDir, "wt-alice")
+
+	udsPath := filepath.Join("/tmp", fmt.Sprintf("bf-int-s2-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(udsPath)
+	t.Cleanup(func() { _ = os.Remove(udsPath) })
+	srv := server.NewServer(udsPath, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+
+	var dialErr error
+	for i := 0; i < 50; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err := net.Dial("unix", udsPath)
+		if err == nil {
+			conn.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		t.Fatalf("failed to start UDS server: %v", dialErr)
+	}
+
+	cmdNew := exec.Command(binPath, "session", "new", "prop1", "--participants", "alice,bob")
+	cmdNew.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdNew.Dir = gitDir
+	if err := cmdNew.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	bobWT := filepath.Join(gitDir, "wt-bob")
+	cmdProp := exec.Command(binPath, "propose", "--proposal", "prop1", "--quorum", "majority")
+	cmdProp.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=bob")
+	cmdProp.Dir = bobWT
+	if err := cmdProp.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmdVote1 := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "approve")
+	cmdVote1.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=alice")
+	cmdVote1.Dir = aliceWT
+	var vote1Out bytes.Buffer
+	cmdVote1.Stdout = &vote1Out
+	cmdVote1.Stderr = &vote1Out
+	if err := cmdVote1.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmdVote1.Process.Kill()
+
+	time.Sleep(300 * time.Millisecond)
+
+	cmdTally1 := exec.Command(binPath, "tally", "--proposal", "prop1")
+	cmdTally1.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdTally1.Dir = gitDir
+	tally1, err := cmdTally1.Output()
+	if err != nil {
+		t.Fatalf("tally failed: %v, output: %s\nVote1 Output:\n%s", err, string(tally1), vote1Out.String())
+	}
+	if !strings.Contains(string(tally1), "alice: approve") {
+		t.Fatalf("expected alice: approve, got:\n%s\nVote1 Output:\n%s", string(tally1), vote1Out.String())
+	}
+
+	cmdVote2 := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "reject")
+	cmdVote2.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=alice")
+	cmdVote2.Dir = aliceWT
+	var vote2Out bytes.Buffer
+	cmdVote2.Stdout = &vote2Out
+	cmdVote2.Stderr = &vote2Out
+	if err := cmdVote2.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmdVote2.Process.Kill()
+
+	waitErr := make(chan error, 1)
+	go func() {
+		waitErr <- cmdVote1.Wait()
+	}()
+
+	select {
+	case <-waitErr:
+		// First process terminated
+	case <-time.After(2 * time.Second):
+		t.Fatalf("first vote process did not terminate after reconnect replacement. Vote1 Output:\n%s\nVote2 Output:\n%s", vote1Out.String(), vote2Out.String())
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	cmdTally2 := exec.Command(binPath, "tally", "--proposal", "prop1")
+	cmdTally2.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdTally2.Dir = gitDir
+	tally2, err := cmdTally2.Output()
+	if err != nil {
+		t.Fatalf("second tally failed: %v, output: %s\nVote2 Output:\n%s", err, string(tally2), vote2Out.String())
+	}
+	if !strings.Contains(string(tally2), "alice: reject") {
+		t.Fatalf("expected tally to update to reject, got:\n%s\nVote2 Output:\n%s", string(tally2), vote2Out.String())
+	}
+}
+
+func TestIntegrationAncestrySpoofing(t *testing.T) {
+	t.Setenv("BOTFAM_TESTING", "")
+
+	root := t.TempDir()
+	binPath := filepath.Join(root, "botfam")
+	buildBotfam(t, binPath)
+
+	gitDir := filepath.Join(root, "myrepo")
+	setupTestRepoAndWorktrees(t, gitDir, []string{"alice", "bob"})
+
+	udsPath := filepath.Join("/tmp", fmt.Sprintf("bf-int-s3-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(udsPath)
+	t.Cleanup(func() { _ = os.Remove(udsPath) })
+	srv := server.NewServer(udsPath, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+
+	var dialErr error
+	for i := 0; i < 50; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err := net.Dial("unix", udsPath)
+		if err == nil {
+			conn.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		t.Fatalf("failed to start UDS server: %v", dialErr)
+	}
+
+	cmdNew := exec.Command(binPath, "session", "new", "prop1", "--participants", "alice,bob")
+	cmdNew.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdNew.Dir = gitDir
+	_ = cmdNew.Run()
+
+	cmdProp := exec.Command(binPath, "propose", "--proposal", "prop1", "--quorum", "majority")
+	cmdProp.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=bob")
+	cmdProp.Dir = gitDir
+	_ = cmdProp.Run()
+
+	cmdVote := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "approve")
+	cmdVote.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=bob")
+	cmdVote.Dir = gitDir
+	output, err := cmdVote.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected spoofed vote to fail, but succeeded with output: %s", string(output))
+	}
+	if !strings.Contains(string(output), "actor-worktree mismatch") {
+		t.Fatalf("expected actor-worktree mismatch error, got: %s", string(output))
+	}
+}
+
+func TestIntegrationSessionConstitution(t *testing.T) {
+	t.Setenv("BOTFAM_TESTING", "")
+
+	root := t.TempDir()
+	binPath := filepath.Join(root, "botfam")
+	buildBotfam(t, binPath)
+
+	gitDir := filepath.Join(root, "myrepo")
+	setupTestRepoAndWorktrees(t, gitDir, []string{"alice", "bob", "charlie"})
+	aliceWT := filepath.Join(gitDir, "wt-alice")
+	charlieWT := filepath.Join(gitDir, "wt-charlie")
+
+	udsPath := filepath.Join("/tmp", fmt.Sprintf("bf-int-s4-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(udsPath)
+	t.Cleanup(func() { _ = os.Remove(udsPath) })
+	srv := server.NewServer(udsPath, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+
+	var dialErr error
+	for i := 0; i < 50; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err := net.Dial("unix", udsPath)
+		if err == nil {
+			conn.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		t.Fatalf("failed to start UDS server: %v", dialErr)
+	}
+
+	cmdNew := exec.Command(binPath, "session", "new", "prop1", "--participants", "alice,bob,charlie", "--rule", "consensus")
+	cmdNew.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdNew.Dir = gitDir
+	if err := cmdNew.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	bobWT := filepath.Join(gitDir, "wt-bob")
+	cmdProp := exec.Command(binPath, "propose", "--proposal", "prop1", "--quorum", "consensus")
+	cmdProp.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=bob")
+	cmdProp.Dir = bobWT
+	if err := cmdProp.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	cmdVoteAlice := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "approve")
+	cmdVoteAlice.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=alice")
+	cmdVoteAlice.Dir = aliceWT
+	if err := cmdVoteAlice.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmdVoteAlice.Process.Kill()
+
+	time.Sleep(300 * time.Millisecond)
+
+	cmdTally := exec.Command(binPath, "tally", "--proposal", "prop1")
+	cmdTally.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdTally.Dir = gitDir
+	tally1, err := cmdTally.Output()
+	if err != nil {
+		t.Fatalf("tally failed: %v, output: %s", err, string(tally1))
+	}
+	if !strings.Contains(string(tally1), "Status:        MET") {
+		t.Fatalf("expected Status: MET with consensus rule, got:\n%s", string(tally1))
+	}
+
+	cmdVoteCharlie := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "reject")
+	cmdVoteCharlie.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=charlie")
+	cmdVoteCharlie.Dir = charlieWT
+	if err := cmdVoteCharlie.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmdVoteCharlie.Process.Kill()
+
+	time.Sleep(300 * time.Millisecond)
+
+	cmdTally2 := exec.Command(binPath, "tally", "--proposal", "prop1")
+	cmdTally2.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
+	cmdTally2.Dir = gitDir
+	tally2, err := cmdTally2.Output()
+	if err != nil {
+		t.Fatalf("second tally failed: %v, output: %s", err, string(tally2))
+	}
+	if !strings.Contains(string(tally2), "Status:        BLOCKED") {
+		t.Fatalf("expected Status: BLOCKED after charlie rejects, got:\n%s", string(tally2))
+	}
+}
+

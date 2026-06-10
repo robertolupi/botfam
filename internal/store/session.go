@@ -19,6 +19,9 @@ type SessionMeta struct {
 	Participants []string `json:"participants"`
 	CreatedBy    string   `json:"created_by"`
 	CreatedAt    float64  `json:"created_at"`
+	DecisionRule string   `json:"decision_rule,omitempty"`
+	Goals        []string `json:"goals,omitempty"`
+	Guardrails   []string `json:"guardrails,omitempty"`
 }
 
 type SessionHandoff struct {
@@ -36,7 +39,7 @@ type SessionEntry struct {
 }
 
 // SessionNew initializes a new session directory and writes meta.json.
-func (s *Store) SessionNew(slug string, participants []string, creator string) error {
+func (s *Store) SessionNew(slug string, participants []string, creator string, decisionRule string, goals []string, guardrails []string) error {
 	if err := ValidateName("session slug", slug); err != nil {
 		return err
 	}
@@ -58,6 +61,9 @@ func (s *Store) SessionNew(slug string, participants []string, creator string) e
 		Participants: participants,
 		CreatedBy:    creator,
 		CreatedAt:    unixFloat(time.Now().UTC()),
+		DecisionRule: decisionRule,
+		Goals:        goals,
+		Guardrails:   guardrails,
 	}
 	b, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {

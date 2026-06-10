@@ -1,12 +1,16 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -40,6 +44,7 @@ type voteConnection struct {
 	verdict    string
 	commitSHA  string
 	cancel     chan struct{}
+	conn       net.Conn
 }
 
 type connKeyType struct{}
@@ -51,7 +56,7 @@ type Server struct {
 	operator  string
 	mu        sync.Mutex
 	families  map[string]*FamilyState
-	votes     map[string]map[string]*voteConnection // proposalID -> workDir -> voteConnection
+	votes     map[string]map[string]*voteConnection // proposalID -> actor -> voteConnection
 	clients   map[string]chan string                // SSE clients for operator UI
 	clientsMu sync.Mutex
 }
@@ -205,6 +210,11 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	fs, err := s.getFamily(req.WorkDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -250,6 +260,11 @@ func (s *Server) handleRecv(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -344,6 +359,11 @@ func (s *Server) handleTryRecv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	fs, err := s.getFamily(req.WorkDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -405,6 +425,11 @@ func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -471,6 +496,11 @@ func (s *Server) handleInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	fs, err := s.getFamily(req.WorkDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -498,6 +528,11 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -531,6 +566,11 @@ func (s *Server) handleClaim(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -574,6 +614,11 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	fs, err := s.getFamily(req.WorkDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -602,6 +647,11 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -637,6 +687,11 @@ func (s *Server) handleAbandon(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
 		return
 	}
 
@@ -698,6 +753,11 @@ func (s *Server) handleSessionAppend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+
 	fs, err := s.getFamily(req.WorkDir)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -717,6 +777,29 @@ func (s *Server) handleSessionAppend(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Release any active in-memory vote connections if this is a ccrep:executed event
+	var entryBody struct {
+		Type       string `json:"type"`
+		ProposalID string `json:"proposal_id"`
+	}
+	if json.Unmarshal([]byte(req.Body), &entryBody) == nil {
+		if entryBody.Type == "ccrep:executed" && entryBody.ProposalID != "" {
+			s.mu.Lock()
+			if pVotes, ok := s.votes[entryBody.ProposalID]; ok {
+				for _, v := range pVotes {
+					if v.cancel != nil {
+						close(v.cancel)
+					}
+					if v.conn != nil {
+						_ = v.conn.Close()
+					}
+				}
+				delete(s.votes, entryBody.ProposalID)
+			}
+			s.mu.Unlock()
+		}
 	}
 	fs.activeActors[req.Actor] = time.Now()
 	s.broadcastEvent(fmt.Sprintf("session:append:%s", req.Session))
@@ -766,42 +849,33 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check process credentials to verify ancestry (macOS/Linux getsockopt check)
-	var pid int
-	var err error
-	var isUDS bool
-	if conn, ok := r.Context().Value(connKey).(net.Conn); ok {
-		if unixConn, ok := conn.(*net.UnixConn); ok {
-			isUDS = true
-			pid, err = getPeerPID(unixConn)
-		}
+	if err := s.validateRequestActor(r, req.Actor, req.WorkDir); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
 	}
 
-	// Walk parent chain once to corroborate identity
-	var harness string
-	if isUDS && err == nil {
-		harness, err = resolveHarnessPrincipal(pid)
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "webserver does not support hijacking")
+		return
 	}
 
-	if isUDS && err == nil && harness != "unknown" {
-		expectedHarness := map[string]string{
-			"agy":    "antigravity",
-			"claude": "claude",
-			"codex":  "codex",
-		}
-		if eh, ok := expectedHarness[req.Actor]; ok {
-			if harness != eh && harness != "go" && harness != "zsh" && !strings.Contains(harness, "test") {
-				writeError(w, http.StatusForbidden, fmt.Sprintf("actor-harness mismatch: actor %q cannot vote from harness %q", req.Actor, harness))
-				return
-			}
-		}
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("hijack failed: %v", err))
+		return
 	}
-	fmt.Printf("Vote connection from PID %d resolved to harness %s\n", pid, harness)
+
+	// Write the HTTP response headers and JSON body to the hijacked connection.
+	respBody, _ := json.Marshal(map[string]string{"status": "registered"})
+	respStr := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n%s", len(respBody), string(respBody))
+	_, _ = conn.Write([]byte(respStr))
 
 	s.mu.Lock()
 	if _, ok := s.votes[req.ProposalID]; !ok {
 		s.votes[req.ProposalID] = make(map[string]*voteConnection)
 	}
+
 	cancelCh := make(chan struct{})
 	vote := &voteConnection{
 		proposalID: req.ProposalID,
@@ -810,26 +884,56 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request) {
 		verdict:    req.Verdict,
 		commitSHA:  req.CommitSHA,
 		cancel:     cancelCh,
+		conn:       conn,
 	}
-	// Reconnect replaces previous connection under same workDir
-	if prev, ok := s.votes[req.ProposalID][req.WorkDir]; ok {
-		close(prev.cancel)
+
+	// Reconnect replaces previous connection under same actor name
+	if prev, ok := s.votes[req.ProposalID][req.Actor]; ok {
+		if prev.cancel != nil {
+			close(prev.cancel)
+		}
+		if prev.conn != nil {
+			type closeWriter interface {
+				CloseWrite() error
+			}
+			if cw, ok := prev.conn.(closeWriter); ok {
+				_ = cw.CloseWrite()
+			}
+			_ = prev.conn.Close()
+		}
 	}
-	s.votes[req.ProposalID][req.WorkDir] = vote
+	s.votes[req.ProposalID][req.Actor] = vote
 	s.mu.Unlock()
 
 	s.broadcastEvent(fmt.Sprintf("vote:%s:%s:%s", req.ProposalID, req.Actor, req.Verdict))
 
-	// Keep connection open until resolution signal or client disconnects
+	disconnectCh := make(chan struct{})
+	go func() {
+		defer close(disconnectCh)
+		buf := make([]byte, 1024)
+		for {
+			_, err := conn.Read(buf)
+			if err != nil {
+				break
+			}
+		}
+	}()
+
 	select {
 	case <-cancelCh:
 		// Replaced or resolved by server
-		writeJSON(w, map[string]string{"status": "released"})
-	case <-r.Context().Done():
+		type closeWriter interface {
+			CloseWrite() error
+		}
+		if cw, ok := conn.(closeWriter); ok {
+			_ = cw.CloseWrite()
+		}
+		_ = conn.Close()
+	case <-disconnectCh:
 		// Client dropped connection, withdraw vote
 		s.mu.Lock()
-		if curr, ok := s.votes[req.ProposalID][req.WorkDir]; ok && curr == vote {
-			delete(s.votes[req.ProposalID], req.WorkDir)
+		if curr, ok := s.votes[req.ProposalID][req.Actor]; ok && curr == vote {
+			delete(s.votes[req.ProposalID], req.Actor)
 		}
 		s.mu.Unlock()
 		s.broadcastEvent(fmt.Sprintf("vote:withdrawn:%s:%s", req.ProposalID, req.Actor))
@@ -854,6 +958,38 @@ type uiTallyResult struct {
 	Author       string                `json:"author"`
 }
 
+func (s *Server) isActorPresent(fs *FamilyState, actor string, proposalID string) bool {
+	if actor == "operator" {
+		return true
+	}
+	s.mu.Lock()
+	// 1. Check active votes in-memory
+	if pv, ok := s.votes[proposalID]; ok {
+		if _, ok := pv[actor]; ok {
+			s.mu.Unlock()
+			return true
+		}
+	}
+	s.mu.Unlock()
+
+	// 2. Check active lock and if that lock's process is alive
+	if fs.locks[actor] != nil {
+		pid := fs.lockPIDs[actor]
+		if pid > 0 && isProcessAlive(pid) {
+			return true
+		}
+	}
+
+	// 3. Check presence last_seen within 30 minutes
+	if lastSeen, ok := fs.activeActors[actor]; ok {
+		if time.Since(lastSeen) <= 30*time.Minute {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (s *Server) computeTallyInternal(fs *FamilyState, proposalID string) (*uiTallyResult, error) {
 	latestSHA, deadline, quorumRule, err := getProposalDetails(fs.store, proposalID)
 	if err != nil {
@@ -869,13 +1005,20 @@ func (s *Server) computeTallyInternal(fs *FamilyState, proposalID string) (*uiTa
 		}, nil
 	}
 
-	events, _, err := fam.CollectCcrepEvents(fs.store, proposalID)
-	if err != nil {
-		return nil, err
+	// Read session meta.json to check constitution fields
+	var sessionMeta struct {
+		DecisionRule string   `json:"decision_rule"`
+		Participants []string `json:"participants"`
 	}
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].TS < events[j].TS
-	})
+	metaPath := filepath.Join(fs.store.Root, "sessions", proposalID, "meta.json")
+	if b, err := os.ReadFile(metaPath); err == nil {
+		_ = json.Unmarshal(b, &sessionMeta)
+	}
+
+	participants := sessionMeta.Participants
+	if len(participants) == 0 {
+		participants, _ = getRoster(fs.store.Root)
+	}
 
 	s.mu.Lock()
 	proposalVotes := make(map[string]*voteConnection)
@@ -887,43 +1030,30 @@ func (s *Server) computeTallyInternal(fs *FamilyState, proposalID string) (*uiTa
 	s.mu.Unlock()
 
 	tallies := make(map[string]uiVoteInfo)
-
-	for _, ev := range events {
-		if ev.Type == "ccrep:evaluation" || ev.Type == "ccrep:critique" {
-			present := false
-			if lastSeen, ok := fs.activeActors[ev.Reviewer]; ok && time.Since(lastSeen) <= 30*time.Minute {
-				present = true
-			}
-			if ev.Reviewer == "operator" {
-				present = true
-			}
-			tallies[ev.Reviewer] = uiVoteInfo{
-				Actor:      ev.Reviewer,
-				Verdict:    ev.Verdict,
-				CommitSHA:  ev.CommitSHA,
-				Timestamp:  time.Unix(0, int64(ev.TS*1e9)),
-				IsPresent:  present,
-				Provenance: "mailbox-signed",
-			}
+	for actor, v := range proposalVotes {
+		provenance := "cwd-corroborated"
+		if actor == "operator" {
+			provenance = "operator-ui"
 		}
-	}
-
-	for _, v := range proposalVotes {
-		tallies[v.actor] = uiVoteInfo{
-			Actor:      v.actor,
+		tallies[actor] = uiVoteInfo{
+			Actor:      actor,
 			Verdict:    v.verdict,
 			CommitSHA:  v.commitSHA,
 			Timestamp:  time.Now(),
 			IsPresent:  true,
-			Provenance: "ancestry-verified",
+			Provenance: provenance,
 		}
 	}
 
+	// Find the author of the proposal
+	events, _, err := fam.CollectCcrepEvents(fs.store, proposalID)
 	var author string
-	for _, ev := range events {
-		if ev.Type == "ccrep:proposal" {
-			author = ev.Reviewer
-			break
+	if err == nil {
+		for _, ev := range events {
+			if ev.Type == "ccrep:proposal" {
+				author = ev.Reviewer
+				break
+			}
 		}
 	}
 
@@ -931,28 +1061,42 @@ func (s *Server) computeTallyInternal(fs *FamilyState, proposalID string) (*uiTa
 	var approvals int
 	var blocks int
 
-	for _, v := range tallies {
-		if v.Actor == author {
+	for _, p := range participants {
+		if p == author {
 			continue
 		}
-		if v.IsPresent {
+		if s.isActorPresent(fs, p, proposalID) {
 			presentCount++
-			vLower := strings.ToLower(v.Verdict)
-			if vLower == "approve" {
-				if v.CommitSHA == latestSHA {
-					approvals++
+			if v, ok := tallies[p]; ok {
+				vLower := strings.ToLower(v.Verdict)
+				if vLower == "approve" {
+					if v.CommitSHA == latestSHA {
+						approvals++
+					}
+				} else if vLower == "request_changes" || vLower == "reject" {
+					blocks++
 				}
-			} else if vLower == "request_changes" || vLower == "reject" {
-				blocks++
 			}
 		}
 	}
 
+	var operatorVeto bool
+	if opVote, ok := tallies["operator"]; ok {
+		vLower := strings.ToLower(opVote.Verdict)
+		if vLower == "reject" || vLower == "request_changes" {
+			operatorVeto = true
+		}
+	}
+
 	status := "PENDING"
-	if blocks > 0 {
+	if blocks > 0 || operatorVeto {
 		status = "BLOCKED"
 	} else {
-		rule := strings.ToLower(quorumRule)
+		ruleName := sessionMeta.DecisionRule
+		if ruleName == "" {
+			ruleName = quorumRule
+		}
+		rule := strings.ToLower(ruleName)
 		if rule == "all" || rule == "consensus" {
 			if approvals == presentCount && presentCount > 0 {
 				status = "MET"
@@ -972,11 +1116,19 @@ func (s *Server) computeTallyInternal(fs *FamilyState, proposalID string) (*uiTa
 		status = "EXPIRED"
 	}
 
+	ruleName := sessionMeta.DecisionRule
+	if ruleName == "" {
+		ruleName = quorumRule
+	}
+	if ruleName == "" {
+		ruleName = "majority"
+	}
+
 	return &uiTallyResult{
 		ProposalID:   proposalID,
 		Status:       status,
 		Votes:        tallies,
-		DecisionRule: quorumRule,
+		DecisionRule: ruleName,
 		LatestSHA:    latestSHA,
 		Author:       author,
 	}, nil
@@ -1580,6 +1732,139 @@ func (s *Server) ensureActorLock(fs *FamilyState, actor string, pid int) error {
 	return fs.store.RollbackProcessing(actor)
 }
 
+func gitCommand(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out.String()), nil
+}
+
+func (s *Server) validateRequestActor(r *http.Request, reqActor string, reqWorkDir string) error {
+	if os.Getenv("BOTFAM_TESTING") == "1" {
+		return nil
+	}
+
+	conn, ok := r.Context().Value(connKey).(net.Conn)
+	if !ok {
+		if reqActor == "operator" {
+			return nil
+		}
+		return fmt.Errorf("non-UDS connection not allowed for actor %q", reqActor)
+	}
+
+	unixConn, ok := conn.(*net.UnixConn)
+	if !ok {
+		if reqActor == "operator" {
+			return nil
+		}
+		return fmt.Errorf("non-unix connection not allowed for actor %q", reqActor)
+	}
+
+	pid, err := getPeerPID(unixConn)
+	if err != nil {
+		return fmt.Errorf("failed to get peer PID: %w", err)
+	}
+
+	cwd, err := getProcessCWD(pid)
+	if err != nil {
+		return fmt.Errorf("failed to get process CWD for PID %d: %w", pid, err)
+	}
+
+	gitRoot, err := findGitRoot(cwd)
+	if err != nil {
+		return fmt.Errorf("failed to find git root for CWD %q: %w", cwd, err)
+	}
+
+	// Resolve the main repository root
+	mainGitRoot := gitRoot
+	commonDir, err := gitCommand(gitRoot, "rev-parse", "--git-common-dir")
+	if err == nil {
+		if !filepath.IsAbs(commonDir) {
+			commonDir = filepath.Clean(filepath.Join(gitRoot, commonDir))
+		}
+		mainGitRoot = filepath.Dir(commonDir)
+	}
+
+
+	evalMainGitRoot, err := filepath.EvalSymlinks(mainGitRoot)
+	if err != nil {
+		evalMainGitRoot = mainGitRoot
+	}
+	evalReqWorkDir, err := filepath.EvalSymlinks(reqWorkDir)
+	if err != nil {
+		evalReqWorkDir = reqWorkDir
+	}
+
+	matched := false
+	if evalReqWorkDir == evalMainGitRoot {
+		matched = true
+	} else {
+		// Check if it's the ~/.botfam store path
+		rootsStr, err := gitCommand(gitRoot, "rev-list", "--max-parents=0", "HEAD")
+		if err == nil {
+			lines := strings.Split(strings.TrimSpace(rootsStr), "\n")
+			var cleanLines []string
+			for _, l := range lines {
+				if l != "" {
+					cleanLines = append(cleanLines, l)
+				}
+			}
+			sort.Strings(cleanLines)
+			sum := sha256.Sum256([]byte(strings.Join(cleanLines, "\n")))
+			id := hex.EncodeToString(sum[:])[:12]
+			if strings.Contains(evalReqWorkDir, "fam-"+id) {
+				matched = true
+			}
+		}
+	}
+
+	if !matched {
+		return fmt.Errorf("work_dir mismatch: resolved git root %q does not match requested work_dir %q", evalMainGitRoot, evalReqWorkDir)
+	}
+
+	resolvedActor := actorFromDir(gitRoot)
+
+	isAgent := func(name string) bool {
+		return name == "agy" || name == "claude" || name == "codex" || name == "antigravity" ||
+			name == "alice" || name == "bob" || name == "charlie"
+	}
+
+	if reqActor == "operator" {
+		if isAgent(resolvedActor) {
+			return fmt.Errorf("operator cannot perform actions from agent worktree %q (resolved actor %q)", gitRoot, resolvedActor)
+		}
+	} else {
+		normReq := strings.TrimPrefix(reqActor, "wt-")
+		normReq = strings.TrimPrefix(normReq, "botfam-")
+		normResolved := strings.TrimPrefix(resolvedActor, "wt-")
+		normResolved = strings.TrimPrefix(normResolved, "botfam-")
+
+		if normReq == "antigravity" {
+			normReq = "agy"
+		}
+		if normResolved == "antigravity" {
+			normResolved = "agy"
+		}
+
+		if normReq != normResolved {
+			return fmt.Errorf("actor-worktree mismatch: actor %q cannot perform actions from worktree %q (resolved actor %q)", reqActor, gitRoot, resolvedActor)
+		}
+	}
+
+	return nil
+}
+
+func actorFromDir(path string) string {
+	base := filepath.Base(path)
+	base = strings.TrimPrefix(base, "wt-")
+	base = strings.TrimPrefix(base, "botfam-")
+	return base
+}
+
 func getRequestPID(r *http.Request) int {
 	if conn, ok := r.Context().Value(connKey).(net.Conn); ok {
 		if unixConn, ok := conn.(*net.UnixConn); ok {
@@ -1760,6 +2045,19 @@ func (s *Server) handleUIVote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+
+	// Register operator's vote in the daemon's in-memory registry
+	s.mu.Lock()
+	if _, ok := s.votes[req.ProposalID]; !ok {
+		s.votes[req.ProposalID] = make(map[string]*voteConnection)
+	}
+	s.votes[req.ProposalID]["operator"] = &voteConnection{
+		proposalID: req.ProposalID,
+		actor:      "operator",
+		verdict:    req.Verdict,
+		commitSHA:  tally.LatestSHA,
+	}
+	s.mu.Unlock()
 
 	s.broadcastEvent(fmt.Sprintf("session:append:%s", req.ProposalID))
 	writeJSON(w, entry)
