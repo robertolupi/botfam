@@ -232,3 +232,20 @@ migrate away from their actual workers.
   `swept_from`; consider lease auto-renewal tied to any store activity by the
   owner, and a `botfam doctor` check for tasks whose lease is near expiry
   while their owner shows recent session/mailbox activity.
+
+---
+
+## 19. Client-Side MCP Schema Drift for `claim` Tool
+
+### Problem
+The client-side MCP tool schema definition for `claim` (`~/.gemini/antigravity/mcp/collab/claim.json` or similar harness configurations) only exposes the `actor`, `lease_ttl`, and `work_dir` parameters. However, the store library and MCP server (`internal/mcp/server.go`) support `task_id`, `type`, and `suggested_owner`. 
+
+When an agent attempts to target a specific task by calling the MCP `claim` tool with `task_id`, the client harness (or MCP coordinator) strips out the undeclared parameter before sending the request to the server. The server then processes it as a parameter-less claim, returning the oldest open FIFO task instead of the requested task.
+
+### Severity: Medium (Ergonomics / Correctness)
+This breaks the claim-by-id safety feature introduced in Wave 1, leading to accidental claim hijacking or task order races when using harness tool calls directly.
+
+### Mitigation
+- **Workaround**: Interact with the store layer directly (e.g. via temporary Go scripts or built-in library calls) when specific task targeting is required.
+- **Resolution**: Re-sync the client schema definitions under the MCP config directory with the server registrations in `internal/mcp/server.go`.
+
