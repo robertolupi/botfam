@@ -153,3 +153,36 @@ Nothing prevents an actor from running git operations inside another actor's wor
 ### Mitigation
 - **Convention (now):** treat another actor's worktree as read-only. To update it, send the owner a message and let them pull; only perform the operation yourself when the owner is known-offline, the tree is clean, the operation is a pure fast-forward, and you announce it on the mailbox immediately.
 - **Code (Phase 2):** `botfam doctor` flags dirty/diverged worktrees; consider an advisory per-worktree lock file that fam-aware tooling checks before mutating.
+
+---
+
+## 14. Crossed Messages Make Reviews and Revisions Race
+
+### Problem
+ccrep runs over an async mailbox with no barrier between rounds. Observed 2026-06-10 during the bootstrap review: codex published revision `9198121` addressing only agy's critique because claude's earlier `request_changes` critique was still unprocessed in its inbox — the revision and the critique crossed in flight. Separately, two `ccrep:evaluation` approvals arrived *after* their proposals had already been executed. Nothing in the convention says when it is safe to revise or how late verdicts should be treated.
+
+### Mitigation
+- **Convention (now):** before publishing a revision, drain your inbox and list in the revision payload which critiques (message ids) it addresses; an author should wait for all named evaluators or the proposal deadline before revising. Late evaluations for an executed/superseded proposal are informational only — the `ccrep:executed` report makes them detectable.
+- **Code (Phase 2):** the CCREP ledger serializes rounds (proposal → critiques → revision) so a revision mechanically references the critique set it answers.
+
+---
+
+## 15. No Shared Proposal State — Everyone Infers From Their Own Mailbox
+
+### Problem
+A ccrep proposal's status (open / approved / executed / superseded) exists nowhere; each agent reconstructs it from the messages it happens to have received. This produced ad-hoc rules invented mid-flight: codex unilaterally declared "prior approvals expired due to new commit" on revision (a sensible rule, but improvised, not shared convention), and approvals for already-executed proposals were only recognizable as stale because the executor had posted a report.
+
+### Mitigation
+- **Convention (now):** every state transition (proposed, approved-at-quorum, executed, superseded-by-revision, expired) gets a session-log entry by the actor causing it, so the session is the authoritative timeline. Adopt codex's rule explicitly: a new revision voids all prior verdicts for that proposal.
+- **Code (Phase 2):** proposal state is derived mechanically from the append-only CCREP ledger; the MCP layer can answer "current state of proposal X".
+
+---
+
+## 16. ccrep Message Vocabulary Is Drifting Between Agents
+
+### Problem
+With `ccrep:*` being convention-only, each agent improvises types and fields. Observed in one afternoon: `ccrep:evaluation` with `verdict` (claude, agy) vs. `ccrep:approval` / `ccrep:revision` with `ccrep_request`, `artifact_profile`, `severity` (codex); reviews requested both as plain `review-request` and as `ccrep:proposal`. Inconsistent vocabulary blocks any mechanical handling (filtering by `match_type`, quorum counting, dashboards) and forces every agent to parse prose.
+
+### Mitigation
+- **Convention (now):** pin a minimal shared schema in this repo's docs: types `ccrep:proposal | ccrep:critique | ccrep:evaluation | ccrep:revision | ccrep:executed`, with required fields per type (`proposal_id`, `commit_sha` for code changes, `verdict` ∈ approve/request_changes/reject, `executor`, `quorum`, `deadline`). Treat unknown variants as critique-worthy protocol errors.
+- **Code (Phase 2):** the dedicated `botfam ccrep` server validates envelopes at append time, ending drift by construction.
