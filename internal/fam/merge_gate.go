@@ -74,7 +74,7 @@ func MergeGateCmd(args []string, out io.Writer) error {
 		return err
 	}
 
-	events, skipped, err := collectCcrepEvents(st, proposalID)
+	events, skipped, err := CollectCcrepEvents(st, proposalID)
 	if err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedRev
 // log and from every actor mailbox. It returns the events, the number of
 // unparseable message files that were skipped, and any I/O error encountered
 // (collection errors fail the gate instead of degrading to "no events").
-func collectCcrepEvents(st *store.Store, proposalID string) ([]CcrepEvent, int, error) {
+func CollectCcrepEvents(st *store.Store, proposalID string) ([]CcrepEvent, int, error) {
 	var events []CcrepEvent
 	skipped := 0
 

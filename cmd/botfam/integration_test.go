@@ -3,18 +3,47 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/rlupi/botfam/internal/fam"
+	"github.com/rlupi/botfam/internal/server"
 )
+
+func TestMain(m *testing.M) {
+	os.Setenv("BOTFAM_TESTING", "1")
+	for _, arg := range os.Args {
+		if arg == "server" || arg == "serve" || arg == "vote" || arg == "tally" || arg == "propose" || arg == "approve" || arg == "merge" {
+			os.Args = append([]string{"botfam"}, os.Args[1:]...)
+			if err := run(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
+
+	if os.Getenv("BOTFAM_TEST_HELPER") == "serve" {
+		os.Args = []string{"botfam", "serve"}
+		if err := run(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	os.Exit(m.Run())
+}
 
 func TestIntegrationTwoActorsOverStdio(t *testing.T) {
 	if os.Getenv("BOTFAM_TEST_HELPER") == "serve" {
@@ -142,12 +171,49 @@ type botClient struct {
 	nextID int
 }
 
+var (
+	testServerOnce sync.Once
+	testSocketPath string
+)
+
 func startBotfam(t *testing.T, root, actor string) *botClient {
 	t.Helper()
+
+	testServerOnce.Do(func() {
+		absScratch, err := filepath.Abs("../../scratch")
+		if err != nil {
+			t.Fatalf("failed to resolve scratch path: %v", err)
+		}
+		_ = os.MkdirAll(absScratch, 0755)
+		testSocketPath = filepath.Join(absScratch, fmt.Sprintf("integration-%d.sock", time.Now().UnixNano()))
+
+		srv := server.NewServer(testSocketPath, 0)
+		ctx := context.Background()
+		go func() {
+			_ = srv.Start(ctx)
+		}()
+
+		var dialErr error
+		for i := 0; i < 50; i++ {
+			time.Sleep(50 * time.Millisecond)
+			conn, err := net.Dial("unix", testSocketPath)
+			if err == nil {
+				conn.Close()
+				dialErr = nil
+				break
+			}
+			dialErr = err
+		}
+		if dialErr != nil {
+			t.Fatalf("failed to start integration test UDS daemon: %v", dialErr)
+		}
+	})
+
 	cmd := exec.Command(os.Args[0], "-test.run=TestIntegrationTwoActorsOverStdio")
 	cmd.Env = append(os.Environ(),
 		"BOTFAM_TEST_HELPER=serve",
 		"COLLAB_ROOT="+root,
+		"BOTFAM_SOCKET="+testSocketPath,
 	)
 	if actor != "" {
 		cmd.Env = append(cmd.Env, "COLLAB_ACTOR="+actor)
@@ -360,13 +426,7 @@ func TestIntegrationSessionsOverStdio(t *testing.T) {
 
 	// 1. Compile the real botfam binary to root/botfam
 	binPath := filepath.Join(root, "botfam")
-	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
-	buildCmd.Dir = "."
-	var buildStderr bytes.Buffer
-	buildCmd.Stderr = &buildStderr
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
-	}
+	buildBotfam(t, binPath)
 
 	// Helper to start real botfam serve as a subprocess
 	startRealBot := func(actor string) *botClient {
@@ -493,13 +553,7 @@ func TestIntegrationSessionCloseTTYGate(t *testing.T) {
 	root := t.TempDir()
 
 	binPath := filepath.Join(root, "botfam")
-	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
-	buildCmd.Dir = "."
-	var buildStderr bytes.Buffer
-	buildCmd.Stderr = &buildStderr
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
-	}
+	buildBotfam(t, binPath)
 
 	cmdNew := exec.Command(binPath, "session", "new", "test-tty-session", "--participants", "alice")
 	cmdNew.Env = append(os.Environ(), "COLLAB_ROOT="+root)
@@ -544,13 +598,7 @@ func TestIntegrationB_NarrowSafety(t *testing.T) {
 
 	// 1. Compile the real botfam binary to root/botfam
 	binPath := filepath.Join(root, "botfam")
-	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
-	buildCmd.Dir = "."
-	var buildStderr bytes.Buffer
-	buildCmd.Stderr = &buildStderr
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
-	}
+	buildBotfam(t, binPath)
 
 	// Initialize the git repo in root
 	gitDir := filepath.Join(root, "myrepo")
@@ -740,13 +788,7 @@ func TestIntegrationLifecycleInvariants(t *testing.T) {
 	root := t.TempDir()
 
 	binPath := filepath.Join(root, "botfam")
-	buildCmd := exec.Command("go", "build", "-o", binPath, ".")
-	buildCmd.Dir = "."
-	var buildStderr bytes.Buffer
-	buildCmd.Stderr = &buildStderr
-	if err := buildCmd.Run(); err != nil {
-		t.Fatalf("go build failed: %v; stderr:\n%s", err, buildStderr.String())
-	}
+	buildBotfam(t, binPath)
 
 	gitDir := filepath.Join(root, "myrepo")
 	if err := os.Mkdir(gitDir, 0755); err != nil {
@@ -1056,3 +1098,15 @@ func TestIntegrationLifecycleInvariants(t *testing.T) {
 		t.Fatalf("unexpected swept task state: %+v", sweptTask)
 	}
 }
+
+func buildBotfam(t *testing.T, binPath string) {
+	t.Helper()
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
+	cmd.Dir = "."
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go build failed: %v; stderr:\n%s", err, stderr.String())
+	}
+}
+

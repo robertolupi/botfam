@@ -2,23 +2,29 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/rlupi/botfam/internal/fam"
-	"github.com/rlupi/botfam/internal/store"
 )
 
 // errIdentityRequired signals that no actor identity could be resolved from
@@ -41,23 +47,13 @@ type server struct {
 
 	mu    sync.Mutex
 	actor string
-	locks map[string]*store.ActorLock
 }
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	s := &server{
 		envActor: os.Getenv("COLLAB_ACTOR"),
 		lockMode: lockActorEnabled(),
-		locks:    make(map[string]*store.ActorLock),
 	}
-	defer func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		for _, lock := range s.locks {
-			_ = lock.Close()
-		}
-	}()
-
 	mcpSrv := mcpserver.NewMCPServer("botfam", "0.1.0", mcpserver.WithToolCapabilities(false))
 	s.registerTools(mcpSrv)
 	return serveStdio(context.Background(), mcpSrv, in, out)
@@ -189,149 +185,75 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
 		return nil, err
 	}
-	st := store.New(info.Root)
-	if err := st.Init(); err != nil {
-		return nil, err
-	}
 
 	actor, err := s.resolveActor(argString(args, "actor"), info.Actor)
 	if err != nil {
-		// Identity-optional tools never use the calling actor; tolerate the
-		// absence of an identity for them, but still surface conflict errors
-		// (and still bind normally above when an identity IS resolvable).
 		if !identityOptionalTools[name] || !errors.Is(err, errIdentityRequired) {
 			return nil, err
 		}
 		actor = ""
 	}
-	var result any
-	switch name {
-	case "send":
-		to := argString(args, "to")
-		typ := argString(args, "type")
-		msg, err := st.Send(actor, to, typ, argObject(args, "payload"), argString(args, "in_reply_to"), argFloatPtr(args, "expires_at"))
-		result = msg
-		if err != nil {
-			return nil, err
-		}
-	case "recv":
-		if err := s.ensureActorLock(actor, st); err != nil {
-			return nil, err
-		}
-		timeout := time.Duration(argFloatDefault(args, "timeout_s", 120) * float64(time.Second))
-		msg, err := st.Recv(ctx, actor, argString(args, "match_type"), timeout)
-		if err != nil {
-			return nil, err
-		}
-		result = msg
-	case "try_recv":
-		if err := s.ensureActorLock(actor, st); err != nil {
-			return nil, err
-		}
-		msg, err := st.TryRecv(actor, argString(args, "match_type"))
-		if err != nil {
-			return nil, err
-		}
-		result = msg
-	case "peek":
-		msg, err := st.Peek(actor, argString(args, "match_type"))
-		if err != nil {
-			return nil, err
-		}
-		result = msg
-	case "ack":
-		if err := s.ensureActorLock(actor, st); err != nil {
-			return nil, err
-		}
-		msg, err := st.Ack(actor, argString(args, "id"), args["outcome"])
-		if err != nil {
-			return nil, err
-		}
-		result = msg
-	case "seen":
-		seen, err := st.Seen(actor, argString(args, "id"))
-		if err != nil {
-			return nil, err
-		}
-		result = map[string]any{"seen": seen}
-	case "inbox":
-		snap, err := st.Inbox(actor)
-		if err != nil {
-			return nil, err
-		}
-		result = snap
-	case "post":
-		task, err := st.Post(actor, argStringDefault(args, "type", "task"), argObject(args, "payload"))
-		if err != nil {
-			return nil, err
-		}
-		result = task
-	case "claim":
-		task, err := st.Claim(actor, time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)), store.ClaimOptions{
-			TaskID:         argString(args, "task_id"),
-			Type:           argString(args, "type"),
-			SuggestedOwner: argString(args, "suggested_owner"),
-		})
-		if err != nil {
-			return nil, err
-		}
-		result = task
-	case "complete":
-		task, err := st.Complete(actor, argString(args, "task_id"), args["result"])
-		if err != nil {
-			return nil, err
-		}
-		result = task
-	case "heartbeat":
-		task, err := st.Heartbeat(actor, argString(args, "task_id"), time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)))
-		if err != nil {
-			return nil, err
-		}
-		result = task
-	case "abandon":
-		task, err := st.Abandon(actor, argString(args, "task_id"), argString(args, "reason"))
-		if err != nil {
-			return nil, err
-		}
-		result = task
-	case "sweep":
-		tasks, err := st.Sweep()
-		if err != nil {
-			return nil, err
-		}
-		result = map[string]any{"swept": tasks}
-	case "session_append":
-		if err := s.ensureActorLock(actor, st); err != nil {
-			return nil, err
-		}
-		sessionName := argString(args, "session")
-		body := argString(args, "body")
-		var handoff *store.SessionHandoff
-		if hObj, ok := args["handoff"].(map[string]any); ok && len(hObj) > 0 {
-			handoff = &store.SessionHandoff{
-				Task:        argString(hObj, "task"),
-				Context:     argString(hObj, "context"),
-				Deliverable: argString(hObj, "deliverable"),
-			}
-		}
-		entry, err := st.SessionAppend(sessionName, actor, body, handoff)
-		if err != nil {
-			return nil, err
-		}
-		result = entry
-	case "session_read":
-		sessionName := argString(args, "session")
-		filterActor := argString(args, "from")
-		sinceTS := argFloatDefault(args, "since_ts", 0)
-		limit := int(argFloatDefault(args, "limit", 0))
-		entries, err := st.SessionRead(sessionName, filterActor, sinceTS, limit)
-		if err != nil {
-			return nil, err
-		}
-		result = entries
-	default:
-		return nil, fmt.Errorf("unknown tool %q", name)
+
+	// Ensure UDS daemon is running (auto-start)
+	if err := ensureDaemon(); err != nil {
+		return nil, err
 	}
+
+	// Route payload to UDS daemon
+	payload := make(map[string]any)
+	for k, v := range args {
+		payload[k] = v
+	}
+	payload["actor"] = actor
+	payload["work_dir"] = info.Root // Daemon expectsResolved info.Root as work_dir
+
+	udsPath, err := getSocketPath()
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(dialCtx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(dialCtx, "unix", udsPath)
+			},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	url := "http://localhost/" + name
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error calling UDS daemon endpoint %q: %w", name, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		var errResp struct {
+			Error string `json:"error"`
+		}
+		if json.NewDecoder(resp.Body).Decode(&errResp) == nil && errResp.Error != "" {
+			return nil, errors.New(errResp.Error)
+		}
+		return nil, fmt.Errorf("daemon endpoint %q returned status %s", name, resp.Status)
+	}
+
+	var result any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode daemon response: %w", err)
+	}
+
 	return toolResult(result)
 }
 
@@ -374,7 +296,7 @@ func (s *server) resolveActor(callActor string, dirActor string) (string, error)
 	if candidate == "" {
 		return "", errIdentityRequired
 	}
-	if err := store.ValidateName("actor", candidate); err != nil {
+	if err := validateActorName(candidate); err != nil {
 		return "", err
 	}
 	if s.actor == "" {
@@ -387,18 +309,107 @@ func (s *server) resolveActor(callActor string, dirActor string) (string, error)
 	return s.actor, nil
 }
 
-func (s *server) ensureActorLock(actor string, st *store.Store) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.locks[st.Root] != nil {
-		return nil
+func validateActorName(name string) error {
+	if name == "" {
+		return errors.New("actor name cannot be empty")
 	}
-	lock, err := st.LockActor(actor)
+	for _, r := range name {
+		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return fmt.Errorf("invalid actor %q: must match [A-Za-z0-9_-]+", name)
+		}
+	}
+	return nil
+}
+
+func getSocketPath() (string, error) {
+	if path := os.Getenv("BOTFAM_SOCKET"); path != "" {
+		return path, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(home, ".botfam", "daemon.sock")
+	if len(path) > 104 {
+		h := sha256.Sum256([]byte(home))
+		path = filepath.Join("/tmp", fmt.Sprintf("bf-%s.sock", hex.EncodeToString(h[:])))
+	}
+	return path, nil
+}
+
+func ensureDaemon() error {
+	udsPath, err := getSocketPath()
 	if err != nil {
 		return err
 	}
-	s.locks[st.Root] = lock
-	return st.RollbackProcessing(actor)
+
+	// Dial socket to see if running
+	conn, err := net.Dial("unix", udsPath)
+	if err == nil {
+		conn.Close()
+		return nil
+	}
+
+	// If BOTFAM_SOCKET is set explicitly (e.g. in tests), do not auto-spawn a background process.
+	// We expect the test runner to manage the test server lifecycle.
+	if os.Getenv("BOTFAM_SOCKET") != "" {
+		return fmt.Errorf("UDS daemon not running at %s", udsPath)
+	}
+
+	_ = os.Remove(udsPath)
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		execPath = os.Args[0]
+	}
+	if os.Getenv("BOTFAM_TESTING") != "1" {
+		if homeBin := filepath.Join(home, "bin", "botfam"); fileExists(homeBin) {
+			execPath = homeBin
+		}
+	}
+
+	cmd := exec.Command(execPath, "server", "--port=0")
+	cmd.Dir = "/"
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true,
+	}
+
+	// Redirect stdout/stderr to a log file for debugging
+	logFile, _ := os.OpenFile(filepath.Join(filepath.Dir(udsPath), "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if logFile != nil {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		defer logFile.Close()
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start daemon: %w", err)
+	}
+
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		conn, err := net.Dial("unix", udsPath)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+	}
+	logBytes, _ := os.ReadFile(filepath.Join(filepath.Dir(udsPath), "daemon.log"))
+	logStr := ""
+	if len(logBytes) > 0 {
+		logStr = "\nDaemon Log:\n" + string(logBytes)
+	}
+	return fmt.Errorf("daemon did not start UDS listener within 5s%s", logStr)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func toolResult(v any) (*mcplib.CallToolResult, error) {

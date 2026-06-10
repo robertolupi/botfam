@@ -2,24 +2,62 @@ package mcp
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/rlupi/botfam/internal/store"
+	serverlib "github.com/rlupi/botfam/internal/server"
 )
 
-// newTestServer returns a fresh server plus an explicit fam root. COLLAB_ROOT
-// is pinned via the process env (callTool resolves with os.Environ()), and
-// COLLAB_ACTOR is cleared so identity comes only from call args or work_dir.
 func newTestServer(t *testing.T) (*server, string) {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("COLLAB_ROOT", root)
 	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_LOCK_ACTOR", "")
-	return &server{locks: make(map[string]*store.ActorLock)}, root
+
+	// Use scratch directory to ensure socket path is short (Darwin 104 char limit)
+	absScratch, err := filepath.Abs("../../scratch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.MkdirAll(absScratch, 0755)
+	udsPath := filepath.Join(absScratch, fmt.Sprintf("test-%d.sock", time.Now().UnixNano()))
+	t.Setenv("BOTFAM_SOCKET", udsPath)
+	t.Cleanup(func() {
+		_ = os.Remove(udsPath)
+	})
+
+	// Start in-process UDS server
+	srv := serverlib.NewServer(udsPath, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+
+	// Wait for the UDS socket to become active
+	var dialErr error
+	for i := 0; i < 50; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err := net.Dial("unix", udsPath)
+		if err == nil {
+			conn.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		t.Fatalf("failed to start test UDS daemon: %v", dialErr)
+	}
+
+	return &server{}, root
 }
 
 func mkdir(t *testing.T, path string) string {
