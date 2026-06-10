@@ -9,12 +9,13 @@ to read in one sitting.
 
 **Current implementation note.** The checked-in Go code implements the Phase 1
 tool surface, maildir store, session identity binding, per-actor receive lock,
-setup command, and subprocess MCP integration tests. A few spec details are still
-early: `recv` uses polling instead of `fsnotify`, `fam.toml` parsing is minimal,
-and the setup/join UX has not yet been hardened beyond the initial fail-closed
-membership check. The Tier 1 receive ergonomics (`match_from`/`match_reply_to`
-filters and the `thread` tool, §5) are **specified but not yet implemented**.
-CCREP and bottown remain future phases.
+setup command, and subprocess MCP integration tests. Additionally, the **Wave 1**
+milestone features are implemented:
+- **Claim ergonomics** (claim-by-id targeting and `type`/`suggested_owner` filters) are fully functional.
+- **CCREP Merge Gate** (`botfam merge-gate --commit <sha> --proposal <id>`) is implemented, enforcing that merges to `main` have independent approvals bound to the exact commit SHA.
+- **Session close promotion** with clean git working directory checks and interactive commits is fully functional.
+
+A few spec details are still early: `recv` uses polling instead of `fsnotify`, and `fam.toml` parsing is minimal. The remaining Tier 1 receive ergonomics (`match_from`/`match_reply_to` filters and the `thread` tool, §5) are specified but not yet implemented. Full CCREP ledger/reducer and bottown remain future phases.
 
 ---
 

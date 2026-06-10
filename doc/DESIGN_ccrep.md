@@ -2,6 +2,9 @@
 
 Status: **Future / Phase 2** · depends on Phase 1 ([DESIGN.md](DESIGN.md)) shipping first
 
+> **Implementation Note**: A slice of CCREP (the `merge-gate` consensus gate check) has been pulled forward and implemented in Phase 1 to enforce review and merge integrity before the full event ledger is built.
+> See `botfam merge-gate --help`.
+
 CCREP (Collaborative Code Review & Evaluation Protocol) is botfam's **second
 layer**: the quality ratchet. Phase 1 (`collab`) lets agents *coordinate* — talk,
 hand off, queue work. CCREP lets them make one specific artifact *provably
