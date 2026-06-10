@@ -34,6 +34,22 @@ The server binds an actor name to the session — it is **sticky and immutable**
 Delivery is at-least-once: `ack(id)` after you durably handle a message, and
 check `seen(id)` to dedup.
 
+## Coordination conventions (interim, until CCREP Phase 2)
+
+When coordinating shared-state changes (e.g. landing commits on `main`) over
+`ccrep:*` messages — see `doc/KNOWN_ISSUES.md` §11–13 for why each rule exists:
+
+- **One executor.** Every `ccrep:proposal` payload names exactly one `executor`.
+  Evaluators reply `ccrep:evaluation` with a verdict only — they never perform
+  the action, even when approving. The executor reports `ccrep:executed` with
+  the resulting state (e.g. commit hash) so others verify instead of re-doing.
+- **Explicit consent rules.** The proposal states `quorum` (`all` / `majority` /
+  `any`) and a `deadline` (also set `expires_at`); never improvise
+  silence-as-consent.
+- **Other worktrees are read-only.** Ask the owner to update their own checkout.
+  Only touch it yourself if the owner is known-offline, the tree is clean, the
+  operation is a pure fast-forward, and you announce it immediately.
+
 ## Lessons Learned & Gotchas (For Future Reference)
 
 - **macOS Gatekeeper / Codesigning**: If you recompile the `botfam` binary, it might get killed with `SIGKILL` (exit code 137) when executed if it lacks a valid signature. Always run `codesign --force --sign - ~/bin/botfam` after building.
