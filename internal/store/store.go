@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -312,11 +313,112 @@ func (s *Store) Post(actor, typ string, payload map[string]any) (Task, error) {
 	return task, nil
 }
 
-func (s *Store) Claim(actor string, leaseTTL time.Duration) (*Task, error) {
+func matchFilters(task Task, typeFilter, suggestedOwnerFilter string) bool {
+	if typeFilter != "" && task.Type != typeFilter {
+		return false
+	}
+	if suggestedOwnerFilter != "" {
+		so, _ := task.Payload["suggested_owner"].(string)
+		if so != suggestedOwnerFilter {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Store) Claim(actor string, leaseTTL time.Duration, opts ClaimOptions) (*Task, error) {
 	if err := ValidateName("actor", actor); err != nil {
 		return nil, err
 	}
 	_, _ = s.Sweep()
+
+	if opts.TaskID != "" {
+		files, err := listJSON(filepath.Join(s.Root, "tasks", "open"))
+		if err != nil {
+			return nil, err
+		}
+		var foundFile string
+		for _, f := range files {
+			if strings.HasSuffix(f, "-"+opts.TaskID+".json") {
+				foundFile = f
+				break
+			}
+		}
+		if foundFile != "" {
+			src := filepath.Join(s.Root, "tasks", "open", foundFile)
+			task, err := readTask(src)
+			if err != nil {
+				return nil, err
+			}
+			if task.ID == opts.TaskID {
+				if !matchFilters(task, opts.Type, opts.SuggestedOwner) {
+					return nil, fmt.Errorf("task %q does not match filters", opts.TaskID)
+				}
+				if err := os.MkdirAll(filepath.Join(s.Root, "tasks", "claimed", actor), 0o755); err != nil {
+					return nil, err
+				}
+				dst := filepath.Join(s.Root, "tasks", "claimed", actor, foundFile)
+				if err := os.Rename(src, dst); err != nil {
+					if !errors.Is(err, fs.ErrNotExist) {
+						return nil, err
+					}
+					// If it doesn't exist, it might have been claimed/completed concurrently.
+					// Fall through to search claimed/done below.
+				} else {
+					now := unixFloat(time.Now().UTC())
+					exp := unixFloat(time.Now().UTC().Add(leaseTTL))
+					task.Status = "claimed"
+					task.Owner = actor
+					task.ClaimedAt = &now
+					task.LeaseExpiresAt = &exp
+					if err := writeJSON(dst, task); err != nil {
+						return nil, err
+					}
+					task.filename = foundFile
+					return &task, nil
+				}
+			}
+		}
+
+		// Look in tasks/claimed/<any-actor>
+		claimedRoot := filepath.Join(s.Root, "tasks", "claimed")
+		actors, err := os.ReadDir(claimedRoot)
+		if err == nil {
+			for _, actorDir := range actors {
+				if !actorDir.IsDir() {
+					continue
+				}
+				actorName := actorDir.Name()
+				cfiles, _ := listJSON(filepath.Join(claimedRoot, actorName))
+				for _, cf := range cfiles {
+					if strings.HasSuffix(cf, "-"+opts.TaskID+".json") {
+						ctask, err := readTask(filepath.Join(claimedRoot, actorName, cf))
+						if err == nil && ctask.ID == opts.TaskID {
+							return nil, fmt.Errorf("task %q is already claimed by %q", opts.TaskID, actorName)
+						}
+					}
+				}
+			}
+		}
+
+		// Look in tasks/done
+		doneRoot := filepath.Join(s.Root, "tasks", "done")
+		dfiles, err := listJSON(doneRoot)
+		if err == nil {
+			for _, df := range dfiles {
+				if strings.HasSuffix(df, "-"+opts.TaskID+".json") {
+					dtask, err := readTask(filepath.Join(doneRoot, df))
+					if err == nil && dtask.ID == opts.TaskID {
+						return nil, fmt.Errorf("task %q is already completed", opts.TaskID)
+					}
+				}
+			}
+		}
+
+		return nil, fmt.Errorf("task %q not found", opts.TaskID)
+	}
+
+	// If opts.TaskID is NOT provided:
 	if err := os.MkdirAll(filepath.Join(s.Root, "tasks", "claimed", actor), 0o755); err != nil {
 		return nil, err
 	}
@@ -326,15 +428,18 @@ func (s *Store) Claim(actor string, leaseTTL time.Duration) (*Task, error) {
 	}
 	for _, f := range files {
 		src := filepath.Join(s.Root, "tasks", "open", f)
+		task, err := readTask(src)
+		if err != nil {
+			continue
+		}
+		if !matchFilters(task, opts.Type, opts.SuggestedOwner) {
+			continue
+		}
 		dst := filepath.Join(s.Root, "tasks", "claimed", actor, f)
 		if err := os.Rename(src, dst); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
-			return nil, err
-		}
-		task, err := readTask(dst)
-		if err != nil {
 			return nil, err
 		}
 		now := unixFloat(time.Now().UTC())

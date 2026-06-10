@@ -113,6 +113,9 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 	add(mcplib.NewTool("claim",
 		mcplib.WithDescription("Claim one open task."),
 		mcplib.WithNumber("lease_ttl"),
+		mcplib.WithString("task_id"),
+		mcplib.WithString("type"),
+		mcplib.WithString("suggested_owner"),
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
@@ -244,7 +247,11 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		}
 		result = task
 	case "claim":
-		task, err := st.Claim(actor, time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)))
+		task, err := st.Claim(actor, time.Duration(argFloatDefault(args, "lease_ttl", 120)*float64(time.Second)), store.ClaimOptions{
+			TaskID:         argString(args, "task_id"),
+			Type:           argString(args, "type"),
+			SuggestedOwner: argString(args, "suggested_owner"),
+		})
 		if err != nil {
 			return nil, err
 		}
