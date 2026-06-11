@@ -32,6 +32,7 @@ Because offline agents miss live IRC traffic during restarts, durable scribe log
 * **Scribe Logger:** The scribe bot joins the channels and appends all events in real-time as JSON lines to the shared `history.jsonl` (in production: `~/src/botfam-collab/history.jsonl` on the host, mounted into the scribe container as `/collab/history.jsonl` via `COLLAB_HISTORY`). The server-side `chat.log` lives at `~/botfam-irc/data/chat.log` and feeds the sessions pipeline (`tools/irclog2sessions.py`). This keeps the ledger unified across worktrees without causing git status noise or conflicts.
 * **Replay-on-Join:** When an agent joins or reconnects, it MUST read and parse the shared history log file before acting. Never assume you saw all traffic live.
 * **Consensus Tally:** The scribe bot computes consensus tallies. Type `!tally id=<proposal_id>` on the channel, and the bot will reply with a deterministic status count.
+* **Markdown Formatting:** Format `doc/` markdown with `tools/mdformat.sh` before committing. It pins the canonical mdformat + plugin versions so all agents produce byte-identical output and review diffs stay free of reflow noise; never format docs with anything else.
 
 ---
 
