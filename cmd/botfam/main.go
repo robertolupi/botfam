@@ -66,6 +66,36 @@ func run() error {
 			return fam.ApproveCmd(os.Args[2:], os.Stdout)
 		case "merge":
 			return fam.MergeCmd(os.Args[2:], os.Stdout)
+		case "send":
+			return fam.SendCmd(os.Args[2:], os.Stdout)
+		case "recv":
+			return fam.RecvCmd(os.Args[2:], os.Stdout)
+		case "try-recv", "try_recv":
+			return fam.TryRecvCmd(os.Args[2:], os.Stdout)
+		case "peek":
+			return fam.PeekCmd(os.Args[2:], os.Stdout)
+		case "ack":
+			return fam.AckCmd(os.Args[2:], os.Stdout)
+		case "seen":
+			return fam.SeenCmd(os.Args[2:], os.Stdout)
+		case "inbox":
+			return fam.InboxCmd(os.Args[2:], os.Stdout)
+		case "post":
+			return fam.PostCmd(os.Args[2:], os.Stdout)
+		case "claim":
+			return fam.ClaimCmd(os.Args[2:], os.Stdout)
+		case "complete":
+			return fam.CompleteCmd(os.Args[2:], os.Stdout)
+		case "heartbeat":
+			return fam.HeartbeatCmd(os.Args[2:], os.Stdout)
+		case "abandon":
+			return fam.AbandonCmd(os.Args[2:], os.Stdout)
+		case "sweep":
+			return fam.SweepCmd(os.Args[2:], os.Stdout)
+		case "session-append", "session_append":
+			return fam.SessionAppendCmd(os.Args[2:], os.Stdout)
+		case "session-read", "session_read":
+			return fam.SessionReadCmd(os.Args[2:], os.Stdout)
 		case "server":
 			var udsPath string
 			tcpPort := 8080
@@ -126,14 +156,14 @@ func run() error {
 			return fmt.Errorf("unknown command %q", os.Args[1])
 		}
 	}
-	return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
+	printHelp()
+	return nil
 }
 
 func printHelp() {
 	fmt.Print(`botfam
 
 Usage:
-  botfam                  run stdio MCP server
   botfam serve            run stdio MCP server
   botfam setup <project> --agents alice,bob [--force]
   botfam session <subcommand>
@@ -146,6 +176,23 @@ Usage:
   botfam propose --proposal <id> [--quorum <quorum>] [--deadline <deadline>]
   botfam approve --proposal <id> [--verdict <verdict>]
   botfam merge --proposal <id>
+
+Collab Subcommands (debugging / direct CLI):
+  botfam send --to <actor> --type <type> [--payload <json>] [--in-reply-to <id>] [--expires-at <secs>]
+  botfam recv [--match-type <type>] [--timeout <secs>]
+  botfam try-recv [--match-type <type>]
+  botfam peek [--match-type <type>]
+  botfam ack --id <id> [--outcome <json>]
+  botfam seen --id <id>
+  botfam inbox
+  botfam post --type <type> [--payload <json>]
+  botfam claim [--lease-ttl <secs>] [--task-id <id>] [--type <type>] [--suggested-owner <name>]
+  botfam complete --task-id <id> [--result <json>]
+  botfam heartbeat --task-id <id> [--lease-ttl <secs>]
+  botfam abandon --task-id <id> [--reason <text>]
+  botfam sweep
+  botfam session-append --session <slug> --body <body> [--handoff <json>]
+  botfam session-read --session <slug> [--from <actor>] [--since <ts>] [--limit <n>]
 
 Global Flags:
   --json, -j              output results as structured JSON lines

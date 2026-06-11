@@ -111,6 +111,45 @@ func topicPublish(args []string, out io.Writer) error {
 	return nil
 }
 
+func splitArgs(s string) []string {
+	var args []string
+	var current strings.Builder
+	inDoubleQuotes := false
+	inSingleQuotes := false
+	escaped := false
+	for _, r := range s {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' && !inSingleQuotes {
+			escaped = true
+			continue
+		}
+		if r == '"' && !inSingleQuotes {
+			inDoubleQuotes = !inDoubleQuotes
+			continue
+		}
+		if r == '\'' && !inDoubleQuotes {
+			inSingleQuotes = !inSingleQuotes
+			continue
+		}
+		if (r == ' ' || r == '\t') && !inDoubleQuotes && !inSingleQuotes {
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+			continue
+		}
+		current.WriteRune(r)
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
+}
+
 func topicListen(args []string, out io.Writer) error {
 	var topic string
 	for i := 0; i < len(args); i++ {
@@ -189,6 +228,107 @@ func topicListen(args []string, out io.Writer) error {
 		}
 		return fmt.Errorf("daemon endpoint returned status %s", resp.Status)
 	}
+
+	// Start stdin reader loop in background
+	go func() {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+
+			if strings.HasPrefix(line, "/") {
+				args := splitArgs(line[1:])
+				if len(args) == 0 {
+					continue
+				}
+				cmdName := args[0]
+				cmdArgs := args[1:]
+
+				var err error
+				switch cmdName {
+				case "setup":
+					err = Setup(cmdArgs, out)
+				case "session":
+					err = SessionCmd(cmdArgs, out)
+				case "topic":
+					err = TopicCmd(cmdArgs, out)
+				case "merge-gate":
+					err = MergeGateCmd(cmdArgs, out)
+				case "agent-docs":
+					err = AgentDocsCmd(cmdArgs, out)
+				case "vote":
+					err = VoteCmd(cmdArgs, out)
+				case "tally":
+					err = TallyCmd(cmdArgs, out)
+				case "propose":
+					err = ProposeCmd(cmdArgs, out)
+				case "approve":
+					err = ApproveCmd(cmdArgs, out)
+				case "merge":
+					err = MergeCmd(cmdArgs, out)
+				case "send":
+					err = SendCmd(cmdArgs, out)
+				case "recv":
+					err = RecvCmd(cmdArgs, out)
+				case "try-recv", "try_recv":
+					err = TryRecvCmd(cmdArgs, out)
+				case "peek":
+					err = PeekCmd(cmdArgs, out)
+				case "ack":
+					err = AckCmd(cmdArgs, out)
+				case "seen":
+					err = SeenCmd(cmdArgs, out)
+				case "inbox":
+					err = InboxCmd(cmdArgs, out)
+				case "post":
+					err = PostCmd(cmdArgs, out)
+				case "claim":
+					err = ClaimCmd(cmdArgs, out)
+				case "complete":
+					err = CompleteCmd(cmdArgs, out)
+				case "heartbeat":
+					err = HeartbeatCmd(cmdArgs, out)
+				case "abandon":
+					err = AbandonCmd(cmdArgs, out)
+				case "sweep":
+					err = SweepCmd(cmdArgs, out)
+				case "session-append", "session_append":
+					err = SessionAppendCmd(cmdArgs, out)
+				case "session-read", "session_read":
+					err = SessionReadCmd(cmdArgs, out)
+				default:
+					err = fmt.Errorf("unknown slash command %q", cmdName)
+				}
+
+				if err != nil {
+					if IsJSONOutput() {
+						_ = writeJSONError(out, err)
+					} else {
+						fmt.Fprintf(out, "Error: %v\n", err)
+					}
+				}
+			} else {
+				// Publish chat message to topic
+				reqPayload := map[string]any{
+					"work_dir": info.Root,
+					"actor":    actor,
+					"topic":    topic,
+					"body":     line,
+				}
+				var respMsg store.TopicMessage
+				err := sendDaemonRequest(context.Background(), "topic_publish", reqPayload, &respMsg)
+				if err != nil {
+					if IsJSONOutput() {
+						_ = writeJSONError(out, err)
+					} else {
+						fmt.Fprintf(out, "Error publishing message: %v\n", err)
+					}
+				}
+			}
+		}
+	}()
 
 	reader := bufio.NewReader(resp.Body)
 	for {

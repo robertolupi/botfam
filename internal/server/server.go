@@ -2145,11 +2145,7 @@ func (s *Server) handleTopicPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pid := getRequestPID(r)
-	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
-		writeError(w, http.StatusLocked, err.Error())
-		return
-	}
+
 
 	msg, err := fs.store.TopicPublish(req.Topic, req.Actor, req.Body)
 	if err != nil {
@@ -2178,11 +2174,7 @@ func (s *Server) handleTopicListen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pid := getRequestPID(r)
-	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
-		writeError(w, http.StatusLocked, err.Error())
-		return
-	}
+
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Transfer-Encoding", "chunked")
@@ -2270,11 +2262,7 @@ func (s *Server) handleTopicCursorUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	pid := getRequestPID(r)
-	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
-		writeError(w, http.StatusLocked, err.Error())
-		return
-	}
+
 
 	err = fs.store.TopicCursorUpdate(req.Actor, req.Topic, req.LastReadID)
 	if err != nil {
@@ -2302,11 +2290,7 @@ func (s *Server) handleTopicCursorRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pid := getRequestPID(r)
-	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
-		writeError(w, http.StatusLocked, err.Error())
-		return
-	}
+
 
 	id, err := fs.store.TopicCursorRead(req.Actor, req.Topic)
 	if err != nil {

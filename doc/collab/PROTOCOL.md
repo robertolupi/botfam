@@ -23,21 +23,20 @@ The server binds an actor name to the session — **sticky and immutable**.
   directory resolution, or `COLLAB_ACTOR`) is rejected. With no automatic
   resolution and no explicit actor, the call is refused.
 
-There is deliberately **no identity in the environment**: `.mcp.json` is a
-bare `{ "command": "botfam" }`.
+All coordination runs via the `botfam` CLI tool. There is no MCP server configuration required in the environment by default; agents run `botfam` verbs directly inside their worktree.
 
 ## 2. Coordination tools
 
-- **Messaging:** `send`, `recv`, `try_recv`, `peek`, `ack`, `seen`, `inbox`
-- **Task queue (leased):** `post`, `claim`, `complete`, `heartbeat`,
-  `abandon`, `sweep`
-- **Session ledger:** `session_append`, `session_read` (filter param: `from`).
+- **Messaging:** `send`, `recv`, `try-recv`, `peek`, `ack`, `seen`, `inbox`
+- **Task queue (leased):** `post`, `claim`, `complete`, `heartbeat`, `abandon`, `sweep`
+- **Session ledger:** `session-append`, `session-read` (filter param: `from`).
   Session close requires a TTY — promotion is a human gesture.
 
+All verbs are executed as CLI subcommands, e.g. `botfam inbox`, `botfam send`, `botfam claim`.
 `recv` blocks cheaply until a message arrives (zero tokens while parked);
-pick a `timeout_s` under your harness's tool-call ceiling and re-invoke in a
-loop. Delivery is at-least-once: `ack(id)` after you durably handle a
-message; `seen(id)` to dedup.
+pick a `timeout` under your harness's tool-call ceiling and re-invoke in a
+loop. Delivery is at-least-once: `ack` after you durably handle a
+message; `seen` to dedup.
 
 Queue discipline: `heartbeat` at every natural pause or your lease gets swept
 mid-work (KNOWN_ISSUES §18); after any `claim`, verify the returned task id is
@@ -110,7 +109,7 @@ worktrees), never by cd-ing into their checkout.
   `store.New(...)`) against the same store.
 - **Split-brain store paths:** entry points with odd working directories can
   resolve different stores; `COLLAB_ROOT` is the explicit override.
-- **CLI vs MCP tool commands:** The `botfam` CLI tool does not have direct subcommands for `inbox`, `send`, `recv`, `claim`, etc. These are only exposed as tool definitions by the MCP server (`collab`). Do not invoke them as CLI subcommands; call them via the MCP server interface. CLI subcommands are for topics (`topic`), sessions (`session`), and voting (`vote`, `tally`, `propose`, `approve`, `merge`).
+- **CLI-first Execution:** All collaboration tools (e.g. `send`, `recv`, `claim`, `inbox`) are now directly exposed as subcommands under the `botfam` CLI, deprecating the previous MCP server interface. Agents and operators should invoke these CLI subcommands directly.
 - **Stale UDS socket files:** If the daemon socket `/Users/rlupi/.botfam/daemon.sock` is held by a stale test process or previous run, calls will fail with connection refused or 404. Find and kill stale `botfam` daemon processes (e.g. `kill -9 <PID>`) and remove the socket file (`rm -f ~/.botfam/daemon.sock`) to allow a fresh daemon to start.
 - **UDS Peer Credential Validation & CWD `/`**: The daemon validates that UDS connections originate from a process whose current working directory (CWD) is inside the git repository. However, the IDE/harness may start the MCP server process in `/` (not a git repository), causing validation to fail. To bypass this:
   - Run commands via the `botfam` CLI directly in the worktree directory (e.g. `~/bin/botfam topic ...`), which ensures the UDS peer process has a valid repo CWD.
