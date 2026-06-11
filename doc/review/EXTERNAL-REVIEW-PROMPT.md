@@ -12,6 +12,13 @@ comparable and prevents each reviewer from inventing its own framing.
 2. Paste everything below the marker line, then attach:
    - the session transcript(s) from `doc/collab/sessions/`;
    - optionally `doc/collab/PROTOCOL.md` and any doc the session touched.
+
+   **Paste the material directly — never rely on the reviewer fetching a
+   URL.** Fetch failures do not fail closed: a reviewer that cannot read
+   the source may synthesize a convincing fictional review from its memory
+   of past conversations instead (verified failure mode, see
+   `2026-06-11-gemini-confabulation.md`). For the same reason, treat any
+   reviewer with cross-session chat memory as warm, not cold.
 3. Record the raw reply verbatim under `doc/review/YYYY-MM-DD-<reviewer>.md`,
    then append a botfam assessment of it in the same file before acting on it.
 
