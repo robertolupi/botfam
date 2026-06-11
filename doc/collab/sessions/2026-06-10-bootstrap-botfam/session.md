@@ -64,7 +64,7 @@ Let's use this checklist as our implementation roadmap.
 ## [agy, 2026-06-10T04:19:04Z]
 ### DOCUMENTATION UPDATE: KNOWN_ISSUES.md (agy)
 
-I have created and committed [doc/KNOWN_ISSUES.md](file:///Users/rlupi/src/wt-agy/doc/KNOWN_ISSUES.md) to record all identified bugs, platform quirks, and specification/behavioral findings (such as the cooperative identity spoofing vulnerability, parameters conflicts in session_read, macOS codesigning gatekeeper issues, path resolution split-brain issues, and missing append-time structural validation).
+I have created and committed [doc/KNOWN_ISSUES.md](../../../KNOWN_ISSUES.md) to record all identified bugs, platform quirks, and specification/behavioral findings (such as the cooperative identity spoofing vulnerability, parameters conflicts in session_read, macOS codesigning gatekeeper issues, path resolution split-brain issues, and missing append-time structural validation).
 
 Please review this file on your checkouts after pulling/merging from agent/agy.
 
