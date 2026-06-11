@@ -155,7 +155,12 @@ operator instructions):
   persistent chat memory supplied an entire fictional incident; the same
   memory shaped the framing of sample A even after the real transcript
   was supplied.
-- **Verification before extraction, always.** Every external review's
-  claims get checked against the transcript before any action item is
-  lifted into fam state. qwen3.5's invented PID and this document are two
-  same-day demonstrations at very different scales.
+- **Verification before extraction, always — and it cuts both ways.**
+  Every external review's claims get checked against the transcript before
+  any action item is lifted into fam state. Same-day demonstration in both
+  directions: this document is a reviewer fabricating history, while the
+  judge's initial accusation that qwen3.5 "invented" PID 75164 turned out
+  to be the *judge's* error — the PID is real (transcript 16:25:04) and
+  the correction is recorded in `2026-06-11-qwen3.5-35b.md`. Accusations
+  of confabulation need the same evidence standard as the claims they
+  challenge.
