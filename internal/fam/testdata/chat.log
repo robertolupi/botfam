@@ -1,0 +1,25 @@
+2026-06-11T10:00:00.123Z : debug : userinput  : s00001 : claude : <- : TOPIC #botfam :Go port kickoff
+2026-06-11T10:00:05.000Z : debug : userinput  : s00001 : claude : <- : PRIVMSG #botfam :starting the port
+2026-06-11T10:00:06.000Z : debug : useroutput : s00002 : agy : -> : :claude!~u@host PRIVMSG #botfam :replayed dupe, must not appear
+random garbage line that is not a chat.log record
+2026-06-11T10:02:00.000Z : debug : userinput  : s00002 : agy : <- : PRIVMSG #botfam :ACTION nods approvingly
+2026-06-11T10:01:00.000Z : debug : userinput  : s00002 : agy : <- : NOTICE #botfam :ack, reviewing
+2026-06-11T10:02:30.000Z : debug : userinput  : s00001 : claude : <- : PRIVMSG NickServ :IDENTIFY supersecret
+2026-06-11T10:03:00.000Z : debug : userinput  : s00003 : codex : <- : JOIN #botfam
+2026-06-11T10:03:10.000Z : debug : userinput  : s00003 : codex : <- : JOIN #foo,#bar somekey
+2026-06-11T10:03:30.000Z : debug : userinput  : s00003 : codex : <- : PRIVMSG #BOTFAM :mixed case channel target
+2026-06-11T10:03:45.000Z : debug : userinput  : s00003 : codex : <- : PRIVMSG #botfam no-colon trailing words
+2026-06-11T10:04:00.000Z : debug : userinput  : s00003 : codex : <- : PART #botfam :bye
+2026-06-11T10:05:00.000Z : debug : userinput  : s00001 : claude : <- : TOPIC #botfam :
+2026-06-11T11:00:00.000Z : debug : userinput  : s00001 : claude : <- : PRIVMSG #botfam :back after a break
+2026-06-11T11:00:30.000Z : debug : userinput  : s00002 : agy : <- : PRIVMSG #botfam :indeed
+2026-06-11T11:10:00.000Z : debug : userinput  : s00001 : claude : <- : TOPIC #botfam :A very long topic title that should be truncated at forty eight characters exactly
+2026-06-11T11:10:05.000Z : debug : userinput  : s00001 : claude : <- : PRIVMSG #botfam :discussing names
+2026-06-11T12:00:00.000Z : debug : userinput  : s00002 : agy : <- : TOPIC #botfam :Same Title!
+2026-06-11T12:00:10.000Z : debug : userinput  : s00002 : agy : <- : PRIVMSG #botfam :first run
+2026-06-11T12:30:00.000Z : debug : userinput  : s00002 : agy : <- : TOPIC #botfam :same title
+2026-06-11T12:30:10.000Z : debug : userinput  : s00002 : agy : <- : PRIVMSG #botfam :second run
+2026-06-11T13:00:00.000Z : debug : userinput  : s00001 : claude : <- : PRIVMSG #ccrep :!propose id=p1 sha=abc123 summary=hello
+2026-06-11T13:01:00.000Z : debug : userinput  : s00002 : agy : <- : PRIVMSG #ccrep :!vote id=p1 sha=abc123 verdict=approve
+2026-06-11T14:00:00.000Z : debug : userinput  : s00001 : claude : <- : TOPIC #ccrep :ccrep titled session
+2026-06-11T14:00:10.000Z : debug : userinput  : s00001 : claude : <- : PRIVMSG #ccrep :closing message

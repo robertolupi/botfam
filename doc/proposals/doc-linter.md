@@ -69,8 +69,8 @@ file:line diagnostics. Numbered for addressable evaluation:
   before committing doc changes, alongside the existing PROTOCOL.md §2
   formatting rule.
 - **Phase 1:** a Go implementation (single-toolchain direction, same reason
-  `tools/irclog2sessions.py` is slated for porting) covering checks 3 and 4;
-  `botfam doc-lint` subcommand only if usage earns it.
+  `tools/irclog2sessions.py` was ported to `botfam irclog2sessions`) covering
+  checks 3 and 4; `botfam doc-lint` subcommand only if usage earns it.
 - **Phase 2:** wire into whatever merge-gate or CI substrate exists by then;
   until then it stays a pre-commit convention like formatting.
 

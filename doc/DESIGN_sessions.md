@@ -4,7 +4,7 @@
 > **Status**: Superseded/Evolved into the IRC-first session design
 > (2026-06-11). Working sessions are now run inside dedicated, ephemeral
 > `#session-<slug>` IRC channels instead of local directories under
-> `$COLLAB_ROOT`. Scribe logs these channels, and `tools/irclog2sessions.py` is
+> `$COLLAB_ROOT`. Scribe logs these channels, and `botfam irclog2sessions` is
 > used to parse and render raw IRC logs into structured Markdown session files
 > in the repository.
 

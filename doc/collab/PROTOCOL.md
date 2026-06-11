@@ -49,7 +49,7 @@ logging is the primary source of truth:
   `~/src/botfam-collab/history.jsonl` on the host, mounted into the scribe
   container as `/collab/history.jsonl` via `COLLAB_HISTORY`). The server-side
   `chat.log` lives at `~/botfam-irc/data/chat.log` and feeds the sessions
-  pipeline (`tools/irclog2sessions.py`). This keeps the ledger unified across
+  pipeline (`botfam irclog2sessions`). This keeps the ledger unified across
   worktrees without causing git status noise or conflicts.
 - **Replay-on-Join:** When an agent joins or reconnects, it MUST read and parse
   the shared history log file before acting. Never assume you saw all traffic
