@@ -1,8 +1,8 @@
 # botfam
 
-A tiny, single-binary **stdio MCP server** that enables a "family" of AI agents to coordinate seamlessly over a shared filesystem. It provides maildir-backed messaging (with cheap blocking receive) and a lease-based task queue to let agents hand work back and forth safely.
+A tiny, single-binary **CLI tool** that enables a "family" of AI agents to coordinate seamlessly over a shared filesystem. It provides SQLite-backed messaging (with cheap blocking receive) and a lease-based task queue to let agents hand work back and forth safely.
 
-botfam is the lightweight successor to a lineage of multi-agent coordination experiments (`deep-cuts/collab` → `hydra` → `scriba`). It keeps the core idea that proved out—filesystem-backed mailboxes and task lists—while stripping away all the operational cruft (no databases, no background daemons, no SSH keys, and no Python dependencies).
+botfam is the lightweight successor to a lineage of multi-agent coordination experiments (`deep-cuts/collab` → `hydra` → `scriba`). It keeps the core idea that proved out—coordination mailboxes and task lists—while stripping away all the operational cruft (no external databases, no background daemons, no SSH keys, and no Python dependencies).
 
 ---
 
@@ -19,14 +19,14 @@ botfam is the lightweight successor to a lineage of multi-agent coordination exp
 ## Architecture at a Glance
 
 ```
-Agent A (wt-agy)    ──stdio MCP──> botfam serve ─┐
-                                                  ├─> ~/.botfam/fam-<project-hash>/ (Mailbox & Tasks)
-Agent B (wt-claude) ──stdio MCP──> botfam serve ─┘
+Agent A (wt-agy)    ──CLI command──> botfam <cmd> ─┐
+                                                   ├─> ~/.botfam/fam-<project-hash>/ (SQLite Database & Sockets)
+Agent B (wt-claude) ──CLI command──> botfam <cmd> ─┘
 ```
 
-* **One Process per Agent**: Each agent's editor or harness spawns its own stdio `botfam` server via `.mcp.json`.
-* **State on Disk**: All communication and task leasing is implemented as atomic `os.Rename` operations within a local maildir-style state directory outside the git repository.
-* **Consensus-Driven Merges**: Merges to `main` are validated by checking session logs and mailbox messages for review verdicts.
+* **Direct CLI Execution**: Each agent's editor or harness runs `botfam` commands directly from its worktree.
+* **State on Disk**: All communication, task leasing, presence, and logs are implemented as SQLite transactions in a local database (`botfam.db`) within a local state directory outside the git repository.
+* **Consensus-Driven Merges**: Merges to `main` are validated by checking session logs and proposals for review verdicts.
 
 ---
 
@@ -34,11 +34,11 @@ Agent B (wt-claude) ──stdio MCP──> botfam serve ─┘
 
 We have completed the **Wave 1** implementation of the coordination and safety layer:
 
-* **Mailbox Messaging**: Functional `send`, `recv`, `try_recv`, `peek`, `ack`, `seen`, and `inbox` tools.
-* **Task Queue**: Functional `post`, `claim`, `complete`, `heartbeat`, `abandon`, and `sweep` tools, with **claim ergonomics** (targeted claim-by-id and type/suggested-owner filters).
+* **Mailbox Messaging**: Functional `send`, `recv`, `try_recv`, `peek`, `ack`, `seen`, and `inbox` commands.
+* **Task Queue**: Functional `post`, `claim`, `complete`, `heartbeat`, `abandon`, and `sweep` commands, with **claim ergonomics** (targeted claim-by-id and type/suggested-owner filters).
 * **CCREP Merge Gate**: The `botfam merge-gate --commit <sha> --proposal <id>` subcommand checks and enforces peer review consensus (independent approvals, no blockers, approvals die on new commits).
 * **Interactive Session Promotion**: `botfam session close <slug>` renders the session log to markdown, verifies that the git working directory is clean, stages the markdown file, and opens the operator's editor interactively to edit the commit.
-* **Integration Testing**: End-to-end integration tests spin up multiple stdio server subprocesses exchanging messages and completing tasks.
+* **Integration Testing**: End-to-end integration tests verify messaging, task lifecycle, and topics/cursors.
 
 ---
 
@@ -55,7 +55,7 @@ This script will:
 * Build the `botfam` binary to `~/bin/botfam` and codesign it on macOS.
 * Set up the shared `~/.botfam/` project directories.
 * Add git worktrees for each agent on their respective branches (`agent/<agent>`).
-* Generate the `.mcp.json` and harness configs.
+* Configure the harness to allow direct execution of `botfam` CLI commands.
 
 ### 2. Run Tests
 Ensure everything is green. If you are running in a restricted sandbox, use the local cache flag:
