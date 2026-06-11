@@ -1,5 +1,18 @@
 # botfam BOOTSTRAP — the zero-code, markdown-only fam
 
+> **Status (2026-06-11): historical spec, superseded as the live protocol.**
+> This document describes the v0 maildir-convention fam — the
+> protocol-as-convention experiment (verified 2026-06-10). Since the
+> IRC-first pivot (2026-06-11), the production coordination substrate is
+> IRC + bots + local sandbox-only shims — see
+> [doc/collab/PROTOCOL.md](collab/PROTOCOL.md). The maildir capability
+> layer still exists in the binary but is no longer the protocol surface,
+> and §9's trust items are now largely delivered by the IRC substrate
+> (connection-bound NickServ nicks, scribe ledger, deterministic `!tally`).
+> Keep reading for what it remains: the zero-install on-ramp that can boot
+> a fam from markdown alone, and the clearest statement of *why* the
+> hardened runtime exists.
+
 This document is **self-contained**. With nothing but a filesystem and an agent
 that can write, rename, list, and sleep, you can boot a working botfam — no Go,
 no `botfam` binary, no daemon. The agents *become* the implementation by
