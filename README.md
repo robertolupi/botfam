@@ -1,44 +1,67 @@
 # botfam
 
-A tiny, single-binary **CLI tool** that enables a "family" of AI agents to coordinate seamlessly over a shared filesystem. It provides SQLite-backed messaging (with cheap blocking receive) and a lease-based task queue to let agents hand work back and forth safely.
+A tiny, single-binary **CLI tool** that lets a "family" of AI agents
+coordinate. Since 2026-06-11 the architecture is, in the operator's words:
 
-botfam is the lightweight successor to a lineage of multi-agent coordination experiments (`deep-cuts/collab` → `hydra` → `scriba`). It keeps the core idea that proved out—coordination mailboxes and task lists—while stripping away all the operational cruft (no external databases, no background daemons, no SSH keys, and no Python dependencies).
+> **IRC + bots + local sandbox-only shims.**
 
----
+Agents coordinate over a local IRC server; durable capabilities (history,
+vote tallying) are bots on the channel; anything host-local is a private
+implementation detail of a single process, never inter-agent coordination.
 
-## Why botfam?
-
-1. **Lightweight & Portable**: Written in Go and compiled into a single static binary. Nothing to install, no virtual environments to activate.
-2. **Cheap, Blocking `recv`**: Instead of burning tokens polling for new work, agents can park on a blocking `recv` call that wakes up cheaply only when a new message arrives.
-3. **Lease-Based Task Queue**: Agents claim work from a shared pool. If an agent crashes or hangs, its task lease expires and is automatically reclaimed by the family.
-4. **Cooperative & Secure Identity**: Identity is resolved automatically from the git worktree folder or pinned in the environment, with file locking to prevent spoofing.
-5. **Built-in Quality Gates**: The `merge-gate` subcommand checks for peer approvals and ensures that no code merges to `main` without a fresh review on the exact commit SHA (preventing AI confabulation).
+botfam is the lightweight successor to a lineage of multi-agent
+coordination experiments (`deep-cuts/collab` → `hydra` → `scriba`; see
+`doc/lineage/`). It keeps the ideas that proved out — attributable
+messages, leased work, consensus-gated merges — and moves the protocol
+surface onto IRC, where attribution (connection-bound nicks), total
+message ordering, and presence come for free.
 
 ---
 
 ## Architecture at a Glance
 
 ```
-Agent A (wt-agy)    ──CLI command──> botfam <cmd> ─┐
-                                                   ├─> ~/.botfam/fam-<project-hash>/ (SQLite Database & Sockets)
-Agent B (wt-claude) ──CLI command──> botfam <cmd> ─┘
+Agent A (wt-agy)    ── botfam irc-client ──┐
+Agent B (wt-claude) ── botfam irc-client ──┼─> ergo IRC (docker, 127.0.0.1:6667)
+Operator (rlupi)    ── any IRC client    ──┤      #botfam  #ccrep  #botfam-test
+                                           └─ scribe bot ─> history.jsonl (ledger)
+                                                          + !tally (deterministic votes)
 ```
 
-* **Direct CLI Execution**: Each agent's editor or harness runs `botfam` commands directly from its worktree.
-* **State on Disk**: All communication, task leasing, presence, and logs are implemented as SQLite transactions in a local database (`botfam.db`) within a local state directory outside the git repository.
-* **Consensus-Driven Merges**: Merges to `main` are validated by checking session logs and proposals for review verdicts.
+* **IRC substrate**: ergo v2.18.0 in Docker compose (`botfam-irc-prod`),
+  localhost-only, IRCv3 `CHATHISTORY` for replay after disconnects.
+* **scribe bot**: a compose service with the stable nick `scribe`; appends
+  every channel event to a JSONL ledger and answers `!tally` with
+  deterministic vote counts.
+* **ccrep consensus**: changes to shared state (e.g. merges to `main`) run
+  through `!propose` / `!vote` / `!executed` bang commands on the channel —
+  see [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md), the single source
+  of truth for the coordination rules.
+* **Agent tooling in the binary**: `irc-client` (FIFO-driven connection),
+  `irc-wait` (wake watcher), `scribe`, `merge-gate`, session rendering.
 
----
+## Why this shape?
 
-## Feature Status
+1. **Lightweight & Portable**: one static Go binary; the IRC server is one
+   `docker compose up`.
+2. **Attribution and ordering for free**: connection-bound NickServ nicks
+   and server-side message order replace hand-rolled identity machinery.
+3. **Confabulation resistance**: SHAs are pasted, never retyped; the scribe
+   tallies votes deterministically; the merge gate rejects stale approvals
+   (approvals die on new commits).
+4. **Everything is reviewable**: coordination happens in a channel that is
+   logged, replayable, and rendered into per-session transcripts under
+   `doc/collab/sessions/`.
 
-We have completed the **Wave 1** implementation of the coordination and safety layer:
+## Legacy: the mailbox/queue layer
 
-* **Mailbox Messaging**: Functional `send`, `recv`, `try_recv`, `peek`, `ack`, `seen`, and `inbox` commands.
-* **Task Queue**: Functional `post`, `claim`, `complete`, `heartbeat`, `abandon`, and `sweep` commands, with **claim ergonomics** (targeted claim-by-id and type/suggested-owner filters).
-* **CCREP Merge Gate**: The `botfam merge-gate --commit <sha> --proposal <id>` subcommand checks and enforces peer review consensus (independent approvals, no blockers, approvals die on new commits).
-* **Interactive Session Promotion**: `botfam session close <slug>` renders the session log to markdown, verifies that the git working directory is clean, stages the markdown file, and opens the operator's editor interactively to edit the commit.
-* **Integration Testing**: End-to-end integration tests verify messaging, task lifecycle, and topics/cursors.
+Earlier waves built SQLite-backed messaging (`send`/`recv`/`inbox`) and a
+lease-based task queue (`post`/`claim`/`complete`) plus a UDS daemon. These
+subcommands still exist in the binary but were **superseded as the
+coordination surface by the IRC-first pivot (2026-06-11)**; their
+retirement is a pending proposal. Do not design new coordination against
+them. The zero-code, markdown-only bootstrap of that era is preserved in
+[doc/BOOTSTRAP.md](doc/BOOTSTRAP.md) (historical spec with a status note).
 
 ---
 
@@ -57,9 +80,19 @@ This script will:
 * Add git worktrees for each agent on their respective branches (`agent/<agent>`).
 * Configure the harness to allow direct execution of `botfam` CLI commands.
 
-### 2. Run Tests
-Ensure everything is green. If you are running in a restricted sandbox, use the local cache flag:
+### 2. Start the IRC substrate
 
+```bash
+# production (persistent, localhost-only)
+docker compose -f docker/prod/compose.yaml up -d
+
+# hermetic test substrate (never touches prod; port 16667)
+docker/test-substrate.sh
+```
+
+See [docker/README.md](docker/README.md) for the operational contract.
+
+### 3. Run Tests
 ```bash
 # Standard test run
 go test ./...
@@ -68,12 +101,17 @@ go test ./...
 env GOCACHE=$PWD/.gocache GOMODCACHE=$PWD/.gomodcache go test ./...
 ```
 
-### 3. Build the Binary
+### 4. Build the Binary
 ```bash
 go build ./cmd/botfam
+# macOS: codesign --force --sign - ~/bin/botfam
 ```
 
-### 4. Interactive Operator Commands
-* **List active sessions**: `botfam session list`
-* **Render a session log to markdown**: `botfam session render <slug>`
-* **Close and commit a session**: `botfam session close <slug>`
+---
+
+## Project history & self-improvement
+
+The fam reviews itself: per-session transcripts live in
+`doc/collab/sessions/`, retrospectives and external review panels in
+`doc/review/` (start with `doc/review/2026-06-11-unified.md`), and protocol
+proposals in `doc/protocol/` and `doc/proposals/`.

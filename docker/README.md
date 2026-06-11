@@ -28,12 +28,21 @@ re-apply if the base version is bumped):
   on, including unregistered channels
 - languages path → `/ircd-bin/languages` (image layout)
 
-## Path to production-in-docker
+## Production (live since 2026-06-11)
 
-This substrate is the gate for migrating the production ergo to Docker.
-Production would additionally need: host binding `127.0.0.1:6667` (and the
-TLS listener + real certs), persistent named volumes for `/ircd`, the
-production config differences (network name Lupi, opers, strict loopback
-philosophy, log rotation), an always-on Docker daemon (Docker Desktop
-autostart or colima), and a migration of `ircd.db` + `ergo_history.db` into
-the volume.
+The migration this substrate gated is **done**: production runs as compose
+project `botfam-irc-prod` via `docker/prod/compose.yaml` (ergo v2.18.0 +
+scribe). Operational contract:
+
+- Host exposure `127.0.0.1:6667` only, plaintext (localhost-by-design; no
+  TLS listener).
+- Data bind-mounted from `~/botfam-irc/data` (`ircd.db`, `ergo_history.db`,
+  `chat.log`); real `ircd.yaml` (with the live oper hash) lives in
+  `~/botfam-irc/`, never in git.
+- `restart: unless-stopped` on both services; server log rotated by Docker
+  (`json-file`, 20m × 8). `chat.log` rotation is an open item (AI-R6 in
+  `doc/review/2026-06-11-unified.md`).
+- **IRC is down whenever Docker Desktop is down** — enable start-at-login
+  (operator-owned; F9 waiver recorded in the unified retrospective).
+- `ircd.db` + `ergo_history.db` were migrated into the volume with zero
+  data loss; CHATHISTORY verified across the cutover.
