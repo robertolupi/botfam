@@ -1,13 +1,15 @@
 # Proposal: Doc-Coverage — Measuring What Agents Actually Read
 
 > [!NOTE]
-> **Status**: Draft (2026-06-11). Idea capture from an operator/claude
-> discussion; sequel to `runtime-coverage-dormancy.md`, same dormancy-detection
-> pattern one layer up. Not yet proposed on #ccrep.
+> **Status**: Draft (2026-06-11). Sequel to `runtime-coverage-dormancy.md`,
+> one layer up: tests keep dormant code green, and doc reviewers read
+> everything while operation reads almost nothing, so dormant docs need
+> operational measurement too. Not yet proposed on #ccrep.
 
 ## Status
 
-**Draft** (2026-06-11, by Roberto + claude). Captured so the idea isn't lost;
+**Draft** (2026-06-11, by Roberto + claude). Captured from an operator/claude
+discussion so the idea isn't lost;
 deliberately staged so Phase 0 needs zero code and works in any
 convention-booted fam (including ones outside this repo). Natural sequencing:
 let `runtime-coverage-dormancy` prove the pattern on code first.
@@ -51,16 +53,17 @@ Measure tiers 2–4 with three mechanisms, cheapest first.
    trails / retros / proposals must cite the doc section that justifies them
    (e.g. `per PROTOCOL.md §4`). Doc-coverage is then a grep over the trails:
    a doc uncited for N episodes is dormant — retire it, or ask why it exists.
-   This also closes the ritual-accretion loop: the fam rule "every ritual must
-   produce an artifact a later episode actually reads" becomes checkable,
-   because "gets read" is now observable as "gets cited."
+   This also closes the ritual-accretion loop: the rule this proposal puts
+   forward — "every ritual must produce an artifact a later episode actually
+   reads" (stated here for the first time, not yet fam policy) — becomes
+   checkable, because "gets read" is now observable as "gets cited."
 2. **Transcript mining (tier 2, the GOCOVERDIR analog).** Harness session
    transcripts already record every file read (Claude Code: JSONL tool calls;
    other harnesses: their own logs). A collection step — natural seam: the
-   session-retrospective skill — extracts `doc/**` accesses per actor and
-   aggregates into a `doc-coverage` report: opens per doc, last-opened, by
-   whom. Diff against the corpus for the dormant list. Cost: one extractor
-   per harness format.
+   `botfam-session-retrospective` skill — extracts `doc/**` accesses per
+   actor and aggregates into a `doc-coverage` report: opens per doc,
+   last-opened, by whom. Diff against the corpus for the dormant list.
+   Cost: one extractor per harness format.
 3. **Doc-eval — canaries (tier 4, the mutation-testing analog).** Code
    coverage says "executed"; mutation testing says "actually verified." The
    doc equivalent: plant a benign marker in a section ("if this section
@@ -74,7 +77,8 @@ Measure tiers 2–4 with three mechanisms, cheapest first.
 ### Rollout
 
 - **Phase 0 (zero code, any fam):** adopt the citation convention by adding
-  one rule to the protocol docs; measure with grep at retro time. Falsifies
+  one rule to `PROTOCOL.md` §2 (Coordination & Durability), next to the other
+  artifact/ledger conventions; measure with grep at retro time. Falsifies
   the idea cheaply: if citations don't discriminate (everything or nothing
   gets cited), stop here and rethink.
 - **Phase 1:** transcript extractors + a report (script first; `botfam
