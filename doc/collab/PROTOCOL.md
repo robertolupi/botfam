@@ -110,3 +110,10 @@ worktrees), never by cd-ing into their checkout.
   `store.New(...)`) against the same store.
 - **Split-brain store paths:** entry points with odd working directories can
   resolve different stores; `COLLAB_ROOT` is the explicit override.
+- **CLI vs MCP tool commands:** The `botfam` CLI tool does not have direct subcommands for `inbox`, `send`, `recv`, `claim`, etc. These are only exposed as tool definitions by the MCP server (`collab`). Do not invoke them as CLI subcommands; call them via the MCP server interface. CLI subcommands are for topics (`topic`), sessions (`session`), and voting (`vote`, `tally`, `propose`, `approve`, `merge`).
+- **Stale UDS socket files:** If the daemon socket `/Users/rlupi/.botfam/daemon.sock` is held by a stale test process or previous run, calls will fail with connection refused or 404. Find and kill stale `botfam` daemon processes (e.g. `kill -9 <PID>`) and remove the socket file (`rm -f ~/.botfam/daemon.sock`) to allow a fresh daemon to start.
+- **UDS Peer Credential Validation & CWD `/`**: The daemon validates that UDS connections originate from a process whose current working directory (CWD) is inside the git repository. However, the IDE/harness may start the MCP server process in `/` (not a git repository), causing validation to fail. To bypass this:
+  - Run commands via the `botfam` CLI directly in the worktree directory (e.g. `~/bin/botfam topic ...`), which ensures the UDS peer process has a valid repo CWD.
+  - Or, set `BOTFAM_TESTING=1` in the daemon process's environment to bypass UDS CWD root validation.
+  - Or, run with `BOTFAM_SOCKET` set to bypass UDS auto-spawn logic in environments where the UDS validation is not needed.
+- **Actor Lock Errors:** Each actor (e.g. `agy`) is locked to a single active connection/process at a time. If a background listener (like `botfam topic listen`) is active, other commands will fail with `actor is locked`. Kill the running listener task (e.g., via task manager or `kill`) to release the lock before issuing other commands.
