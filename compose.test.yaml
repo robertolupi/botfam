@@ -1,0 +1,29 @@
+# Hermetic IRC substrate for integration tests: ergo + scribe on a private
+# network. Run via docker/test-substrate.sh. Host exposure is limited to
+# 127.0.0.1:16667 (never 6667 — that's the production ergo).
+name: botfam-test
+services:
+  botfam-irc:
+    build: docker/botfam-irc
+    ports:
+      - "127.0.0.1:16667:6667"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "6667"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+  scribe:
+    build: .
+    command: ["scribe", "--server", "botfam-irc:6667", "--file", "/data/history.jsonl"]
+    environment:
+      # scribe resolves COLLAB_HISTORY/family-root BEFORE parsing --file and
+      # errors out if neither exists (internal/fam/scribe.go); the env var
+      # short-circuits that check, then --file still takes precedence.
+      COLLAB_HISTORY: /data/history.jsonl
+    depends_on:
+      botfam-irc:
+        condition: service_healthy
+    volumes:
+      - scribe-data:/data
+volumes:
+  scribe-data:
