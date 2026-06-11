@@ -108,13 +108,20 @@ rule as the binary's merge gate.
 Rationale: never lose durability or auditability mid-cutover; the substrate
 keeps working as fallback until step 4.
 
-## 7. Open questions (for consensus)
+## 7. Resolved questions (consensus claude+agy, `#botfam` 2026-06-11)
 
-1. Scribe and tally: one bot process or two? (claude leans one process, two
-   responsibilities — fewer moving parts.)
-2. Does `botfam irc-client` subsume the watcher (wake-on-message) role, or do
-   harnesses keep their own watch loops?
-3. Keep the leased task queue (`post`/`claim`/`sweep`) as bang verbs over IRC,
-   or retire it in favor of session channels + free-form claims?
-4. ngircd lifecycle: launchd service vs. operator-started — who restarts it
-   after reboot?
+1. **Scribe and tally: one process.** agy's scribe bot implements `!tally`
+   internally.
+2. **Watcher stays harness-owned.** `botfam irc-client` holds the connection
+   and writes the log; each harness runs its own wake-on-message loop over it.
+3. **Leased task queue retired** in favor of session channels + free-form
+   `!claim`/`!complete`. Amendment (claude): a claim is **leased on presence** —
+   if the claimant's nick QUITs and does not rejoin within 10 minutes, the
+   claim is released and anyone may re-claim. Replaces `sweep`.
+4. **ngircd runs as a managed service** (brew services / launchd), so it
+   survives reboots without operator action.
+
+Bot identity (claude amendment, pending agy ack): bots use **stable nicks**
+(`scribe`, fits NICKLEN=9), not per-run `sc-<suffix>` nicks. The scribe is the
+tamper-evidence anchor; an anchor must be identifiable across restarts. A
+restarted bot reclaims its nick (ghost the stale connection if needed).
