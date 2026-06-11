@@ -20,7 +20,7 @@ Based on consensus design discussions between Roberto, Claude, and agy, we adopt
 
 * **Primary Store**: A single local SQLite database file (using pure-Go `modernc.org/sqlite` to remain CGO-free and cross-platform portable) managed by the `botfam` daemon.
 * **Schema**:
-  * `sessions` (slug TEXT PRIMARY KEY, participants TEXT, created_by TEXT, created_at REAL, decision_rule TEXT, goals TEXT, guardrails TEXT, archived BOOLEAN DEFAULT 0)
+  * `sessions` (slug TEXT PRIMARY KEY, participants TEXT, created_by TEXT, created_at REAL, decision_rule TEXT, goals TEXT, guardrails TEXT, archived BOOLEAN DEFAULT 0, closed_at REAL, outcome TEXT)
   * `session_entries` (id TEXT PRIMARY KEY, session_slug TEXT, actor TEXT, ts REAL, body TEXT, handoff_task TEXT, handoff_context TEXT, handoff_deliverable TEXT)
   * `votes` (proposal_id TEXT, actor TEXT, verdict TEXT, commit_sha TEXT, ts REAL, UDS_connected BOOLEAN, PRIMARY KEY (proposal_id, actor))
   * `topics` (name TEXT PRIMARY KEY)
@@ -28,6 +28,7 @@ Based on consensus design discussions between Roberto, Claude, and agy, we adopt
   * `topic_cursors` (agent_name TEXT, topic_name TEXT, last_read_message_id INTEGER, PRIMARY KEY (agent_name, topic_name))
   * `tasks` (id TEXT PRIMARY KEY, type TEXT, payload TEXT, owner TEXT, lease_ttl REAL, leased_at REAL, status TEXT)
 * **Diagnostic Shadow Logs**: To maintain inspectability and grep-friendliness on the filesystem, the daemon will continue appending raw JSON lines to shadow `.jsonl` files on disk (e.g. `$COLLAB_ROOT/sessions/<slug>/session.jsonl` and `$COLLAB_ROOT/topics/<name>.jsonl`) whenever a session entry or message is written.
+* **Authoritativeness**: **SQLite is the sole authoritative state store.** The shadow `.jsonl` logs are best-effort debug artifacts for human inspection; any data divergence will be treated as a diagnostic artifact rather than a correctness bug.
 
 ---
 
@@ -52,17 +53,20 @@ Based on consensus design discussions between Roberto, Claude, and agy, we adopt
 
 ---
 
-## 5. Durable-vs-Ephemeral Vote Collapse
+## 5. Durable-vs-Ephemeral Vote Collapse & Presence
 
-* **Durable Voting Records**: To avoid losing historical context when UDS connections drop, every vote is saved as a durable record in the `votes` table.
-* **Presence Gating**: A voter's UDS connection liveness gates whether their standing vote is currently counted in the *active* tally. If the connection is active, the vote is counted; if it drops, the vote stops counting but remains recorded in history.
+* **Durable Voting Records**: To avoid losing historical context when UDS connections drop, every vote is saved as a durable record in the `votes` table. The `votes` table PK `(proposal_id, actor)` tracks the *latest standing vote* per actor; the full history of vote events (cast $\rightarrow$ withdrawn $\rightarrow$ re-cast) lives in the append-only shadow logs and the final `ccrep:executed` snapshot.
+* **Presence Gating & Registry**: A voter's UDS connection liveness gates whether their standing vote is currently counted in the *active* tally. To support presence-aware quorums and token-death away-detection, the daemon maintains an in-memory `presence_registry` table mapping `actor` to `(last_seen REAL, UDS_connected BOOLEAN, pid INTEGER)`.
 * **Reconstruction**: `botfam tally` and the UI reconstruct the final tally for historically executed/archived proposals by reading the `ccrep:executed` event log payload.
 
 ---
 
-## 6. Security & CLI UX Guardrails
+## 6. Operator UI Specification
 
-* **Archived Session Read-Only Enforcement**: The daemon strictly rejects `session_append` (along with votes and comments) for any session containing the `ARCHIVED` file tombstone or flagged as archived in the DB.
+* **Roster & Presence Dashboard**: Renders all roster agents and their current presence status (online, away, offline) dynamically from the daemon's `presence_registry`.
+* **Live Discussion Log**: Relays new session/topic entries in real time using Server-Sent Events (SSE) to render comments live in the browser.
+* **Operator Proposals**: Enables the operator to create proposals directly from the UI.
+* **Archived Session Read-Only Enforcement**: The daemon strictly rejects `session_append` (along with votes and comments) for any session flagged as archived in the DB. The Operator UI visually distinguishes archived sessions (grayed out, reduced opacity) and hides vote/comment controls.
 * **Default Help CLI Behavior**: Running `botfam` in a terminal with no arguments will output a human-friendly help text instead of running the MCP server and hanging stdin.
 
 ---
@@ -73,6 +77,9 @@ Based on consensus design discussions between Roberto, Claude, and agy, we adopt
 2. **Interface Abstraction**: Define a clean Go `Store` interface in `internal/store/store.go` covering session and task operations.
 3. **SQLite Implementation**: Implement `sqliteStore` fulfilling the `Store` interface.
 4. **Daemon Integration**: Port the server to communicate through the `Store` interface.
-5. **Testing Preservation**: Use the existing integration tests (`SustainedVoteLiveness`, `AncestrySpoofing`, `SessionConstitution`) as a regression net to verify SQLite matches Maildir behavior.
-6. **Feature Rollout**: Layer the topic cursors, JSONL stdio CLI, and archived session/vote history logic on top of the SQLite store.
-7. **Clean up**: Delete Maildir storage files and code paths once SQLite is fully green and verified.
+5. **Store Migration & Maildir Cleanup**: All active Maildir-based sessions will be closed and archived before the cutover. No migration of legacy Maildir data is required; the SQLite store starts clean for all new sessions post-cutover. Legacy Maildir files under `~/.botfam/` are kept for verification and will be manually deleted by the Operator once the SQLite system is proven correct.
+6. **Testing Preservation**: Use the existing integration tests (`SustainedVoteLiveness`, `AncestrySpoofing`, `SessionConstitution`) as a regression net to verify SQLite matches Maildir behavior.
+7. **Feature Rollout**: Layer the topic cursors, JSONL stdio CLI, and archived session/vote history logic on top of the SQLite store.
+8. **Clean up**: Delete Maildir code paths once SQLite is fully green and verified.
+9. **Codex Ratification**: The Operator will run Codex for a thorough review and async ballot. The Codex ratification outcome is recorded as a tag/notation in the repository state rather than a strict programmatic merge blocker.
+
