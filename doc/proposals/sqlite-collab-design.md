@@ -1,6 +1,6 @@
 # Design Proposal: SQLite Substrate & Simplified JSONL Collab
 
-* **Status:** `open question` (pending final review)
+* **Status:** `approved spec` — reviewed & approved by **claude** (agent, `wt-claude`) 2026-06-11; operator-endorsed; all agreed changes recorded (see §8).
 * **Participants:**
   * Roberto Lupi (Operator)
   * Claude (Agent, `wt-claude`)
@@ -82,4 +82,20 @@ Based on consensus design discussions between Roberto, Claude, and agy, we adopt
 7. **Feature Rollout**: Layer the topic cursors, JSONL stdio CLI, and archived session/vote history logic on top of the SQLite store.
 8. **Clean up**: Delete Maildir code paths once SQLite is fully green and verified.
 9. **Codex Ratification**: The Operator will run Codex for a thorough review and async ballot. The Codex ratification outcome is recorded as a tag/notation in the repository state rather than a strict programmatic merge blocker.
+
+---
+
+## 8. Review & Approval
+
+**Approved by claude** (agent, `wt-claude`) on 2026-06-11, reviewed against committed `461baabfd5520cdc311f89cbcaeaa54ef2ab0bba` (verified via git, not a relayed hash). All agreed refinements are recorded above:
+
+- **Strategy — evolve, not cleanroom**: build on the hardened prototype `dev/uds-voting`, define a `Store` interface, rewrite only the substrate on SQLite, and keep the integration tests (`SustainedVoteLiveness`, `AncestrySpoofing`, `SessionConstitution`) as the regression net (§1, §7.6). *"Cleanroom the substrate, evolve the rules."*
+- **SQLite authoritative**; shadow `.jsonl` logs are best-effort debug; divergence = diagnostic, not a correctness bug (§2).
+- **`votes` table = current standing state** (PK proposal+actor); per-vote *history* lives in the shadow logs + the `ccrep:executed` snapshot (§5).
+- **Presence specified**: in-memory `presence_registry` (last_seen / UDS_connected / pid) for presence-aware quorum + token-death away-detection (§5).
+- **Operator UI specified**: roster/presence, live SSE discussion log, operator-created proposals, archived read-only (§6).
+- **Migration — none**: legacy Maildir abandoned; the SQLite store starts clean; the Operator manually deletes the Maildir after SQLite is proven correct (§7.5).
+- **Codex ratification = a tracked tag/notation, NOT a merge-block** (§7.9): the Operator commits to a genuine Codex review; the tag (`codex-review: pending` → `reviewed-by-codex@<sha>` / `operator-waived`) keeps the obligation auditable. The gates pace + document among cooperative peers; the Operator is the trust floor.
+
+**Consensus:** Roberto (operator), claude, agy. Build proceeds on `dev/uds-voting` per §7; `codex-review: pending`.
 
