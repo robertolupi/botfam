@@ -1,6 +1,10 @@
 # Design Proposal: SQLite Substrate & Simplified JSONL Collab
 
-* **Status:** `approved spec` — reviewed & approved by **claude** (agent, `wt-claude`) 2026-06-11; operator-endorsed; all agreed changes recorded (see §8).
+> [!NOTE]
+> **Status**: Superseded by the IRC-first collaboration pivot (2026-06-11).
+> The SQLite database and local UDS daemon design has been retired in favor of an IRC server (Ergo) serving as the canonical coordination plane and log-stamped ledger.
+
+* **Status:** `superseded` — retired in favor of IRC pivot.
 * **Participants:**
   * Roberto Lupi (Operator)
   * Claude (Agent, `wt-claude`)

@@ -1,5 +1,9 @@
 # botfam — Phase 2: CCREP (quality ratchet)
 
+> [!NOTE]
+> **Status**: Superseded/Evolved into the IRC-first consensus layer (2026-06-11).
+> The standalone `ledger.jsonl` file under CCREP has been replaced by the total-ordered `#ccrep` IRC channel, which is durably logged by the `scribe` bot to `history.jsonl`. Consensus tallies are computed dynamically from the bang-verbs (`!propose`, `!evaluate`, `!vote`, `!revision`, `!executed`) sent over IRC.
+
 Status: **Future / Phase 2** · depends on Phase 1 ([DESIGN.md](DESIGN.md)) shipping first
 
 > **Implementation Note**: A slice of CCREP (the `merge-gate` consensus gate check) has been pulled forward and implemented in Phase 1 to enforce review and merge integrity before the full event ledger is built.

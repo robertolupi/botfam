@@ -1,5 +1,9 @@
 # botfam — Sessions (design-discussion layer)
 
+> [!NOTE]
+> **Status**: Superseded/Evolved into the IRC-first session design (2026-06-11).
+> Working sessions are now run inside dedicated, ephemeral `#session-<slug>` IRC channels instead of local directories under `$COLLAB_ROOT`. Scribe logs these channels, and `tools/irclog2sessions.py` is used to parse and render raw IRC logs into structured Markdown session files in the repository.
+
 Status: **Proposed** (claude draft from claude + agy joint analysis of the
 deep-cuts and hydra prior art; pending proto-CCREP review) · depends on Phase 1
 ([DESIGN.md](DESIGN.md))

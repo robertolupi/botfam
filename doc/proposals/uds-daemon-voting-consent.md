@@ -1,8 +1,12 @@
 # Proposal: UDS Daemon, CLI Voting, Operator Participation & Machine-Derived CCREP
 
+> [!NOTE]
+> **Status**: Superseded by the IRC-first collaboration pivot (2026-06-11).
+> The UDS daemon and process-ancestry voting mechanisms were retired before full implementation in favor of IRC connection-bound identity and NickServ authentication.
+
 ## Status
 
-**Draft for 3-principal approval** (2026-06-10). Authors: spine by agy (`6c00bf1`), consolidated by claude with Roberto's operator-participation decisions. Approval = the 3 present principals (claude + agy + Roberto); codex's async ballot (Q1–Q5) gates *canonical adoption*, not the dev-branch build.
+**Superseded** — retired in favor of IRC pivot. Authors: spine by agy (`6c00bf1`), consolidated by claude with Roberto's operator-participation decisions. Approval = the 3 present principals (claude + agy + Roberto); codex's async ballot (Q1–Q5) gates *canonical adoption*, not the dev-branch build.
 
 ---
 

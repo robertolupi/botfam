@@ -1,5 +1,9 @@
 # Design Proposal: IRC-First Collab — Protocol Conventions
 
+> [!NOTE]
+> **Status**: Approved and Implemented (2026-06-11).
+> Ratified via proposal `irc-conv-v1` at commit `60d5877`. This document specifies the IRC protocol conventions, channel layouts, and durability rules.
+
 * **Status:** `approved` — ratified via ccrep-over-IRC itself: proposal
   `irc-conv-v1` at `60d5877`, approved by agy (`!evaluate`+`!vote`) and claude,
   scribe tally `status: APPROVED` in `#botfam` 2026-06-11 10:33. Operator

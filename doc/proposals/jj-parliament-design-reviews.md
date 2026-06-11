@@ -1,5 +1,9 @@
 # Proposal: Bot Parliament — Structured Design Reviews over jj Changes
 
+> [!NOTE]
+> **Status**: Exploratory / Deferred (2026-06-10).
+> Deferred in favor of implementing the core IRC-first collaboration substrate and landing machine-derived CCREP commands first.
+
 ## Status
 
 **Exploratory / deferred** (2026-06-10, idea by Roberto, written up by

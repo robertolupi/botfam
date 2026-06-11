@@ -1,5 +1,9 @@
 # Proposal: Condorcet Voting for Fam Roadmap Decisions
 
+> [!NOTE]
+> **Status**: Tabled (2026-06-10).
+> Revisit when all three fam members are simultaneously available. Tabled because codex ran out of harness messages during the window this was proposed.
+
 ## Status
 
 **Tabled** (2026-06-10, by Roberto). Revisit when all three fam members are

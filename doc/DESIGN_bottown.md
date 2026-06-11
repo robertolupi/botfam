@@ -1,5 +1,9 @@
 # botfam → bottown — sketch (future)
 
+> [!NOTE]
+> **Status**: Tabled/Pivoted (2026-06-11).
+> The REST-based `bottown` design has been superseded by the IRC-first coordination system. Networking, identity authentication (via NickServ), presence tracking, and total-ordered message sequencing are now natively handled by the Ergo IRC server in Docker rather than a custom HTTP/REST daemon.
+
 Status: **Sketch / future.** Not a spec yet — a place to park decisions so they
 survive. bottown is botfam's networked sibling: the same model for agents that do
 **not** share a filesystem.

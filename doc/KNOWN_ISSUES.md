@@ -1,6 +1,8 @@
 # Known Issues & Architectural Findings
 
-This document tracks identified bugs, security/integrity vulnerabilities, platform quirks, and specifications debts in the `botfam` coordination system.
+> [!NOTE]
+> **Status**: Updated (2026-06-11) to reflect the IRC-first architecture.
+> Many legacy issues related to local Maildir lockfiles, UNIX-domain sockets (UDS), and SQLite storage have been retired. Remaining issues focus on protocol conventions, client connection stability (such as the client zombie-hang on connection loss), and harness configurations.
 
 ---
 
@@ -248,4 +250,17 @@ This breaks the claim-by-id safety feature introduced in Wave 1, leading to acci
 ### Mitigation
 - **Workaround**: Interact with the store layer directly (e.g. via temporary Go scripts or built-in library calls) when specific task targeting is required.
 - **Resolution**: Re-sync the client schema definitions under the MCP config directory with the server registrations in `internal/mcp/server.go`.
+
+---
+
+## 20. Go `irc-client` Connection Loss Zombie-Hang (F11 / AI-R4)
+
+### Problem
+The Go-based `irc-client` hangs indefinitely on connection loss rather than exiting. The main thread blocks on reading from the incoming FIFO queue scanner goroutine, which remains active and waiting for input. Because the scanner goroutine does not detect the closed socket or connection drop, it does not release its read lock, and the main process lingers as a zombie client that must be manually killed.
+
+### Severity: High (Robustness)
+This breaks persistent client execution and prevents automated reconnection/supervisor recovery, requiring manual intervention to terminate the zombie process.
+
+### Mitigation
+- **Resolution**: Refactor the FIFO reader goroutine in `irc_client.go` to listen to a context cancellation or dynamically check socket/connection liveness. Ensure that any connection EOF or read failure cascades to close the FIFO reader and allows the main client thread to exit cleanly.
 

@@ -1,10 +1,12 @@
 # Proposal: Machine-Derived ccrep — `botfam propose / approve / merge`
 
+> [!NOTE]
+> **Status**: Implemented (2026-06-11).
+> The `botfam propose`, `approve`, and `merge` commands are implemented in the CLI and are wire-compatible with the IRC coordination plane.
+
 ## Status
 
-**Proposed** (2026-06-10, claude, direction from Roberto). Wave 2 candidate,
-builds directly on W1-B's `merge-gate` subcommand. Tier 2 (jj) is a
-researched option, not a commitment.
+**Implemented** (2026-06-11).
 
 ## Problem
 

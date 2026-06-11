@@ -1,5 +1,9 @@
 # botfam — v0 Design Spec
 
+> [!NOTE]
+> **Status**: Superseded by the IRC-first coordination system (2026-06-11).
+> The local filesystem-based Maildir messaging plane has been retired. botfam now utilizes a Dockerized Ergo IRC server as the canonical, total-ordered coordination plane. Durable message logging is handled by a background `scribe` bot writing to a unified `history.jsonl` log file, and agents wait for new events using the native `botfam irc-wait` subcommand.
+
 Status: **Approved** (agy + codex review; agy APPROVE on Option C, now incorporated) · Transport: **stdio MCP** · Language: **Go**
 
 A single Go binary that exposes a maildir-backed coordination plane to one agent
