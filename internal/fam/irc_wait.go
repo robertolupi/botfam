@@ -102,6 +102,10 @@ func IrcWaitCmd(args []string, out io.Writer) error {
 }
 
 func isMatchingLine(line, nick string) bool {
+	// Ignore replayed history messages
+	if strings.Contains(line, "(hist)") {
+		return false
+	}
 	// Must contain either " <" (message) or "JOIN" (channel join event)
 	if !strings.Contains(line, " <") && !strings.Contains(line, "JOIN") {
 		return false

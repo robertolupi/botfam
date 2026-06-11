@@ -1,9 +1,7 @@
 package fam
 
 import (
-	"bytes"
-	"os/exec"
-	"strings"
+	"runtime/debug"
 )
 
 // BuildSHA is injected at compile time via -ldflags.
@@ -11,22 +9,29 @@ import (
 var BuildSHA = "dev"
 
 // GetVersion returns the compiled BuildSHA if it is not "dev".
-// Otherwise, it attempts to query git for the current commit SHA.
-// If that fails, it falls back to "dev".
+// Otherwise, it attempts to read the Go build info's VCS revision.
+// If that fails, it returns "dev".
 func GetVersion() string {
 	if BuildSHA != "dev" {
 		return BuildSHA
 	}
 
-	// Runtime fallback: query git
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err == nil {
-		sha := strings.TrimSpace(stdout.String())
-		if sha != "" {
-			return sha
+	if info, ok := debug.ReadBuildInfo(); ok {
+		var revision string
+		var modified bool
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				revision = setting.Value
+			}
+			if setting.Key == "vcs.modified" && setting.Value == "true" {
+				modified = true
+			}
+		}
+		if revision != "" {
+			if modified {
+				return revision + "-dirty"
+			}
+			return revision
 		}
 	}
 

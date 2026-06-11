@@ -1728,12 +1728,13 @@ func TestIntegrationIrcWait(t *testing.T) {
 
 	time.Sleep(300 * time.Millisecond)
 
-	// Append a line from ourselves (should be ignored)
+	// Append a line from ourselves and a history line (both should be ignored)
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, _ = f.WriteString("[12:00:00] #botfam <agy> Hello self\n")
+	_, _ = f.WriteString("[12:00:00] (hist) #botfam <claude> Hello history\n")
 	f.Close()
 
 	time.Sleep(300 * time.Millisecond)
@@ -1770,6 +1771,9 @@ func TestIntegrationIrcWait(t *testing.T) {
 	}
 	if strings.Contains(outStr, "Hello self") {
 		t.Fatalf("unexpectedly matched self message in output, got %q", outStr)
+	}
+	if strings.Contains(outStr, "Hello history") {
+		t.Fatalf("unexpectedly matched history message in output, got %q", outStr)
 	}
 }
 
