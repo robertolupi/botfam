@@ -1,15 +1,16 @@
 package fam
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/rlupi/botfam/internal/store"
 )
@@ -19,8 +20,7 @@ type CcrepEvent struct {
 	ProposalID string
 	CommitSHA  string
 	// Reviewer is the authenticated identity of whoever produced the event:
-	// msg.From for mailbox-sourced events, the session entry's actor for
-	// session-sourced events. A payload "reviewer" field never overrides it.
+	// entry.Sender in the IRC history log.
 	Reviewer string
 	// ClaimedReviewer is the payload "reviewer" field, if present. When it
 	// differs from Reviewer the event is a spoof suspect and must not count.
@@ -65,25 +65,20 @@ func MergeGateCmd(args []string, out io.Writer) error {
 		return errors.New("missing required --proposal <id>")
 	}
 
-	info, err := (Resolver{WorkDir: "."}).Resolve()
-	if err != nil {
-		return err
+	historyPath := os.Getenv("COLLAB_HISTORY")
+	if historyPath == "" {
+		historyPath = filepath.Join("doc", "collab", "history.jsonl")
 	}
-	st := store.New(info.Root)
-	if err := st.Init(); err != nil {
-		return err
-	}
-
-	events, skipped, err := CollectCcrepEvents(st, proposalID)
+	events, skipped, err := CollectIrcCcrepEvents(historyPath, proposalID)
 	if err != nil {
 		return err
 	}
 	if skipped > 0 {
-		fmt.Fprintf(out, "warning: skipped %d unparseable message file(s) while collecting CCREP events\n", skipped)
+		fmt.Fprintf(out, "warning: skipped %d unparseable line(s) in history log\n", skipped)
 	}
 
 	if len(events) == 0 {
-		return fmt.Errorf("no CCREP events found for proposal %q", proposalID)
+		return fmt.Errorf("no CCREP events found for proposal %q in history log", proposalID)
 	}
 
 	// Sort events by timestamp
@@ -91,9 +86,9 @@ func MergeGateCmd(args []string, out io.Writer) error {
 		return events[i].TS < events[j].TS
 	})
 
-	// Reviewer identity comes from the authenticated channel (msg.From or the
-	// session entry's actor). Events whose payload claims a different reviewer
-	// are spoof suspects: report them, never count them.
+	// Reviewer identity comes from the authenticated sender in the IRC log.
+	// Events whose payload claims a different reviewer are spoof suspects:
+	// report them, never count them.
 	var spoofSuspects []CcrepEvent
 	var trusted []CcrepEvent
 	for _, ev := range events {
@@ -176,18 +171,7 @@ func MergeGateCmd(args []string, out io.Writer) error {
 			independentApprovals = append(independentApprovals, app)
 		}
 	}
-	// Consensus check:
-	// NOTE: The current merge gate logic has the following gaps which are acceptable
-	// for Wave 1 but should be noted:
-	// - It does NOT enforce proposal deadlines/expires_at fields.
-	// - It does NOT enforce quorum types (e.g., all vs majority vs any).
-	// - The session scan in collectCcrepEvents only sees sessions whose slug
-	//   equals the proposal id; CCREP events appended to differently-named
-	//   sessions are invisible to the gate.
-	// Currently, it accepts any consensus that has >= 1 independent approval and
-	// no active blockers (request_changes or reject verdicts). Fuller enforcement
-	// is deferred to the Phase 2 ledger.
-	//
+
 	// 1. Must have at least one independent approval
 	if len(independentApprovals) == 0 {
 		suffix := ""
@@ -216,8 +200,8 @@ func printMergeGateHelp(out io.Writer) error {
 }
 
 // newCcrepEvent builds an event whose Reviewer is always the authenticated
-// identity (msg.From or session entry actor). If the payload claims a
-// different reviewer, the event is marked as a spoof suspect.
+// sender of the message. If the payload claims a different reviewer, the event
+// is marked as a spoof suspect.
 func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedReviewer string, ts float64) CcrepEvent {
 	return CcrepEvent{
 		Type:            typ,
@@ -231,7 +215,266 @@ func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedRev
 	}
 }
 
-// collectCcrepEvents gathers ccrep:* events for a proposal from the session
+func parseBangLine(body string) (map[string]string, string) {
+	if !strings.HasPrefix(body, "!") {
+		return nil, ""
+	}
+	parts := strings.Fields(body)
+	if len(parts) == 0 {
+		return nil, ""
+	}
+	verb := parts[0]
+	m := make(map[string]string)
+	
+	var currentKey string
+	var currentVal []string
+	
+	for _, part := range parts[1:] {
+		if strings.Contains(part, "=") {
+			if currentKey != "" {
+				m[currentKey] = strings.Join(currentVal, " ")
+			}
+			k, v, _ := strings.Cut(part, "=")
+			currentKey = k
+			currentVal = []string{v}
+		} else {
+			if currentKey != "" {
+				currentVal = append(currentVal, part)
+			}
+		}
+	}
+	if currentKey != "" {
+		m[currentKey] = strings.Join(currentVal, " ")
+	}
+	return m, verb
+}
+
+// CollectIrcCcrepEvents gathers ccrep:* events for a proposal from the shared
+// IRC history log file doc/collab/history.jsonl.
+func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent, int, error) {
+	var events []CcrepEvent
+	skipped := 0
+
+	file, err := os.Open(historyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, 0, nil
+		}
+		return nil, 0, fmt.Errorf("failed to open history file %s: %w", historyPath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var entry struct {
+			Timestamp string `json:"timestamp"`
+			Sender    string `json:"sender"`
+			Type      string `json:"type"`
+			Target    string `json:"target"`
+			Body      string `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			skipped++
+			continue
+		}
+
+		if entry.Type != "PRIVMSG" {
+			continue
+		}
+
+		var bodyMap map[string]any
+		var isBang bool
+		var bangKeyVals map[string]string
+		var bangVerb string
+
+		if err := json.Unmarshal([]byte(entry.Body), &bodyMap); err != nil {
+			// Not JSON. Check if it's a bang command
+			if strings.HasPrefix(entry.Body, "!") {
+				bangKeyVals, bangVerb = parseBangLine(entry.Body)
+				if bangVerb != "" {
+					isBang = true
+				}
+			}
+			if !isBang {
+				continue
+			}
+		}
+
+		var typ, propID, commitSHA, verdict, claimed string
+
+		if isBang {
+			switch bangVerb {
+			case "!propose":
+				typ = "ccrep:proposal"
+			case "!evaluate":
+				typ = "ccrep:evaluation"
+				if bangKeyVals["verdict"] == "request_changes" {
+					typ = "ccrep:critique"
+				}
+			case "!vote":
+				typ = "ccrep:evaluation"
+			case "!revision":
+				typ = "ccrep:revision"
+			default:
+				continue
+			}
+			propID = bangKeyVals["id"]
+			commitSHA = bangKeyVals["sha"]
+			verdict = bangKeyVals["verdict"]
+			claimed = bangKeyVals["reviewer"]
+		} else {
+			typ = getString(bodyMap, "type", "Type")
+			if !strings.HasPrefix(typ, "ccrep:") {
+				continue
+			}
+			propID = getString(bodyMap, "proposal_id", "proposalId", "proposal-id")
+			commitSHA = getString(bodyMap, "commit_sha", "commitSha", "new_commit_sha", "newCommitSha")
+			verdict = getString(bodyMap, "verdict", "Verdict")
+			claimed = getString(bodyMap, "reviewer", "Reviewer")
+		}
+
+		if propID != proposalID {
+			continue
+		}
+
+		var ts float64
+		t, err := time.Parse(time.RFC3339, entry.Timestamp)
+		if err == nil {
+			ts = float64(t.UnixNano()) / 1e9
+		}
+
+		events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, entry.Sender, claimed, ts))
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error scanning history file: %w", err)
+	}
+
+	return events, skipped, nil
+}
+
+func getString(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if val, ok := m[key]; ok {
+			if s, ok := val.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// TallyProposal computes and returns a summarized tally for a given proposal ID.
+func TallyProposal(historyPath string, proposalID string) (string, error) {
+	events, _, err := CollectIrcCcrepEvents(historyPath, proposalID)
+	if err != nil {
+		return "", err
+	}
+	if len(events) == 0 {
+		return fmt.Sprintf("Proposal %q: no events found in history log", proposalID), nil
+	}
+
+	// Sort events by timestamp
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].TS < events[j].TS
+	})
+
+	var author string
+	var latestCommitSHA string
+	foundProposal := false
+	var spoofSuspectsCount int
+
+	var trusted []CcrepEvent
+	for _, ev := range events {
+		if ev.SpoofSuspect {
+			spoofSuspectsCount++
+			continue
+		}
+		trusted = append(trusted, ev)
+	}
+	events = trusted
+
+	for _, ev := range events {
+		if ev.Type == "ccrep:proposal" {
+			foundProposal = true
+			author = ev.Reviewer
+			latestCommitSHA = ev.CommitSHA
+		} else if ev.Type == "ccrep:revision" {
+			latestCommitSHA = ev.CommitSHA
+		}
+	}
+
+	if !foundProposal {
+		return fmt.Sprintf("Proposal %q: no ccrep:proposal event found (fail closed)", proposalID), nil
+	}
+	if latestCommitSHA == "" {
+		return fmt.Sprintf("Proposal %q: ccrep:proposal has no commit_sha", proposalID), nil
+	}
+
+	verdicts := make(map[string]CcrepEvent)
+	for _, ev := range events {
+		if ev.Type == "ccrep:evaluation" || ev.Type == "ccrep:critique" {
+			verdicts[ev.Reviewer] = ev
+		}
+	}
+
+	var approvals []string
+	var blockers []string
+
+	for _, ev := range verdicts {
+		v := strings.ToLower(ev.Verdict)
+		if v == "approve" {
+			if ev.CommitSHA == latestCommitSHA {
+				approvals = append(approvals, ev.Reviewer)
+			}
+		} else if v == "request_changes" || v == "reject" {
+			blockers = append(blockers, fmt.Sprintf("%s (%s on %s)", ev.Reviewer, ev.Verdict, ev.CommitSHA))
+		}
+	}
+
+	sort.Strings(approvals)
+	sort.Strings(blockers)
+
+	// Check independent approvals
+	var independentApprovals []string
+	for _, app := range approvals {
+		if app != author && app != "" {
+			independentApprovals = append(independentApprovals, app)
+		}
+	}
+
+	status := "PENDING"
+	if len(blockers) > 0 {
+		status = "BLOCKED"
+	} else if len(independentApprovals) > 0 {
+		status = "APPROVED"
+	}
+
+	var details []string
+	details = append(details, fmt.Sprintf("status: %s", status))
+	details = append(details, fmt.Sprintf("author: %s", author))
+	details = append(details, fmt.Sprintf("commit: %s", latestCommitSHA))
+	if len(independentApprovals) > 0 {
+		details = append(details, fmt.Sprintf("approvals: %s", strings.Join(independentApprovals, ", ")))
+	} else {
+		details = append(details, "approvals: none")
+	}
+	if len(blockers) > 0 {
+		details = append(details, fmt.Sprintf("blockers: %s", strings.Join(blockers, ", ")))
+	}
+	if spoofSuspectsCount > 0 {
+		details = append(details, fmt.Sprintf("ignored_spoof_suspects: %d", spoofSuspectsCount))
+	}
+
+	return fmt.Sprintf("Proposal %q tally: %s", proposalID, strings.Join(details, " | ")), nil
+}
+
+// CollectCcrepEvents gathers ccrep:* events for a proposal from the session
 // log and from every actor mailbox. It returns the events, the number of
 // unparseable message files that were skipped, and any I/O error encountered
 // (collection errors fail the gate instead of degrading to "no events").
@@ -269,7 +512,7 @@ func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, e
 			claimed := getString(bodyMap, "reviewer", "Reviewer")
 			events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, entry.Actor, claimed, entry.TS))
 		}
-	} else if !errors.Is(statErr, fs.ErrNotExist) {
+	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return nil, 0, fmt.Errorf("checking session log for proposal %q: %w", proposalID, statErr)
 	}
 
@@ -290,7 +533,7 @@ func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, e
 			subDir := filepath.Join(st.RootPath(), actor, sub)
 			msgs, err := os.ReadDir(subDir)
 			if err != nil {
-				if errors.Is(err, fs.ErrNotExist) {
+				if errors.Is(err, os.ErrNotExist) {
 					continue
 				}
 				return nil, 0, fmt.Errorf("reading mailbox %q: %w", subDir, err)
@@ -302,7 +545,7 @@ func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, e
 				msgPath := filepath.Join(subDir, m.Name())
 				b, err := os.ReadFile(msgPath)
 				if err != nil {
-					if errors.Is(err, fs.ErrNotExist) {
+					if errors.Is(err, os.ErrNotExist) {
 						// Message moved/acked concurrently; not an error.
 						continue
 					}
@@ -331,13 +574,3 @@ func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, e
 	return events, skipped, nil
 }
 
-func getString(m map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if val, ok := m[key]; ok {
-			if s, ok := val.(string); ok {
-				return s
-			}
-		}
-	}
-	return ""
-}

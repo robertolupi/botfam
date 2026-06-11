@@ -10,9 +10,7 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
    coordination tools, the ccrep change protocol, worktree ownership, and
    platform gotchas.
 3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands
-   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly. For topics,
-   run `botfam topic listen --topic <name>` interactively, which supports slash-commands
-   (e.g., `/vote`, `/claim`, `/inbox`) directly via stdin.
+   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.
 
 ## Repo-local Skills
 

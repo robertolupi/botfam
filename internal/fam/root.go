@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/rlupi/botfam/internal/store"
 )
 
 type Resolver struct {
@@ -92,10 +90,25 @@ func ParseActor(base string) string {
 	default:
 		return ""
 	}
-	if actor == "" || store.ValidateName("actor", actor) != nil {
+	if actor == "" || validateName(actor) != nil {
 		return ""
 	}
 	return actor
+}
+
+func validateName(name string) error {
+	if name == "" {
+		return errors.New("name cannot be empty")
+	}
+	if len(name) > 64 {
+		return errors.New("name too long")
+	}
+	for _, r := range name {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+			return fmt.Errorf("invalid character %q in name", r)
+		}
+	}
+	return nil
 }
 
 func GitObjectStores(workDir string) ([]string, error) {

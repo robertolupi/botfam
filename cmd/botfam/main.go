@@ -147,6 +147,10 @@ func run() error {
 			srv := server.NewServer(udsPath, tcpPort)
 			fmt.Printf("Starting botfam server UDS daemon on %s, HTTP/SSE on localhost:%d\n", udsPath, tcpPort)
 			return srv.Start(context.Background())
+		case "irc-client":
+			return fam.IrcClientCmd(os.Args[2:], os.Stdout)
+		case "scribe":
+			return fam.ScribeCmd(os.Args[2:], os.Stdout)
 		case "serve":
 			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
 		case "-h", "--help", "help":
@@ -176,6 +180,8 @@ Usage:
   botfam propose --proposal <id> [--quorum <quorum>] [--deadline <deadline>]
   botfam approve --proposal <id> [--verdict <verdict>]
   botfam merge --proposal <id>
+  botfam irc-client <nick> [--server <host:port>] [--channel <channel>] [--dir <dir>]
+  botfam scribe [--server <host:port>] [--channel <channel>] [--file <path>]
 
 Collab Subcommands (debugging / direct CLI):
   botfam send --to <actor> --type <type> [--payload <json>] [--in-reply-to <id>] [--expires-at <secs>]

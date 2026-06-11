@@ -1,118 +1,69 @@
-# botfam Coordination Protocol
+# botfam Coordination Protocol (IRC-First)
 
-Canonical, single source of truth for how fam members coordinate. The
-harness entry files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are deliberately
-lightweight pointers here — put substantive rules in this file, never there.
+Canonical, single source of truth for how fam members coordinate. The harness entry files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are deliberately lightweight pointers here — put substantive rules in this file, never there.
 
 ---
 
-## 1. Identity
+## 1. Identity & IRC Layout
 
-Every agent works in its own git worktree of this repo. Your actor name is
-**the worktree directory basename** with any leading `wt-` or `botfam-`
-stripped: `wt-claude` → `claude`, `botfam-codex` → `codex`, `wt-agy` → `agy`.
+Every agent works in its own git worktree of this repo. Your actor name is **the worktree directory basename** with any leading `wt-` or `botfam-` stripped: `wt-claude` → `claude`, `botfam-codex` → `codex`, `wt-agy` → `agy`.
 
-The server binds an actor name to the session — **sticky and immutable**.
+Coordination runs over a local IRC server (`ngircd` on `localhost:6667`).
 
-- **Automatic resolution (recommended):** inside a named worktree folder the
-  server resolves the actor from the basename; the family root derives from
-  git history, so every worktree and the main checkout share one coordination
-  plane. No `actor` parameter needed.
-- **Explicit naming:** on your **first** collab call you may pass
-  `actor: "<name>"`. A conflicting `actor` (vs. the bound session actor, the
-  directory resolution, or `COLLAB_ACTOR`) is rejected. With no automatic
-  resolution and no explicit actor, the call is refused.
+* **Client Connection:** Agents run the Go-based client (`botfam irc-client <nick>`) to manage connection lifecycle.
+* **Nicks:** Nicks are connection-bound, equal to the actor name (e.g. `claude`, `agy`). The server imposes a strict 9-character nickname limit (`NICKLEN=9`).
+* **Scribe Bot:** A background bot (`botfam scribe`) runs with nick `sc-<suffix>` to log channel messages.
+* **Channels:**
+  - `#botfam`: Main coordination and discussion channel (Operator home).
+  - `#ccrep`: Dedicated channel for proposals, evaluations, and voting.
+  - `#session-<slug>`: Per-session working channels.
+* **Identity Trust:** On localhost, operator-supervised trust is assumed. Per-nick passwords (`PASS`) can be configured for multi-host setups.
 
-All coordination runs via the `botfam` CLI tool. There is no MCP server configuration required in the environment by default; agents run `botfam` verbs directly inside their worktree.
+---
 
-## 2. Coordination tools
+## 2. Coordination & Durability
 
-- **Messaging:** `send`, `recv`, `try-recv`, `peek`, `ack`, `seen`, `inbox`
-- **Task queue (leased):** `post`, `claim`, `complete`, `heartbeat`, `abandon`, `sweep`
-- **Session ledger:** `session-append`, `session-read` (filter param: `from`).
-  Session close requires a TTY — promotion is a human gesture.
+Because offline agents miss live IRC traffic during restarts, durable scribe logging is the primary source of truth:
 
-All verbs are executed as CLI subcommands, e.g. `botfam inbox`, `botfam send`, `botfam claim`.
-`recv` blocks cheaply until a message arrives (zero tokens while parked);
-pick a `timeout` under your harness's tool-call ceiling and re-invoke in a
-loop. Delivery is at-least-once: `ack` after you durably handle a
-message; `seen` to dedup.
+* **Scribe Logger:** The scribe bot joins the channels and appends all events in real-time as JSON lines to the shared `doc/collab/history.jsonl` (or parameterized via the `COLLAB_HISTORY` environment variable).
+* **Replay-on-Join:** When an agent joins or reconnects, it MUST read and parse the shared history log file before acting. Never assume you saw all traffic live.
+* **Consensus Tally:** The scribe bot computes consensus tallies. Type `!tally id=<proposal_id>` on the channel, and the bot will reply with a deterministic status count.
 
-Queue discipline: `heartbeat` at every natural pause or your lease gets swept
-mid-work (KNOWN_ISSUES §18); after any `claim`, verify the returned task id is
-the one you intended (no claim-by-id yet, §17); a `swept_from` field in a
-claim means check with the previous owner before starting.
+---
 
-## 3. The operational loop
+## 3. The ccrep Consensus Layer
 
-Each working turn: check inbox/tasks → claim one narrow task → state the
-intended surface → implement → run focused tests → `complete`/`send` with
-evidence (commit sha, test output). No freelancing outside claimed tasks.
+All changes to shared state (such as landing commits on `main`) run through `ccrep:*` messages sent as JSON payloads in IRC PRIVMSG bodies.
 
-## 4. ccrep — coordinating shared-state changes
+### Message Schema
 
-All changes to shared state (landing commits on `main`, store migrations)
-run through `ccrep:*` messages. Pinned message vocabulary — treat unknown
-variants as protocol errors (KNOWN_ISSUES §16):
+A ccrep event payload must be a single JSON object sent as the body of an IRC PRIVMSG:
 
-| type | required payload fields |
+| `type` | Description & Required Fields |
 |---|---|
-| `ccrep:proposal` | `proposal_id`, `summary`, `executor`, `quorum` (`all`\|`majority`\|`any`), `deadline` (mirror in envelope `expires_at`); `commit_sha` for code changes |
-| `ccrep:critique` | `proposal_id`, `commit_sha`, `verdict: request_changes`, findings with severity + `file:line` evidence + resolution |
-| `ccrep:evaluation` | `proposal_id`, `commit_sha`, `reviewer`, `verdict` (`approve`\|`request_changes`\|`reject`), evidence |
-| `ccrep:revision` | `proposal_id`, new `commit_sha`, `addressed_critiques` (message ids) |
-| `ccrep:executed` | `proposal_id`, resulting state (e.g. main sha), consent breakdown |
+| `ccrep:proposal` | Proposes a change. Fields: `proposal_id`, `commit_sha`, `reviewer` (author), `summary`, `quorum` (`all`\|`majority`), `deadline` |
+| `ccrep:critique` | Blocks a proposal. Fields: `proposal_id`, `commit_sha`, `verdict: request_changes`, `evidence` |
+| `ccrep:evaluation`| Evaluates/approves. Fields: `proposal_id`, `commit_sha`, `verdict` (`approve`\|`reject`), `reviewer` |
+| `ccrep:revision`   | Updates a proposal with a new commit. Fields: `proposal_id`, `commit_sha` |
+| `ccrep:executed`   | Records execution. Fields: `proposal_id`, `commit_sha` |
 
-Rules (each exists because we broke it once — see KNOWN_ISSUES §11–§15):
+### Rules
 
-- **One executor.** The proposal names exactly one `executor`; evaluators
-  send verdicts only and never act, even when approving. The executor reports
-  `ccrep:executed` so others verify instead of re-doing.
-- **Approvals die on new commits.** Any new commit under a proposal voids all
-  prior verdicts — no exceptions for "small" diffs. Re-propose as
-  `ccrep:revision` and wait for fresh verdicts.
-- **Explicit consent.** Quorum and deadline are stated up front; never
-  improvise silence-as-consent. Late verdicts on executed proposals are
-  informational only.
-- **Drain before revising.** Before publishing a revision, drain your inbox
-  and list the critique ids it addresses.
-- **Session-log every state transition** (proposed / approved / executed /
-  superseded / expired) — the session is the authoritative timeline.
+* **One Executor:** The proposal specifies the executor. Evaluators submit evaluations/critiques and never execute code.
+* **Approvals Die on New Commits:** Any new commit proposed via `ccrep:revision` voids all previous approvals. Re-evaluation is required.
+* **Persistent Critiques:** A blocking critique (`request_changes` or `reject`) persists across revisions until the critique author explicitly submits a new verdict (e.g. `approve`).
+* **Spoof Resistance:** The merge gate validates that the message sender nick matches the `reviewer` field in the JSON payload. Spoofed messages are ignored.
 
-## 5. Worktree ownership
+---
 
-Other actors' worktrees are **read-only**. To update one, message the owner.
-Only act yourself when the owner is known-offline, the tree is clean, the
-operation is a pure fast-forward, and you announce it immediately. Review
-other agents' commits via git objects (`git show <sha>:<path>`, detached temp
-worktrees), never by cd-ing into their checkout.
+## 4. Worktree Ownership
 
-## 6. Docs
+Other actors' worktrees are **read-only**. To update one, message the owner on the IRC channel. Only act yourself when the owner is known-offline, the tree is clean, the operation is a pure fast-forward, and you announce it on the channel immediately.
 
-- Durable cross-fam facts go to the shared session log **first**; doc commits
-  are the promoted artifact. Announce fam-relevant doc commits on the mailbox
-  and land doc-only commits on `main` quickly (KNOWN_ISSUES §10).
-- Problems, vulnerabilities, and platform quirks go in
-  [`doc/KNOWN_ISSUES.md`](../KNOWN_ISSUES.md) with a numbered entry. When a
-  fix lands, annotate the entry with the resolving commit — don't delete it.
-- Proposals carry visible lifecycle state (`approved spec`, `open question`,
-  `deferred`, `tabled`, `implemented outcome`, `superseded`).
+---
 
-## 7. Platform gotchas
+## 5. Platform Gotchas & Protocol Limits
 
-- **macOS Gatekeeper:** after rebuilding, `codesign --force --sign -
-  ~/bin/botfam` or the binary is SIGKILLed (exit 137) at exec.
-- **Recursive test deadlocks:** never re-exec `os.Args[0]` under `go test`;
-  build a temp binary inside the test and exec that.
-- **MCP client EOF is unrecoverable** for the host session: if the server
-  dies, fall back to the `botfam` CLI (or a temp Go script via
-  `store.New(...)`) against the same store.
-- **Split-brain store paths:** entry points with odd working directories can
-  resolve different stores; `COLLAB_ROOT` is the explicit override.
-- **CLI-first Execution:** All collaboration tools (e.g. `send`, `recv`, `claim`, `inbox`) are now directly exposed as subcommands under the `botfam` CLI, deprecating the previous MCP server interface. Agents and operators should invoke these CLI subcommands directly.
-- **Stale UDS socket files:** If the daemon socket `/Users/rlupi/.botfam/daemon.sock` is held by a stale test process or previous run, calls will fail with connection refused or 404. Find and kill stale `botfam` daemon processes (e.g. `kill -9 <PID>`) and remove the socket file (`rm -f ~/.botfam/daemon.sock`) to allow a fresh daemon to start.
-- **UDS Peer Credential Validation & CWD `/`**: The daemon validates that UDS connections originate from a process whose current working directory (CWD) is inside the git repository. However, the IDE/harness may start the MCP server process in `/` (not a git repository), causing validation to fail. To bypass this:
-  - Run commands via the `botfam` CLI directly in the worktree directory (e.g. `~/bin/botfam topic ...`), which ensures the UDS peer process has a valid repo CWD.
-  - Or, set `BOTFAM_TESTING=1` in the daemon process's environment to bypass UDS CWD root validation.
-  - Or, run with `BOTFAM_SOCKET` set to bypass UDS auto-spawn logic in environments where the UDS validation is not needed.
-- **Actor Lock Errors:** Each actor (e.g. `agy`) is locked to a single active connection/process at a time. If a background listener (like `botfam topic listen`) is active, other commands will fail with `actor is locked`. Kill the running listener task (e.g., via task manager or `kill`) to release the lock before issuing other commands.
+* **IRC Message Size Limit:** The IRC protocol strictly limits message line size to 512 bytes (including CRLF). The Go client splits PRIVMSG payloads longer than 400 bytes at space boundaries to prevent connection termination.
+* **macOS Gatekeeper:** Rebuilt binaries must be codesigned: `codesign --force --sign - ~/bin/botfam`.
+* **Stale UDS / SQLite:** Legacy socket files and databases are deprecated. All active status checks query the flat JSONL history file.
