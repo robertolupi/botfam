@@ -104,9 +104,6 @@ func Setup(args []string, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(out, "botfam root: %s\n", info.Root)
-	fmt.Fprintln(out, "")
-	fmt.Fprintln(out, ".mcp.json snippet:")
-	fmt.Fprintln(out, `{"mcpServers":{"collab":{"command":"botfam"}}}`)
 	return nil
 }
 

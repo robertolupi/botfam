@@ -1,10 +1,7 @@
 {
-    "enabledMcpjsonServers": [
-        "collab"
-    ],
     "permissions": {
         "allow": [
-            "mcp__collab__*",
+            "Bash(botfam:*)",
             "Bash(basename:*)",
             "Bash(git status:*)",
             "Bash(git log:*)",

@@ -9,8 +9,8 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
    collab call.** It is the single source of truth for identity rules,
    coordination tools, the ccrep change protocol, worktree ownership, and
    platform gotchas.
-3. Talk to the fam through the **`collab`** MCP server (`.mcp.json` is a bare
-   `{ "command": "botfam" }` — no identity in the environment, on purpose).
+3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands
+   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.
 
 ## Repo-local Skills
 

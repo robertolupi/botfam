@@ -39,10 +39,16 @@ func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
 		if got := strings.TrimSpace(string(runCmdOutput(t, wt, "git", "branch", "--show-current"))); got != "agent/"+agent {
 			t.Fatalf("%s branch = %q, want %q", wt, got, "agent/"+agent)
 		}
-		assertFileContains(t, filepath.Join(wt, ".mcp.json"), `"command": "botfam"`)
-		assertFileContains(t, filepath.Join(wt, ".codex", "config.toml"), `command = "`+bin+`"`)
-		assertFileContains(t, filepath.Join(wt, ".agents", "mcp_config.json"), `"command": "botfam"`)
-		assertFileContains(t, filepath.Join(wt, ".claude", "settings.json"), `"mcp__collab__*"`)
+		if _, err := os.Stat(filepath.Join(wt, ".mcp.json")); !os.IsNotExist(err) {
+			t.Fatalf("expected wt/.mcp.json to be deleted/not exist, got: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(wt, ".codex")); !os.IsNotExist(err) {
+			t.Fatalf("expected wt/.codex directory to be deleted/not exist, got: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(wt, ".agents")); !os.IsNotExist(err) {
+			t.Fatalf("expected wt/.agents directory to be deleted/not exist, got: %v", err)
+		}
+		assertFileContains(t, filepath.Join(wt, ".claude", "settings.json"), `"Bash(botfam:*)"`)
 		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "doc/collab/PROTOCOL.md")
 		assertFileContains(t, filepath.Join(wt, "CLAUDE.md"), "doc/collab/PROTOCOL.md")
 		assertFileContains(t, filepath.Join(wt, "GEMINI.md"), "doc/collab/PROTOCOL.md")
@@ -99,8 +105,9 @@ func TestBootstrapScriptRejectsUnsafeInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	runBootstrap(t, home, script, target, "--agents", "agy", "--botfam-bin", bin, "--no-worktrees")
-	assertFileContains(t, filepath.Join(target, ".codex", "config.toml"), `command = "botfam"`)
-	assertFileNotContains(t, filepath.Join(target, ".codex", "config.toml"), bin)
+	if _, err := os.Stat(filepath.Join(target, ".codex")); !os.IsNotExist(err) {
+		t.Fatalf("expected target/.codex to be deleted/not exist, got: %v", err)
+	}
 	assertFileContains(t, filepath.Join(target, "AGENTS.md"), "doc/collab/PROTOCOL.md")
 	assertFileContains(t, filepath.Join(target, "CLAUDE.md"), "doc/collab/PROTOCOL.md")
 	assertFileContains(t, filepath.Join(target, "GEMINI.md"), "doc/collab/PROTOCOL.md")

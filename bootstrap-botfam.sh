@@ -61,67 +61,6 @@ is_git_tracked() {
   git -C "$checkout" ls-files --error-unmatch "$rel" >/dev/null 2>&1
 }
 
-write_json_mcp_config() {
-  path=$1
-  command_name=$2
-  mkdir -p "$(dirname "$path")"
-  tmp="${path}.tmp.$$"
-  if [ -f "$path" ]; then
-    if command -v jq >/dev/null 2>&1; then
-      jq --arg command "$command_name" '
-        .mcpServers = (.mcpServers // {}) |
-        .mcpServers.collab = {"command": $command}
-      ' "$path" > "$tmp"
-    elif [ "$force" -eq 1 ]; then
-      command_json=$(json_string "$command_name")
-      cat > "$tmp" <<EOF
-{
-  "mcpServers": {
-    "collab": {
-      "command": $command_json
-    }
-  }
-}
-EOF
-    else
-      die "$path exists and jq is unavailable; install jq or rerun with --force to overwrite it"
-    fi
-  else
-    command_json=$(json_string "$command_name")
-    cat > "$tmp" <<EOF
-{
-  "mcpServers": {
-    "collab": {
-      "command": $command_json
-    }
-  }
-}
-EOF
-  fi
-  mv "$tmp" "$path"
-}
-
-write_codex_config() {
-  path=$1
-  command_name=$2
-  mkdir -p "$(dirname "$path")"
-  tmp="${path}.tmp.$$"
-  if [ -f "$path" ]; then
-    awk '
-      /^\[mcp_servers\.collab\]$/ { skip = 1; next }
-      /^\[/ && skip { skip = 0 }
-      !skip { print }
-    ' "$path" > "$tmp"
-    if [ -s "$tmp" ] && [ "$(tail -c 1 "$tmp")" != "" ]; then
-      printf '\n' >> "$tmp"
-    fi
-  else
-    : > "$tmp"
-  fi
-  printf '[mcp_servers.collab]\ncommand = "%s"\n' "$(printf '%s' "$command_name" | sed 's/\\/\\\\/g; s/"/\\"/g')" >> "$tmp"
-  mv "$tmp" "$path"
-}
-
 write_claude_settings() {
   path=$1
   mkdir -p "$(dirname "$path")"
@@ -129,10 +68,10 @@ write_claude_settings() {
   if [ -f "$path" ]; then
     if command -v jq >/dev/null 2>&1; then
       jq '
-        .enabledMcpjsonServers = ((.enabledMcpjsonServers // []) + ["collab"] | unique) |
+        (if .enabledMcpjsonServers then .enabledMcpjsonServers = (.enabledMcpjsonServers - ["collab"]) else . end) |
         .permissions = (.permissions // {}) |
-        .permissions.allow = ((.permissions.allow // []) + [
-          "mcp__collab__*",
+        .permissions.allow = (((.permissions.allow // []) - ["mcp__collab__*"]) + [
+          "Bash(botfam:*)",
           "Bash(basename:*)",
           "Bash(git status:*)",
           "Bash(git log:*)",
@@ -151,12 +90,9 @@ write_claude_settings() {
     elif [ "$force" -eq 1 ]; then
       cat > "$tmp" <<'EOF'
 {
-  "enabledMcpjsonServers": [
-    "collab"
-  ],
   "permissions": {
     "allow": [
-      "mcp__collab__*",
+      "Bash(botfam:*)",
       "Bash(basename:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
@@ -180,12 +116,9 @@ EOF
   else
     cat > "$tmp" <<'EOF'
 {
-  "enabledMcpjsonServers": [
-    "collab"
-  ],
   "permissions": {
     "allow": [
-      "mcp__collab__*",
+      "Bash(botfam:*)",
       "Bash(basename:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
@@ -501,14 +434,14 @@ fi
 
 for checkout in $all_checkouts; do
   note "writing harness config in $checkout"
-  write_json_mcp_config "$checkout/.mcp.json" "botfam"
-  write_json_mcp_config "$checkout/.agents/mcp_config.json" "botfam"
-  codex_command=$botfam_bin
-  if is_git_tracked "$checkout" "$checkout/.codex/config.toml"; then
-    codex_command=botfam
-    note "$checkout/.codex/config.toml is tracked; writing portable command 'botfam' instead of an absolute local path"
-  fi
-  write_codex_config "$checkout/.codex/config.toml" "$codex_command"
+  # Clean up legacy MCP configurations
+  rm -f "$checkout/.mcp.json"
+  rm -f "$checkout/.agents/mcp_config.json"
+  rm -f "$checkout/.codex/config.toml"
+  # Delete empty directories if empty
+  [ -d "$checkout/.agents" ] && rmdir "$checkout/.agents" 2>/dev/null || true
+  [ -d "$checkout/.codex" ] && rmdir "$checkout/.codex" 2>/dev/null || true
+
   write_claude_settings "$checkout/.claude/settings.json"
   write_agent_doc "$checkout/AGENTS.md" "$agents" "$script_dir/AGENTS.md"
   if [ ! -f "$checkout/CLAUDE.md" ]; then
@@ -539,7 +472,6 @@ Worktrees:$worktree_summary
 
 Next steps:
   1. Open each harness in its worktree, for example $worktree_dir/wt-codex.
-  2. Restart any already-running harness so MCP config is reloaded.
-  3. Run collab tools from the named worktree; actor identity resolves from the
+  2. Run botfam commands directly from the named worktree; actor identity resolves from the
      worktree basename, e.g. wt-codex -> codex.
 EOF

@@ -25,8 +25,8 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"   collab call.** It is the single source of truth for identity rules,\n" +
 	"   coordination tools, the ccrep change protocol, worktree ownership, and\n" +
 	"   platform gotchas.\n" +
-	"3. Talk to the fam through the **`collab`** MCP server (`.mcp.json` is a bare\n" +
-	"   `{ \"command\": \"botfam\" }` — no identity in the environment, on purpose).\n" +
+	"3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands\n" +
+	"   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.\n" +
 	"\n" +
 	"## Repo-local Skills\n" +
 	"\n" +
