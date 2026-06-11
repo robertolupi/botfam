@@ -428,12 +428,43 @@ func TestIntegrationSessionsOverStdio(t *testing.T) {
 	binPath := filepath.Join(root, "botfam")
 	buildBotfam(t, binPath)
 
+	absScratch, err := filepath.Abs("../../scratch")
+	if err != nil {
+		t.Fatalf("failed to resolve scratch path: %v", err)
+	}
+	_ = os.MkdirAll(absScratch, 0755)
+	testSocketPath := filepath.Join(absScratch, fmt.Sprintf("bf-stdio-sess-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(testSocketPath)
+	t.Cleanup(func() { _ = os.Remove(testSocketPath) })
+	srv := server.NewServer(testSocketPath, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+
+	var dialErr error
+	for i := 0; i < 50; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err := net.Dial("unix", testSocketPath)
+		if err == nil {
+			conn.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		t.Fatalf("failed to start UDS server: %v", dialErr)
+	}
+
 	// Helper to start real botfam serve as a subprocess
 	startRealBot := func(actor string) *botClient {
 		cmd := exec.Command(binPath, "serve")
 		cmd.Env = append(os.Environ(),
 			"COLLAB_ROOT="+root,
 			"COLLAB_ACTOR="+actor,
+			"BOTFAM_SOCKET="+testSocketPath,
 		)
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
@@ -480,7 +511,7 @@ func TestIntegrationSessionsOverStdio(t *testing.T) {
 
 	// 2. Kickoff session using CLI
 	cmd := exec.Command(binPath, "session", "new", "test-mcp-session", "--participants", "alice,bob")
-	cmd.Env = append(os.Environ(), "COLLAB_ROOT="+root)
+	cmd.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_SOCKET="+testSocketPath)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -525,7 +556,7 @@ func TestIntegrationSessionsOverStdio(t *testing.T) {
 
 	// 7. Close session using CLI
 	cmdClose := exec.Command(binPath, "session", "close", "test-mcp-session")
-	cmdClose.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_FORCE_CLOSE=1")
+	cmdClose.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_FORCE_CLOSE=1", "BOTFAM_SOCKET="+testSocketPath)
 	cmdClose.Dir = root
 	var stderrClose bytes.Buffer
 	cmdClose.Stderr = &stderrClose

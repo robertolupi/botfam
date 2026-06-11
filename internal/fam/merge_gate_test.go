@@ -12,7 +12,7 @@ import (
 
 // setupMergeGateStore creates a temp store and points COLLAB_ROOT at it so
 // MergeGateCmd's Resolver picks it up (Resolver Env is nil; t.Setenv works).
-func setupMergeGateStore(t *testing.T) *store.Store {
+func setupMergeGateStore(t *testing.T) store.Store {
 	t.Helper()
 	tempDir := t.TempDir()
 	st := store.New(tempDir)
@@ -26,7 +26,7 @@ func setupMergeGateStore(t *testing.T) *store.Store {
 // sendCcrep sends a ccrep message from one actor to another. It sleeps briefly
 // so consecutive events get strictly increasing timestamps (the gate reduces
 // to the latest verdict per reviewer by timestamp).
-func sendCcrep(t *testing.T, st *store.Store, from, to, typ string, payload map[string]any) {
+func sendCcrep(t *testing.T, st store.Store, from, to, typ string, payload map[string]any) {
 	t.Helper()
 	if _, err := st.Send(from, to, typ, payload, "", nil); err != nil {
 		t.Fatalf("failed to send ccrep: %v", err)

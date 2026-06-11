@@ -22,6 +22,7 @@ type SessionMeta struct {
 	DecisionRule string   `json:"decision_rule,omitempty"`
 	Goals        []string `json:"goals,omitempty"`
 	Guardrails   []string `json:"guardrails,omitempty"`
+	Archived     bool     `json:"archived,omitempty"`
 }
 
 type SessionHandoff struct {
@@ -39,7 +40,7 @@ type SessionEntry struct {
 }
 
 // SessionNew initializes a new session directory and writes meta.json.
-func (s *Store) SessionNew(slug string, participants []string, creator string, decisionRule string, goals []string, guardrails []string) error {
+func (s *MaildirStore) SessionNew(slug string, participants []string, creator string, decisionRule string, goals []string, guardrails []string) error {
 	if err := ValidateName("session slug", slug); err != nil {
 		return err
 	}
@@ -74,7 +75,7 @@ func (s *Store) SessionNew(slug string, participants []string, creator string, d
 }
 
 // SessionAppend appends an entry to session.jsonl inside an exclusive lock.
-func (s *Store) SessionAppend(slug, actor, body string, handoff *SessionHandoff) (SessionEntry, error) {
+func (s *MaildirStore) SessionAppend(slug, actor, body string, handoff *SessionHandoff) (SessionEntry, error) {
 	if err := ValidateName("session slug", slug); err != nil {
 		return SessionEntry{}, err
 	}
@@ -139,7 +140,7 @@ func (s *Store) SessionAppend(slug, actor, body string, handoff *SessionHandoff)
 }
 
 // SessionRead reads entries from session.jsonl with an optional actor and timestamp filter.
-func (s *Store) SessionRead(slug, actor string, sinceTS float64, limit int) ([]SessionEntry, error) {
+func (s *MaildirStore) SessionRead(slug, actor string, sinceTS float64, limit int) ([]SessionEntry, error) {
 	if err := ValidateName("session slug", slug); err != nil {
 		return nil, err
 	}
@@ -186,7 +187,7 @@ func (s *Store) SessionRead(slug, actor string, sinceTS float64, limit int) ([]S
 }
 
 // SessionList returns metadata for all active (non-archived) sessions.
-func (s *Store) SessionList() ([]SessionMeta, error) {
+func (s *MaildirStore) SessionList() ([]SessionMeta, error) {
 	dir := filepath.Join(s.Root, "sessions")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -224,8 +225,47 @@ func (s *Store) SessionList() ([]SessionMeta, error) {
 	return active, nil
 }
 
+// SessionListAll returns metadata for all sessions (both active and archived).
+func (s *MaildirStore) SessionListAll() ([]SessionMeta, error) {
+	dir := filepath.Join(s.Root, "sessions")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var all []SessionMeta
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		slug := e.Name()
+		metaPath := filepath.Join(dir, slug, "meta.json")
+		b, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var meta SessionMeta
+		if err := json.Unmarshal(b, &meta); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, slug, "ARCHIVED")); err == nil {
+				meta.Archived = true
+			}
+			all = append(all, meta)
+		}
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].CreatedAt > all[j].CreatedAt
+	})
+
+	return all, nil
+}
+
+
 // SessionRender projects a session.jsonl file into Markdown format.
-func (s *Store) SessionRender(slug string) (string, error) {
+func (s *MaildirStore) SessionRender(slug string) (string, error) {
 	entries, err := s.SessionRead(slug, "", 0, 0)
 	if err != nil {
 		return "", err
@@ -269,7 +309,7 @@ func (s *Store) SessionRender(slug string) (string, error) {
 }
 
 // SessionClose renders a session and writes it into the specified repo worktree.
-func (s *Store) SessionClose(slug, repoRoot string) error {
+func (s *MaildirStore) SessionClose(slug, repoRoot string) error {
 	rendered, err := s.SessionRender(slug)
 	if err != nil {
 		return err

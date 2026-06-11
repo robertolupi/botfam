@@ -30,7 +30,7 @@ type pendingRecv struct {
 
 type FamilyState struct {
 	mu            sync.Mutex
-	store         *store.Store
+	store         store.Store
 	subscriptions []*pendingRecv
 	locks         map[string]*store.ActorLock
 	lockPIDs      map[string]int
@@ -1010,14 +1010,14 @@ func (s *Server) computeTallyInternal(fs *FamilyState, proposalID string) (*uiTa
 		DecisionRule string   `json:"decision_rule"`
 		Participants []string `json:"participants"`
 	}
-	metaPath := filepath.Join(fs.store.Root, "sessions", proposalID, "meta.json")
+	metaPath := filepath.Join(fs.store.RootPath(), "sessions", proposalID, "meta.json")
 	if b, err := os.ReadFile(metaPath); err == nil {
 		_ = json.Unmarshal(b, &sessionMeta)
 	}
 
 	participants := sessionMeta.Participants
 	if len(participants) == 0 {
-		participants, _ = getRoster(fs.store.Root)
+		participants, _ = getRoster(fs.store.RootPath())
 	}
 
 	s.mu.Lock()
@@ -1162,7 +1162,7 @@ func (s *Server) handleTally(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, res)
 }
 
-func getProposalDetails(st *store.Store, proposalID string) (latestSHA string, deadline float64, quorum string, err error) {
+func getProposalDetails(st store.Store, proposalID string) (latestSHA string, deadline float64, quorum string, err error) {
 	events, _, err := fam.CollectCcrepEvents(st, proposalID)
 	if err != nil {
 		return "", 0, "", err
@@ -1177,7 +1177,7 @@ func getProposalDetails(st *store.Store, proposalID string) (latestSHA string, d
 	}
 
 	// Search maildirs to find the ccrep:proposal payload for quorum/deadline
-	files, err := os.ReadDir(st.Root)
+	files, err := os.ReadDir(st.RootPath())
 	if err == nil {
 		for _, f := range files {
 			if !f.IsDir() || f.Name() == "tmp" || f.Name() == "tasks" || f.Name() == "sessions" || strings.HasPrefix(f.Name(), ".") {
@@ -1185,7 +1185,7 @@ func getProposalDetails(st *store.Store, proposalID string) (latestSHA string, d
 			}
 			actor := f.Name()
 			for _, sub := range []string{"new", "processing", "cur"} {
-				subDir := filepath.Join(st.Root, actor, sub)
+				subDir := filepath.Join(st.RootPath(), actor, sub)
 				msgs, err := os.ReadDir(subDir)
 				if err != nil {
 					continue
@@ -1931,7 +1931,7 @@ func (s *Server) handleUIData(w http.ResponseWriter, r *http.Request) {
 
 	for root, fs := range familiesCopy {
 		fs.mu.Lock()
-		roster, err := getRoster(fs.store.Root)
+		roster, err := getRoster(fs.store.RootPath())
 		if err != nil {
 			fs.mu.Unlock()
 			writeError(w, http.StatusInternalServerError, err.Error())

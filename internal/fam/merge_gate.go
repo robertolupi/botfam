@@ -235,7 +235,7 @@ func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedRev
 // log and from every actor mailbox. It returns the events, the number of
 // unparseable message files that were skipped, and any I/O error encountered
 // (collection errors fail the gate instead of degrading to "no events").
-func CollectCcrepEvents(st *store.Store, proposalID string) ([]CcrepEvent, int, error) {
+func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, error) {
 	var events []CcrepEvent
 	skipped := 0
 
@@ -243,7 +243,7 @@ func CollectCcrepEvents(st *store.Store, proposalID string) ([]CcrepEvent, int, 
 	// NOTE (Wave-1 limitation): this only scans the session whose slug equals
 	// the proposal id. CCREP events recorded in sessions with any other slug
 	// are not seen by the gate. See also the gap notes in MergeGateCmd.
-	sessionDir := filepath.Join(st.Root, "sessions", proposalID)
+	sessionDir := filepath.Join(st.RootPath(), "sessions", proposalID)
 	if _, statErr := os.Stat(sessionDir); statErr == nil {
 		entries, err := st.SessionRead(proposalID, "", 0, 0)
 		if err != nil {
@@ -274,9 +274,9 @@ func CollectCcrepEvents(st *store.Store, proposalID string) ([]CcrepEvent, int, 
 	}
 
 	// B. Check collab messages across all actors
-	files, err := os.ReadDir(st.Root)
+	files, err := os.ReadDir(st.RootPath())
 	if err != nil {
-		return nil, 0, fmt.Errorf("reading store root %q: %w", st.Root, err)
+		return nil, 0, fmt.Errorf("reading store root %q: %w", st.RootPath(), err)
 	}
 	for _, f := range files {
 		if !f.IsDir() {
@@ -287,7 +287,7 @@ func CollectCcrepEvents(st *store.Store, proposalID string) ([]CcrepEvent, int, 
 			continue
 		}
 		for _, sub := range []string{"new", "processing", "cur"} {
-			subDir := filepath.Join(st.Root, actor, sub)
+			subDir := filepath.Join(st.RootPath(), actor, sub)
 			msgs, err := os.ReadDir(subDir)
 			if err != nil {
 				if errors.Is(err, fs.ErrNotExist) {

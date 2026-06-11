@@ -157,7 +157,7 @@ func TestMessageLifecycleSendRecvAckSeen(t *testing.T) {
 	}
 
 	// Verify it is in the new folder
-	newFiles, err := listJSON(filepath.Join(s.Root, "bob", "new"))
+	newFiles, err := listJSON(filepath.Join(s.RootPath(), "bob", "new"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestMessageLifecycleSendRecvAckSeen(t *testing.T) {
 	}
 
 	// Verify processing
-	procFiles, err := listJSON(filepath.Join(s.Root, "bob", "processing"))
+	procFiles, err := listJSON(filepath.Join(s.RootPath(), "bob", "processing"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestMessageLifecycleSendRecvAckSeen(t *testing.T) {
 	}
 
 	// Verify cur
-	curFiles, err := listJSON(filepath.Join(s.Root, "bob", "cur"))
+	curFiles, err := listJSON(filepath.Join(s.RootPath(), "bob", "cur"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestMessageCrashRedelivery(t *testing.T) {
 		t.Fatalf("expected to reserve message, got: %v", got)
 	}
 
-	procFiles, _ := listJSON(filepath.Join(s.Root, "bob", "processing"))
+	procFiles, _ := listJSON(filepath.Join(s.RootPath(), "bob", "processing"))
 	if len(procFiles) != 1 {
 		t.Fatalf("expected message to be in processing, got %d files", len(procFiles))
 	}
@@ -266,11 +266,11 @@ func TestMessageCrashRedelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	procFiles, _ = listJSON(filepath.Join(s.Root, "bob", "processing"))
+	procFiles, _ = listJSON(filepath.Join(s.RootPath(), "bob", "processing"))
 	if len(procFiles) != 0 {
 		t.Fatalf("expected processing to be empty, got %d files", len(procFiles))
 	}
-	newFiles, _ := listJSON(filepath.Join(s.Root, "bob", "new"))
+	newFiles, _ := listJSON(filepath.Join(s.RootPath(), "bob", "new"))
 	if len(newFiles) != 1 {
 		t.Fatalf("expected message to return to new, got %d files", len(newFiles))
 	}
@@ -341,7 +341,7 @@ func TestMessageExpiryDeadLetter(t *testing.T) {
 		t.Fatalf("received expired message: %v", got)
 	}
 
-	expiredFiles, err := listJSON(filepath.Join(s.Root, "bob", "expired"))
+	expiredFiles, err := listJSON(filepath.Join(s.RootPath(), "bob", "expired"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestMessageExpiryDeadLetter(t *testing.T) {
 		t.Fatalf("expected 1 file in expired, got: %d", len(expiredFiles))
 	}
 
-	newFiles, _ := listJSON(filepath.Join(s.Root, "bob", "new"))
+	newFiles, _ := listJSON(filepath.Join(s.RootPath(), "bob", "new"))
 	if len(newFiles) != 0 {
 		t.Fatalf("expected 0 files in new, got: %d", len(newFiles))
 	}
@@ -366,7 +366,7 @@ func TestTaskLifecyclePostClaimHeartbeatComplete(t *testing.T) {
 		t.Fatalf("unexpected task state: %+v", task)
 	}
 
-	openFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "open"))
+	openFiles, _ := listJSON(filepath.Join(s.RootPath(), "tasks", "open"))
 	if len(openFiles) != 1 {
 		t.Fatalf("expected 1 open task file, got: %d", len(openFiles))
 	}
@@ -404,7 +404,7 @@ func TestTaskLifecyclePostClaimHeartbeatComplete(t *testing.T) {
 		t.Fatalf("expected result outcome=ok, got: %+v", completed.Result)
 	}
 
-	doneFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "done"))
+	doneFiles, _ := listJSON(filepath.Join(s.RootPath(), "tasks", "done"))
 	if len(doneFiles) != 1 {
 		t.Fatalf("expected 1 done task file, got: %d", len(doneFiles))
 	}
@@ -441,7 +441,7 @@ func TestTaskLeaseExpirySweep(t *testing.T) {
 		t.Fatalf("expected SweptFrom='bob' and SweptAt set, got: %+v", sweptTask)
 	}
 
-	openFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "open"))
+	openFiles, _ := listJSON(filepath.Join(s.RootPath(), "tasks", "open"))
 	if len(openFiles) != 1 {
 		t.Fatalf("expected task to return to open, got: %d files", len(openFiles))
 	}
@@ -738,10 +738,10 @@ func TestTaskSweepConcurrency(t *testing.T) {
 		claimed.SweptAt = nil
 		claimed.SweptFrom = ""
 
-		path := filepath.Join(s.Root, "tasks", "claimed", "bob", claimed.filename)
+		path := filepath.Join(s.RootPath(), "tasks", "claimed", "bob", claimed.filename)
 		// Clean folders
-		_ = os.Remove(filepath.Join(s.Root, "tasks", "open", claimed.filename))
-		_ = os.Remove(filepath.Join(s.Root, "tasks", "done", claimed.filename))
+		_ = os.Remove(filepath.Join(s.RootPath(), "tasks", "open", claimed.filename))
+		_ = os.Remove(filepath.Join(s.RootPath(), "tasks", "done", claimed.filename))
 		_ = os.MkdirAll(filepath.Dir(path), 0755)
 		if err := writeJSON(path, claimed); err != nil {
 			t.Fatal(err)
@@ -770,8 +770,8 @@ func TestTaskSweepConcurrency(t *testing.T) {
 		}
 
 		// Verify that the file exists in exactly one place (either open or claimed)
-		openExists := fileExists(filepath.Join(s.Root, "tasks", "open", claimed.filename))
-		claimedExists := fileExists(filepath.Join(s.Root, "tasks", "claimed", "bob", claimed.filename))
+		openExists := fileExists(filepath.Join(s.RootPath(), "tasks", "open", claimed.filename))
+		claimedExists := fileExists(filepath.Join(s.RootPath(), "tasks", "claimed", "bob", claimed.filename))
 
 		if openExists && claimedExists {
 			t.Fatal("task exists concurrently in both open and claimed folders (race condition caused duplicate task file)")
@@ -819,7 +819,7 @@ func TestSweepClaimNoDuplicate(t *testing.T) {
 
 		// count files holding task.ID across tasks/open and tasks/claimed/*
 		openCount := 0
-		openFiles, _ := listJSON(filepath.Join(s.Root, "tasks", "open"))
+		openFiles, _ := listJSON(filepath.Join(s.RootPath(), "tasks", "open"))
 		for _, f := range openFiles {
 			if strings.HasSuffix(f, "-"+task.ID+".json") {
 				openCount++
@@ -827,7 +827,7 @@ func TestSweepClaimNoDuplicate(t *testing.T) {
 		}
 
 		claimedCount := 0
-		claimedRoot := filepath.Join(s.Root, "tasks", "claimed")
+		claimedRoot := filepath.Join(s.RootPath(), "tasks", "claimed")
 		actors, _ := os.ReadDir(claimedRoot)
 		for _, actorDir := range actors {
 			if actorDir.IsDir() {
@@ -858,7 +858,7 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tmpDir := filepath.Join(s.Root, "tmp")
+	tmpDir := filepath.Join(s.RootPath(), "tmp")
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -905,7 +905,7 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 	if fileExists(msgPath) {
 		t.Error("expected message tmp file to be deleted")
 	}
-	recoveredMsgPath := filepath.Join(s.Root, "tasks", "open", "msg-1.json")
+	recoveredMsgPath := filepath.Join(s.RootPath(), "tasks", "open", "msg-1.json")
 	if fileExists(recoveredMsgPath) {
 		t.Error("expected message NOT to be recovered as a task in tasks/open/")
 	}
@@ -914,7 +914,7 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 	if fileExists(taskPath) {
 		t.Error("expected task tmp file to be removed from tmp/")
 	}
-	recoveredTaskPath := filepath.Join(s.Root, "tasks", "open", "task-1.json")
+	recoveredTaskPath := filepath.Join(s.RootPath(), "tasks", "open", "task-1.json")
 	if !fileExists(recoveredTaskPath) {
 		t.Fatal("expected task to be recovered to tasks/open/")
 	}
@@ -935,11 +935,11 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 	if fileExists(donePath) {
 		t.Error("expected done task tmp file to be removed from tmp/")
 	}
-	recoveredDonePath := filepath.Join(s.Root, "tasks", "done", "task-done.json")
+	recoveredDonePath := filepath.Join(s.RootPath(), "tasks", "done", "task-done.json")
 	if !fileExists(recoveredDonePath) {
 		t.Fatal("expected done task to be recovered to tasks/done/")
 	}
-	recoveredOpenDonePath := filepath.Join(s.Root, "tasks", "open", "task-done.json")
+	recoveredOpenDonePath := filepath.Join(s.RootPath(), "tasks", "open", "task-done.json")
 	if fileExists(recoveredOpenDonePath) {
 		t.Error("expected done task NOT to be recovered to tasks/open/")
 	}

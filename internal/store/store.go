@@ -30,27 +30,31 @@ func lockKey(root, actor string) string {
 	return filepath.Clean(filepath.Join(absRoot, actor, ".lock"))
 }
 
-type Store struct {
+type MaildirStore struct {
 	Root string
 }
-
 type ActorLock struct {
 	file *os.File
 	key  string
 }
 
-func (s *Store) IsActorLocked(actor string) bool {
+
+func (s *MaildirStore) IsActorLocked(actor string) bool {
 	key := lockKey(s.Root, actor)
 	activeLocksMu.Lock()
 	defer activeLocksMu.Unlock()
 	return activeLocks[key]
 }
 
-func New(root string) *Store {
-	return &Store{Root: root}
+func New(root string) Store {
+	return &SqliteStore{Root: root}
 }
 
-func (s *Store) Init() error {
+func (s *MaildirStore) RootPath() string {
+	return s.Root
+}
+
+func (s *MaildirStore) Init() error {
 	for _, dir := range []string{"tmp", "tasks/open", "tasks/claimed", "tasks/done"} {
 		if err := os.MkdirAll(filepath.Join(s.Root, dir), 0o755); err != nil {
 			return err
@@ -59,7 +63,7 @@ func (s *Store) Init() error {
 	return nil
 }
 
-func (s *Store) EnsureActor(actor string) error {
+func (s *MaildirStore) EnsureActor(actor string) error {
 	if err := ValidateName("actor", actor); err != nil {
 		return err
 	}
@@ -71,7 +75,7 @@ func (s *Store) EnsureActor(actor string) error {
 	return nil
 }
 
-func (s *Store) LockActor(actor string) (*ActorLock, error) {
+func (s *MaildirStore) LockActor(actor string) (*ActorLock, error) {
 	if err := s.EnsureActor(actor); err != nil {
 		return nil, err
 	}
@@ -103,7 +107,7 @@ func (l *ActorLock) Close() error {
 	return l.file.Close()
 }
 
-func (s *Store) RollbackProcessing(actor string) error {
+func (s *MaildirStore) RollbackProcessing(actor string) error {
 	if err := s.EnsureActor(actor); err != nil {
 		return err
 	}
@@ -117,7 +121,7 @@ func (s *Store) RollbackProcessing(actor string) error {
 	return nil
 }
 
-func (s *Store) Send(from, to, typ string, payload map[string]any, inReplyTo string, expiresAt *float64) (Message, error) {
+func (s *MaildirStore) Send(from, to, typ string, payload map[string]any, inReplyTo string, expiresAt *float64) (Message, error) {
 	if err := ValidateName("from actor", from); err != nil {
 		return Message{}, err
 	}
@@ -152,7 +156,7 @@ func (s *Store) Send(from, to, typ string, payload map[string]any, inReplyTo str
 	return msg, nil
 }
 
-func (s *Store) TryRecv(actor, matchType string) (*Message, error) {
+func (s *MaildirStore) TryRecv(actor, matchType string) (*Message, error) {
 	if err := s.expire(actor); err != nil {
 		return nil, err
 	}
@@ -182,7 +186,7 @@ func (s *Store) TryRecv(actor, matchType string) (*Message, error) {
 	return nil, nil
 }
 
-func (s *Store) Recv(ctx context.Context, actor, matchType string, timeout time.Duration) (*Message, error) {
+func (s *MaildirStore) Recv(ctx context.Context, actor, matchType string, timeout time.Duration) (*Message, error) {
 	deadline := time.Now().Add(timeout)
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
@@ -211,7 +215,7 @@ func (s *Store) Recv(ctx context.Context, actor, matchType string, timeout time.
 	}
 }
 
-func (s *Store) Peek(actor, matchType string) (*Message, error) {
+func (s *MaildirStore) Peek(actor, matchType string) (*Message, error) {
 	if err := s.expire(actor); err != nil {
 		return nil, err
 	}
@@ -232,7 +236,7 @@ func (s *Store) Peek(actor, matchType string) (*Message, error) {
 	return nil, nil
 }
 
-func (s *Store) Ack(actor, msgID string, outcome any) (*Message, error) {
+func (s *MaildirStore) Ack(actor, msgID string, outcome any) (*Message, error) {
 	files, err := listJSON(filepath.Join(s.Root, actor, "processing"))
 	if err != nil {
 		return nil, err
@@ -258,7 +262,7 @@ func (s *Store) Ack(actor, msgID string, outcome any) (*Message, error) {
 	return nil, fmt.Errorf("message %q is not reserved by %s", msgID, actor)
 }
 
-func (s *Store) Seen(actor, msgID string) (bool, error) {
+func (s *MaildirStore) Seen(actor, msgID string) (bool, error) {
 	files, err := listJSON(filepath.Join(s.Root, actor, "cur"))
 	if err != nil {
 		return false, err
@@ -272,7 +276,7 @@ func (s *Store) Seen(actor, msgID string) (bool, error) {
 	return false, nil
 }
 
-func (s *Store) Inbox(actor string) (InboxSnapshot, error) {
+func (s *MaildirStore) Inbox(actor string) (InboxSnapshot, error) {
 	if err := s.EnsureActor(actor); err != nil {
 		return InboxSnapshot{}, err
 	}
@@ -292,7 +296,7 @@ func (s *Store) Inbox(actor string) (InboxSnapshot, error) {
 	return InboxSnapshot{Actor: actor, New: idsFromFiles(newFiles), Processing: idsFromFiles(proc), Cur: idsFromFiles(cur), Tasks: counts}, nil
 }
 
-func (s *Store) Post(actor, typ string, payload map[string]any) (Task, error) {
+func (s *MaildirStore) Post(actor, typ string, payload map[string]any) (Task, error) {
 	if err := ValidateName("actor", actor); err != nil {
 		return Task{}, err
 	}
@@ -323,7 +327,7 @@ func matchFilters(task Task, typeFilter, suggestedOwnerFilter string) bool {
 	return true
 }
 
-func (s *Store) Claim(actor string, leaseTTL time.Duration, opts ClaimOptions) (*Task, error) {
+func (s *MaildirStore) Claim(actor string, leaseTTL time.Duration, opts ClaimOptions) (*Task, error) {
 	if err := ValidateName("actor", actor); err != nil {
 		return nil, err
 	}
@@ -470,7 +474,7 @@ func (s *Store) Claim(actor string, leaseTTL time.Duration, opts ClaimOptions) (
 	return nil, nil
 }
 
-func (s *Store) Complete(actor, taskID string, result any) (*Task, error) {
+func (s *MaildirStore) Complete(actor, taskID string, result any) (*Task, error) {
 	path, f, task, err := s.findClaimed(actor, taskID)
 	if err != nil {
 		return nil, err
@@ -504,7 +508,7 @@ func (s *Store) Complete(actor, taskID string, result any) (*Task, error) {
 	return &task, nil
 }
 
-func (s *Store) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*Task, error) {
+func (s *MaildirStore) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*Task, error) {
 	path, f, task, err := s.findClaimed(actor, taskID)
 	if err != nil {
 		return nil, err
@@ -530,7 +534,7 @@ func (s *Store) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*Task, 
 	return &task, nil
 }
 
-func (s *Store) Abandon(actor, taskID, reason string) (*Task, error) {
+func (s *MaildirStore) Abandon(actor, taskID, reason string) (*Task, error) {
 	path, f, task, err := s.findClaimed(actor, taskID)
 	if err != nil {
 		return nil, err
@@ -567,7 +571,7 @@ func (s *Store) Abandon(actor, taskID, reason string) (*Task, error) {
 	return &task, nil
 }
 
-func (s *Store) reapStaleTmpFiles() error {
+func (s *MaildirStore) reapStaleTmpFiles() error {
 	tmpDir := filepath.Join(s.Root, "tmp")
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
@@ -638,7 +642,7 @@ func (s *Store) reapStaleTmpFiles() error {
 	return nil
 }
 
-func (s *Store) Sweep() ([]Task, error) {
+func (s *MaildirStore) Sweep() ([]Task, error) {
 	_ = s.reapStaleTmpFiles()
 
 	root := filepath.Join(s.Root, "tasks", "claimed")
@@ -701,7 +705,7 @@ func (s *Store) Sweep() ([]Task, error) {
 	return out, nil
 }
 
-func (s *Store) TaskCounts() (TaskCounts, error) {
+func (s *MaildirStore) TaskCounts() (TaskCounts, error) {
 	open, _ := listJSON(filepath.Join(s.Root, "tasks", "open"))
 	done, _ := listJSON(filepath.Join(s.Root, "tasks", "done"))
 	claimed := map[string]int{}
@@ -715,7 +719,7 @@ func (s *Store) TaskCounts() (TaskCounts, error) {
 	return TaskCounts{Open: len(open), Claimed: claimed, Done: len(done)}, nil
 }
 
-func (s *Store) findClaimed(actor, taskID string) (string, string, Task, error) {
+func (s *MaildirStore) findClaimed(actor, taskID string) (string, string, Task, error) {
 	files, err := listJSON(filepath.Join(s.Root, "tasks", "claimed", actor))
 	if err != nil {
 		return "", "", Task{}, err
@@ -730,7 +734,7 @@ func (s *Store) findClaimed(actor, taskID string) (string, string, Task, error) 
 	return "", "", Task{}, fmt.Errorf("task %q is not claimed by %s", taskID, actor)
 }
 
-func (s *Store) expire(actor string) error {
+func (s *MaildirStore) expire(actor string) error {
 	if err := s.EnsureActor(actor); err != nil {
 		return err
 	}
@@ -750,7 +754,7 @@ func (s *Store) expire(actor string) error {
 	return nil
 }
 
-func (s *Store) writeJSONAtomic(dst string, v any) error {
+func (s *MaildirStore) writeJSONAtomic(dst string, v any) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
