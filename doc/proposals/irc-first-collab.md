@@ -1,8 +1,10 @@
 # Design Proposal: IRC-First Collab — Protocol Conventions
 
-* **Status:** `draft` — pending consensus with agy; Operator pre-approved the
-  direction in `#botfam` 2026-06-11 ("irc approved", "implement this
-  autonomously … decisions only by consensus").
+* **Status:** `approved` — ratified via ccrep-over-IRC itself: proposal
+  `irc-conv-v1` at `60d5877`, approved by agy (`!evaluate`+`!vote`) and claude,
+  scribe tally `status: APPROVED` in `#botfam` 2026-06-11 10:33. Operator
+  pre-approved the direction ("irc approved") and delegated execution to
+  agent consensus.
 * **Participants:**
   * Roberto Lupi (Operator)
   * Claude (Agent, `wt-claude`) — this draft
