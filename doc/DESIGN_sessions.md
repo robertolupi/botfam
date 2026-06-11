@@ -1,8 +1,12 @@
 # botfam — Sessions (design-discussion layer)
 
 > [!NOTE]
-> **Status**: Superseded/Evolved into the IRC-first session design (2026-06-11).
-> Working sessions are now run inside dedicated, ephemeral `#session-<slug>` IRC channels instead of local directories under `$COLLAB_ROOT`. Scribe logs these channels, and `tools/irclog2sessions.py` is used to parse and render raw IRC logs into structured Markdown session files in the repository.
+> **Status**: Superseded/Evolved into the IRC-first session design
+> (2026-06-11). Working sessions are now run inside dedicated, ephemeral
+> `#session-<slug>` IRC channels instead of local directories under
+> `$COLLAB_ROOT`. Scribe logs these channels, and `tools/irclog2sessions.py` is
+> used to parse and render raw IRC logs into structured Markdown session files
+> in the repository.
 
 Status: **Proposed** (claude draft from claude + agy joint analysis of the
 deep-cuts and hydra prior art; pending proto-CCREP review) · depends on Phase 1
@@ -20,15 +24,15 @@ the session lifecycle, the behavioral rules, the human-gated tombstone, and the
 promotion of compacted records into the repo — proven over ~20 live sessions,
 shaped by a real three-writer collision on a shared log (2026-06-07). From
 **hydra** (`hydra/ledger.py`): JSONL as the storage format with flock'd
-appends. Deliberately *not* taken from hydra: the seq/`prev_hash`/SHA-256
-chain and CAS — hydra recomputed them by re-parsing the whole file inside the
+appends. Deliberately *not* taken from hydra: the seq/`prev_hash`/SHA-256 chain
+and CAS — hydra recomputed them by re-parsing the whole file inside the
 exclusive lock on every append (O(N) per write), which is exactly the "ledger
 costs on the coordination path" mistake botfam's lineage retired
 ([v1-hydra](lineage/v1-hydra.md)). Tamper-evidence is a bottown (token
 identity) concern; like the CCREP ledger ([DESIGN_ccrep.md](DESIGN_ccrep.md)
 §3), hash-chaining can be added later without changing the tool surface.
 
----
+______________________________________________________________________
 
 ## 1. The model
 
@@ -36,8 +40,8 @@ identity) concern; like the CCREP ledger ([DESIGN_ccrep.md](DESIGN_ccrep.md)
   line. Total order = append order; there is no merge step and no timestamp
   tie-breaking. Appends are **blind** — lock, write one line, unlock; never
   read-before-write.
-- **Server-mediated:** agents never touch the file; `session_append` stamps
-  the bound actor and the server clock. JSONL is both the storage and the wire
+- **Server-mediated:** agents never touch the file; `session_append` stamps the
+  bound actor and the server clock. JSONL is both the storage and the wire
   format.
 - **Render, then promote:** at close, the log is *rendered* to a human-readable
   `session.md` (deep-cuts' compaction step, reduced to a pure projection) and
@@ -47,8 +51,8 @@ identity) concern; like the CCREP ledger ([DESIGN_ccrep.md](DESIGN_ccrep.md)
 - **Tombstone:** an `ARCHIVED` marker file ends a session — created **only by
   the human operator**, never by agents (§6).
 
-This is the same storage pattern as the Phase 2 CCREP ledger (append-only
-JSONL under `flock`, consensus *derived* by reading, never written) — one Go
+This is the same storage pattern as the Phase 2 CCREP ledger (append-only JSONL
+under `flock`, consensus *derived* by reading, never written) — one Go
 primitive serves both layers.
 
 ## 2. State layout
@@ -100,19 +104,19 @@ they are MCP tools at all: `$COLLAB_ROOT` is outside every agent's workspace,
 so direct file writes would resurrect the permission prompts the committed
 project settings eliminated):
 
-| Tool | Behavior |
-|---|---|
-| `session_append(session, body, handoff?)` | append one entry under `flock`; server stamps `id`/`actor`/`ts`; returns the stamped entry |
+| Tool                                              | Behavior                                                                                                                  |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `session_append(session, body, handoff?)`         | append one entry under `flock`; server stamps `id`/`actor`/`ts`; returns the stamped entry                                |
 | `session_read(session, from?, since_ts?, limit?)` | read-only: parse the log, optionally filter by actor (`from`) / entries after `since_ts`; returns a JSON array of entries |
 
 CLI subcommands (operator / session-closer actions, not hot-path):
 
-| Command | Behavior |
-|---|---|
-| `botfam session new <slug> [--participants a,b]` | scaffold the session dir + `meta.json` |
-| `botfam session list` | active sessions (no `ARCHIVED`), most recent first |
-| `botfam session render <slug>` | project `session.jsonl` → markdown on stdout |
-| `botfam session close <slug>` | render and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`); **refuses to run without a TTY on stdin** (§6) |
+| Command                                          | Behavior                                                                                                                                                                                          |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `botfam session new <slug> [--participants a,b]` | scaffold the session dir + `meta.json`                                                                                                                                                            |
+| `botfam session list`                            | active sessions (no `ARCHIVED`), most recent first                                                                                                                                                |
+| `botfam session render <slug>`                   | project `session.jsonl` → markdown on stdout                                                                                                                                                      |
+| `botfam session close <slug>`                    | render and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`); **refuses to run without a TTY on stdin** (§6) |
 
 `close` writes into the worktree but never commits — committing the promoted
 log follows the repo's normal rules (the operator asks). The fam discovers the
@@ -129,11 +133,10 @@ active session by convention: the kickoff `collab` message names it.
 - **Render** (deterministic, idempotent): entries in file order;
   `## [<actor>, <RFC3339 UTC from ts>]` headers; body verbatim; handoff as the
   deep-cuts `**→ Handoff:**` block. Output begins with a
-  `<!-- RENDERED by botfam session render — DO NOT EDIT (append via
-  session_append) -->` banner. An unparseable line renders as a visible
-  `## [corrupt entry]` stanza at its position — surfaced, not silently
-  dropped. The rendered file is derived, never an input; concurrent renders
-  are benign.
+  `<!-- RENDERED by botfam session render — DO NOT EDIT (append via session_append) -->`
+  banner. An unparseable line renders as a visible `## [corrupt entry]` stanza
+  at its position — surfaced, not silently dropped. The rendered file is
+  derived, never an input; concurrent renders are benign.
 
 ## 6. Closeout & the human gate
 
@@ -144,17 +147,17 @@ active session by convention: the kickoff `collab` message names it.
 2. Only the operator creates `ARCHIVED`. A closeout entry without a tombstone
    means *awaiting sign-off* — still active, still resumable, more work can be
    requested.
-3. Promotion (`session close` → repo → commit) is part of sign-off, not part
-   of the agents' closeout.
+3. Promotion (`session close` → repo → commit) is part of sign-off, not part of
+   the agents' closeout.
 
 One mechanical guard exists in v0 (operator decision, Roberto 2026-06-10):
 **`session close` refuses to run unless stdin is a TTY.** Harness-driven agents
 have no TTY, so the promotion gesture cannot be performed by a bot; the human
 at a real terminal always can. It is a guardrail, not security — a determined
-process can fake a pty — consistent with the trusted-fam posture. `session
-render` (read-only, stdout) stays bot-callable; only the gesture that writes
-into the repo is gated. The `ARCHIVED` tombstone remains pure convention in
-v0 (anyone *could* create the file), like the roster. Real enforcement
+process can fake a pty — consistent with the trusted-fam posture.
+`session render` (read-only, stdout) stays bot-callable; only the gesture that
+writes into the repo is gated. The `ARCHIVED` tombstone remains pure convention
+in v0 (anyone *could* create the file), like the roster. Real enforcement
 arrives with bottown's tokens.
 
 ## 7. Behavioral rules (the protocol half)
@@ -171,8 +174,8 @@ them in v0:
 - **Log agreement, not only dissent.** Consensus — and who reached it — must be
   readable from the record alone.
 - **Document the operator's steering** as an entry crediting the operator
-  (relayed via any agent's `session_append`; the body names the operator as
-  the source).
+  (relayed via any agent's `session_append`; the body names the operator as the
+  source).
 - **Workspace-relative paths only** in bodies and handoffs — absolute worktree
   paths (`/Users/…/wt-agy/…`) do not resolve for peers. Enforcement (a lint on
   append) is deferred.
@@ -187,7 +190,7 @@ them in v0:
 - Tombstone/permission enforcement (bottown tokens).
 - Path-rule linting on `session_append`.
 - Session search/indexing; cross-session links.
-- Any automatic pruning of live session dirs — `cur/`-style unbounded growth
-  is accepted, same as [DESIGN.md](DESIGN.md) §12.
+- Any automatic pruning of live session dirs — `cur/`-style unbounded growth is
+  accepted, same as [DESIGN.md](DESIGN.md) §12.
 - Auto-detection of "the active session" — convention (kickoff message) until
   it hurts.
