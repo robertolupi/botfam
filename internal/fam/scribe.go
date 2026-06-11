@@ -30,14 +30,6 @@ func ScribeCmd(args []string, out io.Writer) error {
 	channel = "#botfam,#ccrep"
 
 	historyFile = os.Getenv("COLLAB_HISTORY")
-	if historyFile == "" {
-		info, err := (Resolver{WorkDir: "."}).Resolve()
-		if err == nil && info.Root != "" {
-			historyFile = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
-		} else {
-			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
-		}
-	}
 
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
@@ -66,6 +58,15 @@ func ScribeCmd(args []string, out io.Writer) error {
 			}
 		default:
 			return fmt.Errorf("unknown scribe argument %q", arg)
+		}
+	}
+
+	if historyFile == "" {
+		info, err := (Resolver{WorkDir: "."}).Resolve()
+		if err == nil && info.Root != "" {
+			historyFile = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
+		} else {
+			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
 		}
 	}
 
@@ -158,6 +159,12 @@ func ScribeCmd(args []string, out io.Writer) error {
 			entry.Sender = m[1]
 			entry.Type = m[2]
 			entry.Target = m[3]
+			if entry.Type == "JOIN" && entry.Sender == nick {
+				// Announce version on join
+				announcement := fmt.Sprintf("[scribe] version %s joined.", GetVersion())
+				cmd := fmt.Sprintf("PRIVMSG %s :%s\r\n", entry.Target, announcement)
+				_, _ = conn.Write([]byte(cmd))
+			}
 		} else {
 			entry.Sender = "server"
 			entry.Type = "RAW"
@@ -171,7 +178,7 @@ func ScribeCmd(args []string, out io.Writer) error {
 			_ = logFile.Sync()
 		}
 
-		// Handle !tally requests on the channel
+		// Handle !tally and !version requests on the channel
 		if entry.Type == "PRIVMSG" {
 			if m := tallyRe.FindStringSubmatch(entry.Body); m != nil {
 				proposalID := m[1]
@@ -184,6 +191,14 @@ func ScribeCmd(args []string, out io.Writer) error {
 					replyTarget = entry.Sender
 				}
 				cmd := fmt.Sprintf("PRIVMSG %s :%s\r\n", replyTarget, summary)
+				_, _ = conn.Write([]byte(cmd))
+			} else if strings.HasPrefix(strings.TrimSpace(entry.Body), "!version") {
+				replyTarget := entry.Target
+				if !strings.HasPrefix(replyTarget, "#") {
+					replyTarget = entry.Sender
+				}
+				replyBody := fmt.Sprintf("[scribe] version: %s", GetVersion())
+				cmd := fmt.Sprintf("PRIVMSG %s :%s\r\n", replyTarget, replyBody)
 				_, _ = conn.Write([]byte(cmd))
 			}
 		}

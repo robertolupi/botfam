@@ -149,6 +149,8 @@ func run() error {
 			return srv.Start(context.Background())
 		case "irc-client":
 			return fam.IrcClientCmd(os.Args[2:], os.Stdout)
+		case "irc-wait":
+			return fam.IrcWaitCmd(os.Args[2:], os.Stdout)
 		case "scribe":
 			return fam.ScribeCmd(os.Args[2:], os.Stdout)
 		case "serve":
@@ -180,7 +182,8 @@ Usage:
   botfam propose --proposal <id> [--quorum <quorum>] [--deadline <deadline>]
   botfam approve --proposal <id> [--verdict <verdict>]
   botfam merge --proposal <id>
-  botfam irc-client <nick> [--server <host:port>] [--channel <channel>] [--dir <dir>]
+  botfam irc-client <nick> [--server <host:port>] [--channel <channel>] [--dir <dir>] [--pass-file <file>]
+  botfam irc-wait --nick <nick> [--file <path>]
   botfam scribe [--server <host:port>] [--channel <channel>] [--file <path>]
 
 Collab Subcommands (debugging / direct CLI):

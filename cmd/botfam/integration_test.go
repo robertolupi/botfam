@@ -1705,3 +1705,72 @@ func TestIntegrationTopicsAndCursors(t *testing.T) {
 	}
 }
 
+func TestIntegrationIrcWait(t *testing.T) {
+	root := t.TempDir()
+
+	binPath := filepath.Join(root, "botfam")
+	buildBotfam(t, binPath)
+
+	logPath := filepath.Join(root, "test.log")
+	err := os.WriteFile(logPath, []byte("initial line\n"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmdWait := exec.Command(binPath, "irc-wait", "--file", logPath, "--nick", "agy")
+	var stdout, stderr bytes.Buffer
+	cmdWait.Stdout = &stdout
+	cmdWait.Stderr = &stderr
+
+	if err := cmdWait.Start(); err != nil {
+		t.Fatalf("failed to start irc-wait: %v", err)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Append a line from ourselves (should be ignored)
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("[12:00:00] #botfam <agy> Hello self\n")
+	f.Close()
+
+	time.Sleep(300 * time.Millisecond)
+	if cmdWait.ProcessState != nil && cmdWait.ProcessState.Exited() {
+		t.Fatalf("irc-wait exited early on ignored message, error: %s", stderr.String())
+	}
+
+	// Append a line from someone else (should match and trigger exit)
+	f, err = os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.WriteString("[12:00:00] #botfam <claude> Hello agy\n")
+	f.Close()
+
+	waitErr := make(chan error, 1)
+	go func() {
+		waitErr <- cmdWait.Wait()
+	}()
+
+	select {
+	case err := <-waitErr:
+		if err != nil {
+			t.Fatalf("irc-wait failed: %v; stderr:\n%s", err, stderr.String())
+		}
+	case <-time.After(3 * time.Second):
+		_ = cmdWait.Process.Kill()
+		t.Fatalf("timeout waiting for irc-wait to detect message; stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+
+	outStr := stdout.String()
+	if !strings.Contains(outStr, "Hello agy") {
+		t.Fatalf("expected stdout to contain matching message, got %q", outStr)
+	}
+	if strings.Contains(outStr, "Hello self") {
+		t.Fatalf("unexpectedly matched self message in output, got %q", outStr)
+	}
+}
+
+

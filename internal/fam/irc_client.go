@@ -16,7 +16,7 @@ import (
 
 // IrcClientCmd executes the Go-based FIFO-driven IRC client.
 func IrcClientCmd(args []string, out io.Writer) error {
-	var nick, server, channel, workDir string
+	var nick, server, channel, workDir, passFile string
 	server = "localhost:6667"
 	channel = "#botfam"
 
@@ -45,6 +45,13 @@ func IrcClientCmd(args []string, out io.Writer) error {
 			i++
 			if i < len(args) {
 				workDir = args[i]
+			}
+		case strings.HasPrefix(arg, "--pass-file="):
+			passFile = strings.TrimPrefix(arg, "--pass-file=")
+		case arg == "--pass-file":
+			i++
+			if i < len(args) {
+				passFile = args[i]
 			}
 		default:
 			if !strings.HasPrefix(arg, "-") {
@@ -111,6 +118,21 @@ func IrcClientCmd(args []string, out io.Writer) error {
 	defer conn.Close()
 
 	// Send initial commands
+	if passFile != "" {
+		passBytes, err := os.ReadFile(passFile)
+		if err != nil {
+			return fmt.Errorf("failed to read password file: %w", err)
+		}
+		password := strings.TrimSpace(string(passBytes))
+		fields := strings.Fields(password)
+		if len(fields) > 0 {
+			password = fields[len(fields)-1]
+		}
+		if password != "" {
+			_, _ = fmt.Fprintf(conn, "PASS %s:%s\r\n", nick, password)
+		}
+	}
+
 	_, _ = fmt.Fprintf(conn, "NICK %s\r\n", nick)
 	_, _ = fmt.Fprintf(conn, "USER %s 0 * :%s\r\n", nick, nick)
 	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", channel)
@@ -223,11 +245,26 @@ func IrcClientCmd(args []string, out io.Writer) error {
 				where = target
 			}
 			emitHelper(fmt.Sprintf("%s <%s> %s", where, src, text))
+			if strings.HasPrefix(strings.TrimSpace(text), "!version") {
+				replyTarget := target
+				if !strings.HasPrefix(replyTarget, "#") {
+					replyTarget = src
+				}
+				replyBody := fmt.Sprintf("[%s] version: %s", nick, GetVersion())
+				_ = sendPrivmsg(replyTarget, replyBody)
+			}
 			continue
 		}
 
 		if m := eventRe.FindStringSubmatch(line); m != nil {
-			emitHelper(fmt.Sprintf("* %s %s %s", m[1], m[2], m[3]))
+			src := m[1]
+			evType := m[2]
+			target := m[3]
+			emitHelper(fmt.Sprintf("* %s %s %s", src, evType, target))
+			if evType == "JOIN" && src == nick {
+				announcement := fmt.Sprintf("[%s] version %s joined.", nick, GetVersion())
+				_ = sendPrivmsg(target, announcement)
+			}
 			continue
 		}
 

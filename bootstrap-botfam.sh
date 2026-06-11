@@ -284,8 +284,8 @@ ensure_botfam_bin() {
   command -v go >/dev/null 2>&1 || die "Go is required to build botfam; pass --botfam-bin PATH"
 
   mkdir -p "$(dirname "$install_bin")"
-  note "building botfam binary at $install_bin"
-  (cd "$script_dir" && go build -o "$install_bin" ./cmd/botfam)
+  commit_sha=$(git -C "$script_dir" rev-parse HEAD 2>/dev/null || echo "dev")
+  (cd "$script_dir" && go build -ldflags "-X github.com/rlupi/botfam/internal/fam.BuildSHA=$commit_sha" -o "$install_bin" ./cmd/botfam)
   if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
     codesign --force --sign - "$install_bin" >/dev/null 2>&1 || die "codesign failed for $install_bin; macOS may block unsigned MCP binaries"
   fi
