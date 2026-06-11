@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/rlupi/botfam/internal/store"
+	"github.com/robertolupi/botfam/internal/store"
 )
 
 var IsTerminal = func(fd int) bool {

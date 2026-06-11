@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rlupi/botfam/internal/fam"
-	"github.com/rlupi/botfam/internal/server"
+	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/server"
 )
 
 func TestMain(m *testing.M) {
