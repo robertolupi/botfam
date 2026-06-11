@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,7 +32,10 @@ func (s *SqliteStore) RootPath() string {
 func (s *SqliteStore) Init() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.initUnlocked()
+}
 
+func (s *SqliteStore) initUnlocked() error {
 	if s.db != nil {
 		return nil
 	}
@@ -157,6 +161,29 @@ func (s *SqliteStore) runMigrations() error {
 			outcome TEXT,
 			reserved_by TEXT,
 			filename TEXT
+		);
+		`,
+		// Migration 2: Topics and Cursors
+		`
+		CREATE TABLE IF NOT EXISTS topics (
+			name TEXT PRIMARY KEY
+		);
+
+		CREATE TABLE IF NOT EXISTS topic_messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			topic_name TEXT,
+			sender TEXT,
+			ts REAL,
+			body TEXT,
+			FOREIGN KEY(topic_name) REFERENCES topics(name)
+		);
+
+		CREATE TABLE IF NOT EXISTS topic_cursors (
+			agent_name TEXT,
+			topic_name TEXT,
+			last_read_message_id INTEGER,
+			PRIMARY KEY (agent_name, topic_name),
+			FOREIGN KEY(topic_name) REFERENCES topics(name)
 		);
 		`,
 	}
@@ -647,13 +674,16 @@ func (s *SqliteStore) Post(actor, typ string, payload map[string]any) (Task, err
 	if err := ValidateName("actor", actor); err != nil {
 		return Task{}, err
 	}
-	if err := s.Init(); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.initUnlocked(); err != nil {
 		return Task{}, err
 	}
 	if typ == "" {
 		typ = "task"
 	}
-	_, _ = s.Sweep()
+	_, _ = s.sweepUnlocked()
 
 	now := time.Now().UTC()
 	task := Task{
@@ -735,10 +765,13 @@ func (s *SqliteStore) Claim(actor string, leaseTTL time.Duration, opts ClaimOpti
 	if err := ValidateName("actor", actor); err != nil {
 		return nil, err
 	}
-	if err := s.Init(); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.initUnlocked(); err != nil {
 		return nil, err
 	}
-	_, _ = s.Sweep()
+	_, _ = s.sweepUnlocked()
 
 	columns := "id, type, payload, status, owner, created_at, claimed_at, lease_expires_at, result, completed_at, abandoned_at, abandoned_by, abandoned_reason, swept_at, swept_from, filename"
 
@@ -832,7 +865,7 @@ func (s *SqliteStore) Claim(actor string, leaseTTL time.Duration, opts ClaimOpti
 }
 
 func (s *SqliteStore) findClaimed(actor, taskID string) (Task, error) {
-	if err := s.Init(); err != nil {
+	if err := s.initUnlocked(); err != nil {
 		return Task{}, err
 	}
 	columns := "id, type, payload, status, owner, created_at, claimed_at, lease_expires_at, result, completed_at, abandoned_at, abandoned_by, abandoned_reason, swept_at, swept_from, filename"
@@ -848,6 +881,9 @@ func (s *SqliteStore) findClaimed(actor, taskID string) (Task, error) {
 }
 
 func (s *SqliteStore) Complete(actor, taskID string, result any) (*Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	task, err := s.findClaimed(actor, taskID)
 	if err != nil {
 		return nil, err
@@ -903,6 +939,9 @@ func (s *SqliteStore) Complete(actor, taskID string, result any) (*Task, error) 
 }
 
 func (s *SqliteStore) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	task, err := s.findClaimed(actor, taskID)
 	if err != nil {
 		return nil, err
@@ -939,6 +978,9 @@ func (s *SqliteStore) Heartbeat(actor, taskID string, leaseTTL time.Duration) (*
 }
 
 func (s *SqliteStore) Abandon(actor, taskID, reason string) (*Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	task, err := s.findClaimed(actor, taskID)
 	if err != nil {
 		return nil, err
@@ -1073,7 +1115,13 @@ func (s *SqliteStore) reapStaleTmpFiles() error {
 }
 
 func (s *SqliteStore) Sweep() ([]Task, error) {
-	if err := s.Init(); err != nil {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sweepUnlocked()
+}
+
+func (s *SqliteStore) sweepUnlocked() ([]Task, error) {
+	if err := s.initUnlocked(); err != nil {
 		return nil, err
 	}
 	_ = s.reapStaleTmpFiles()
@@ -1717,4 +1765,196 @@ func (s *SqliteStore) writeJSONAtomic(dst string, v any) error {
 		return err
 	}
 	return os.Rename(tmp, dst)
+}
+
+var topicNameRE = regexp.MustCompile(`^[#A-Za-z0-9_-]+$`)
+
+func validateTopicName(name string) error {
+	if !topicNameRE.MatchString(name) {
+		return fmt.Errorf("invalid topic name %q: must match [#A-Za-z0-9_-]+", name)
+	}
+	return nil
+}
+
+func (s *SqliteStore) TopicPublish(topic, sender, body string) (TopicMessage, error) {
+	if err := validateTopicName(topic); err != nil {
+		return TopicMessage{}, err
+	}
+	if err := ValidateName("sender", sender); err != nil {
+		return TopicMessage{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.initUnlocked(); err != nil {
+		return TopicMessage{}, err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return TopicMessage{}, err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("INSERT OR IGNORE INTO topics (name) VALUES (?)", topic)
+	if err != nil {
+		return TopicMessage{}, err
+	}
+
+	now := unixFloat(time.Now().UTC())
+	res, err := tx.Exec(`
+		INSERT INTO topic_messages (topic_name, sender, ts, body)
+		VALUES (?, ?, ?, ?)
+	`, topic, sender, now, body)
+	if err != nil {
+		return TopicMessage{}, err
+	}
+
+	msgID, err := res.LastInsertId()
+	if err != nil {
+		return TopicMessage{}, err
+	}
+
+	msg := TopicMessage{
+		ID:    msgID,
+		Topic: topic,
+		From:  sender,
+		TS:    now,
+		Body:  body,
+	}
+
+	dir := filepath.Join(s.Root, "topics")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return TopicMessage{}, err
+	}
+	jsonlPath := filepath.Join(dir, topic+".jsonl")
+
+	line, err := json.Marshal(msg)
+	if err != nil {
+		return TopicMessage{}, err
+	}
+	line = append(line, '\n')
+
+	f, err := os.OpenFile(jsonlPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return TopicMessage{}, err
+	}
+	defer f.Close()
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return TopicMessage{}, err
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+
+	if _, err := f.Write(line); err != nil {
+		return TopicMessage{}, err
+	}
+	if err := f.Sync(); err != nil {
+		return TopicMessage{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return TopicMessage{}, err
+	}
+
+	return msg, nil
+}
+
+func (s *SqliteStore) TopicRead(topic string, sinceID int64, limit int) ([]TopicMessage, error) {
+	if err := validateTopicName(topic); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.initUnlocked(); err != nil {
+		return nil, err
+	}
+
+	query := "SELECT id, topic_name, sender, ts, body FROM topic_messages WHERE topic_name = ? AND id > ? ORDER BY id ASC"
+	var args []any
+	args = append(args, topic, sinceID)
+
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var msgs []TopicMessage
+	for rows.Next() {
+		var msg TopicMessage
+		err := rows.Scan(&msg.ID, &msg.Topic, &msg.From, &msg.TS, &msg.Body)
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, msg)
+	}
+	return msgs, nil
+}
+
+func (s *SqliteStore) TopicCursorUpdate(agent, topic string, lastReadID int64) error {
+	if err := ValidateName("agent", agent); err != nil {
+		return err
+	}
+	if err := validateTopicName(topic); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.initUnlocked(); err != nil {
+		return err
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec("INSERT OR IGNORE INTO topics (name) VALUES (?)", topic)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO topic_cursors (agent_name, topic_name, last_read_message_id)
+		VALUES (?, ?, ?)
+		ON CONFLICT(agent_name, topic_name) DO UPDATE SET last_read_message_id = excluded.last_read_message_id
+	`, agent, topic, lastReadID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (s *SqliteStore) TopicCursorRead(agent, topic string) (int64, error) {
+	if err := ValidateName("agent", agent); err != nil {
+		return 0, err
+	}
+	if err := validateTopicName(topic); err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.initUnlocked(); err != nil {
+		return 0, err
+	}
+
+	var lastReadID int64
+	err := s.db.QueryRow("SELECT last_read_message_id FROM topic_cursors WHERE agent_name = ? AND topic_name = ?", agent, topic).Scan(&lastReadID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return lastReadID, nil
 }

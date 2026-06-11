@@ -28,13 +28,19 @@ type pendingRecv struct {
 	ch        chan *store.Message
 }
 
+type topicSubscriber struct {
+	topic string
+	ch    chan store.TopicMessage
+}
+
 type FamilyState struct {
-	mu            sync.Mutex
-	store         store.Store
-	subscriptions []*pendingRecv
-	locks         map[string]*store.ActorLock
-	lockPIDs      map[string]int
-	activeActors  map[string]time.Time // last seen timestamps
+	mu               sync.Mutex
+	store            store.Store
+	subscriptions    []*pendingRecv
+	locks            map[string]*store.ActorLock
+	lockPIDs         map[string]int
+	activeActors     map[string]time.Time // last seen timestamps
+	topicSubscribers []*topicSubscriber
 }
 
 type voteConnection struct {
@@ -171,6 +177,12 @@ func (s *Server) setupHandler() http.Handler {
 	// Voting and Tally endpoints
 	mux.HandleFunc("/vote", s.handleVote)
 	mux.HandleFunc("/tally", s.handleTally)
+
+	// Topic and Cursor endpoints
+	mux.HandleFunc("/topic_publish", s.handleTopicPublish)
+	mux.HandleFunc("/topic_listen", s.handleTopicListen)
+	mux.HandleFunc("/topic_cursor_update", s.handleTopicCursorUpdate)
+	mux.HandleFunc("/topic_cursor_read", s.handleTopicCursorRead)
 
 	// Operator UI endpoints
 	mux.HandleFunc("/ui", s.handleUI)
@@ -2096,4 +2108,212 @@ func (s *Server) handleUIComment(w http.ResponseWriter, r *http.Request) {
 
 	s.broadcastEvent(fmt.Sprintf("session:append:%s", req.Session))
 	writeJSON(w, entry)
+}
+
+func (fs *FamilyState) broadcastTopic(topic string, msg store.TopicMessage) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	var active []*topicSubscriber
+	for _, sub := range fs.topicSubscribers {
+		if sub.topic == topic {
+			select {
+			case sub.ch <- msg:
+			default:
+			}
+		}
+		active = append(active, sub)
+	}
+	fs.topicSubscribers = active
+}
+
+func (s *Server) handleTopicPublish(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkDir string `json:"work_dir"`
+		Actor   string `json:"actor"`
+		Topic   string `json:"topic"`
+		Body    string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	fs, err := s.getFamily(req.WorkDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	pid := getRequestPID(r)
+	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
+		writeError(w, http.StatusLocked, err.Error())
+		return
+	}
+
+	msg, err := fs.store.TopicPublish(req.Topic, req.Actor, req.Body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	fs.broadcastTopic(req.Topic, msg)
+	writeJSON(w, msg)
+}
+
+func (s *Server) handleTopicListen(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkDir string `json:"work_dir"`
+		Actor   string `json:"actor"`
+		Topic   string `json:"topic"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	fs, err := s.getFamily(req.WorkDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	pid := getRequestPID(r)
+	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
+		writeError(w, http.StatusLocked, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Transfer-Encoding", "chunked")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+
+	lastReadID, err := fs.store.TopicCursorRead(req.Actor, req.Topic)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Stream backlog
+	backlog, err := fs.store.TopicRead(req.Topic, lastReadID, 0)
+	if err == nil {
+		for _, msg := range backlog {
+			b, err := json.Marshal(msg)
+			if err == nil {
+				fmt.Fprintln(w, string(b))
+				flusher.Flush()
+				if err := fs.store.TopicCursorUpdate(req.Actor, req.Topic, msg.ID); err != nil {
+					fmt.Fprintf(os.Stderr, "TopicCursorUpdate error backlog: %v\n", err)
+				}
+			}
+		}
+	}
+
+	ch := make(chan store.TopicMessage, 100)
+	sub := &topicSubscriber{topic: req.Topic, ch: ch}
+	fs.mu.Lock()
+	fs.topicSubscribers = append(fs.topicSubscribers, sub)
+	fs.mu.Unlock()
+
+	defer func() {
+		fs.mu.Lock()
+		var remaining []*topicSubscriber
+		for _, s := range fs.topicSubscribers {
+			if s != sub {
+				remaining = append(remaining, s)
+			}
+		}
+		fs.topicSubscribers = remaining
+		fs.mu.Unlock()
+	}()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-ch:
+			b, err := json.Marshal(msg)
+			if err == nil {
+				fmt.Fprintln(w, string(b))
+				flusher.Flush()
+				if err := fs.store.TopicCursorUpdate(req.Actor, req.Topic, msg.ID); err != nil {
+					fmt.Fprintf(os.Stderr, "TopicCursorUpdate error real-time: %v\n", err)
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) handleTopicCursorUpdate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkDir    string `json:"work_dir"`
+		Actor      string `json:"actor"`
+		Topic      string `json:"topic"`
+		LastReadID int64  `json:"last_read_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	fs, err := s.getFamily(req.WorkDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	pid := getRequestPID(r)
+	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
+		writeError(w, http.StatusLocked, err.Error())
+		return
+	}
+
+	err = fs.store.TopicCursorUpdate(req.Actor, req.Topic, req.LastReadID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleTopicCursorRead(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		WorkDir string `json:"work_dir"`
+		Actor   string `json:"actor"`
+		Topic   string `json:"topic"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	fs, err := s.getFamily(req.WorkDir)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	pid := getRequestPID(r)
+	if err := s.ensureActorLock(fs, req.Actor, pid); err != nil {
+		writeError(w, http.StatusLocked, err.Error())
+		return
+	}
+
+	id, err := fs.store.TopicCursorRead(req.Actor, req.Topic)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+
+	writeJSON(w, map[string]int64{"last_read_id": id})
 }

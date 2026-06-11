@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,18 +18,40 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintln(os.Stderr, "botfam:", err)
+		if fam.IsJSONOutput() {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			})
+		} else {
+			fmt.Fprintln(os.Stderr, "botfam:", err)
+		}
 		os.Exit(1)
 	}
 }
 
 func run() error {
+	// Parse global --json flag
+	var cleanArgs []string
+	isJSON := false
+	for _, arg := range os.Args {
+		if arg == "--json" || arg == "-j" {
+			isJSON = true
+		} else {
+			cleanArgs = append(cleanArgs, arg)
+		}
+	}
+	os.Args = cleanArgs
+	fam.SetJSONOutput(isJSON)
+
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "setup":
 			return fam.Setup(os.Args[2:], os.Stdout)
 		case "session":
 			return fam.SessionCmd(os.Args[2:], os.Stdout)
+		case "topic":
+			return fam.TopicCmd(os.Args[2:], os.Stdout)
 		case "merge-gate":
 			return fam.MergeGateCmd(os.Args[2:], os.Stdout)
 		case "agent-docs":
@@ -114,6 +137,7 @@ Usage:
   botfam serve            run stdio MCP server
   botfam setup <project> --agents alice,bob [--force]
   botfam session <subcommand>
+  botfam topic <subcommand>
   botfam merge-gate --commit <sha> --proposal <id>
   botfam agent-docs generate|check
   botfam server [--socket <path>] [--port <port>]
@@ -122,5 +146,8 @@ Usage:
   botfam propose --proposal <id> [--quorum <quorum>] [--deadline <deadline>]
   botfam approve --proposal <id> [--verdict <verdict>]
   botfam merge --proposal <id>
+
+Global Flags:
+  --json, -j              output results as structured JSON lines
 `)
 }

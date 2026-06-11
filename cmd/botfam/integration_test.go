@@ -1512,3 +1512,196 @@ func TestIntegrationSessionConstitution(t *testing.T) {
 	}
 }
 
+func TestIntegrationTopicsAndCursors(t *testing.T) {
+	t.Setenv("BOTFAM_TESTING", "1")
+
+	root := t.TempDir()
+	binPath := filepath.Join(root, "botfam")
+	buildBotfam(t, binPath)
+
+	udsPath := filepath.Join("/tmp", fmt.Sprintf("bf-int-topics-%d.sock", time.Now().UnixNano()))
+	_ = os.Remove(udsPath)
+	t.Cleanup(func() { _ = os.Remove(udsPath) })
+
+	srv := server.NewServer(udsPath, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = srv.Start(ctx)
+	}()
+
+	var dialErr error
+	for i := 0; i < 50; i++ {
+		time.Sleep(50 * time.Millisecond)
+		conn, err := net.Dial("unix", udsPath)
+		if err == nil {
+			conn.Close()
+			dialErr = nil
+			break
+		}
+		dialErr = err
+	}
+	if dialErr != nil {
+		t.Fatalf("failed to start UDS server: %v", dialErr)
+	}
+
+	// 1. Publish first message
+	cmdPub1 := exec.Command(binPath, "topic", "publish", "--topic", "#dev", "--message", "hello first message")
+	cmdPub1.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=bob")
+	cmdPub1.Dir = root
+	outPub1, err := cmdPub1.CombinedOutput()
+	if err != nil {
+		t.Fatalf("publish 1 failed: %v, output: %s", err, string(outPub1))
+	}
+	if !strings.Contains(string(outPub1), "hello first message") {
+		t.Fatalf("unexpected publish output: %s", string(outPub1))
+	}
+
+	// 2. Start listener for alice
+	cmdList := exec.Command(binPath, "topic", "listen", "--topic", "#dev")
+	cmdList.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=alice")
+	cmdList.Dir = root
+
+	stdoutList, err := cmdList.StdoutPipe()
+	if err != nil {
+		t.Fatalf("failed to get stdout pipe: %v", err)
+	}
+	var stderrList bytes.Buffer
+	cmdList.Stderr = &stderrList
+
+	if err := cmdList.Start(); err != nil {
+		t.Fatalf("failed to start listener: %v", err)
+	}
+
+	// Read first message from listener
+	reader := bufio.NewReader(stdoutList)
+	lineChan := make(chan string, 1)
+	errChan := make(chan error, 1)
+	go func() {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			errChan <- err
+		} else {
+			lineChan <- line
+		}
+	}()
+
+	select {
+	case line := <-lineChan:
+		if !strings.Contains(line, "hello first message") {
+			t.Fatalf("expected first message in listen output, got: %q", line)
+		}
+	case err := <-errChan:
+		t.Fatalf("listener read error: %v, stderr: %s", err, stderrList.String())
+	case <-time.After(3 * time.Second):
+		_ = cmdList.Process.Kill()
+		t.Fatal("timeout waiting for listener to receive first message")
+	}
+
+	// Kill listener to unlock alice
+	_ = cmdList.Process.Kill()
+	_ = cmdList.Wait()
+
+	// 3. Read cursor and verify it updated to 1
+	cmdCur := exec.Command(binPath, "topic", "cursor", "--topic", "#dev", "--agent", "alice")
+	cmdCur.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_SOCKET="+udsPath)
+	cmdCur.Dir = root
+	outCur, err := cmdCur.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cursor read failed: %v, output: %s", err, string(outCur))
+	}
+	if !strings.Contains(string(outCur), "Cursor offset: 1") {
+		t.Fatalf("expected cursor offset 1, got output: %q", string(outCur))
+	}
+
+	// Also verify cursor with --json flag
+	cmdCurJSON := exec.Command(binPath, "--json", "topic", "cursor", "--topic", "#dev", "--agent", "alice")
+	cmdCurJSON.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_SOCKET="+udsPath)
+	cmdCurJSON.Dir = root
+	outCurJSON, err := cmdCurJSON.CombinedOutput()
+	if err != nil {
+		t.Fatalf("cursor json read failed: %v, output: %s", err, string(outCurJSON))
+	}
+	var curResp struct {
+		Ok     bool `json:"ok"`
+		Result struct {
+			LastReadID int64 `json:"last_read_id"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(outCurJSON, &curResp); err != nil {
+		t.Fatalf("failed to parse cursor json output %q: %v", string(outCurJSON), err)
+	}
+	if !curResp.Ok || curResp.Result.LastReadID != 1 {
+		t.Fatalf("expected cursor offset 1 from json, got ok=%v, last_read_id=%d", curResp.Ok, curResp.Result.LastReadID)
+	}
+
+	// 4. Publish second message while listener is down
+	cmdPub2 := exec.Command(binPath, "topic", "publish", "--topic", "#dev", "--message", "hello second message")
+	cmdPub2.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=bob")
+	cmdPub2.Dir = root
+	outPub2, err := cmdPub2.CombinedOutput()
+	if err != nil {
+		t.Fatalf("publish 2 failed: %v, output: %s", err, string(outPub2))
+	}
+
+	// 5. Reconnect listener and check that it resumes from cursor (only receives second message, no duplicate first message)
+	cmdList2 := exec.Command(binPath, "topic", "listen", "--topic", "#dev")
+	cmdList2.Env = append(os.Environ(), "COLLAB_ROOT="+root, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=alice")
+	cmdList2.Dir = root
+
+	stdoutList2, err := cmdList2.StdoutPipe()
+	if err != nil {
+		t.Fatalf("failed to get stdout pipe 2: %v", err)
+	}
+	var stderrList2 bytes.Buffer
+	cmdList2.Stderr = &stderrList2
+
+	if err := cmdList2.Start(); err != nil {
+		t.Fatalf("failed to start listener 2: %v", err)
+	}
+	defer func() {
+		_ = cmdList2.Process.Kill()
+		_ = cmdList2.Wait()
+	}()
+
+	reader2 := bufio.NewReader(stdoutList2)
+	lineChan2 := make(chan string, 1)
+	errChan2 := make(chan error, 1)
+	go func() {
+		line, err := reader2.ReadString('\n')
+		if err != nil {
+			errChan2 <- err
+		} else {
+			lineChan2 <- line
+		}
+	}()
+
+	select {
+	case line := <-lineChan2:
+		if !strings.Contains(line, "hello second message") {
+			t.Fatalf("expected second message in listen output, got: %q", line)
+		}
+		if strings.Contains(line, "hello first message") {
+			t.Fatalf("unexpectedly received first message when resuming from cursor, got: %q", line)
+		}
+	case err := <-errChan2:
+		t.Fatalf("listener 2 read error: %v, stderr: %s", err, stderrList2.String())
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout waiting for listener 2 to receive second message")
+	}
+
+	// 6. Verify shadow file
+	jsonlFile := filepath.Join(root, "topics", "#dev.jsonl")
+	data, err := os.ReadFile(jsonlFile)
+	if err != nil {
+		t.Fatalf("failed to read shadow jsonl file: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected exactly 2 lines in shadow log, got %d. Contents:\n%s", len(lines), string(data))
+	}
+	if !strings.Contains(lines[0], "hello first message") || !strings.Contains(lines[1], "hello second message") {
+		t.Fatalf("shadow log lines mismatch, got:\n%s", string(data))
+	}
+}
+

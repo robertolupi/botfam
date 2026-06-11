@@ -964,3 +964,66 @@ func TestReapStaleTmpFilesMessageGuard(t *testing.T) {
 	}
 }
 
+func TestTopicsAndCursors(t *testing.T) {
+	s := New(t.TempDir())
+	if err := s.Init(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Publish messages to topics
+	msg1, err := s.TopicPublish("#dev", "alice", "hello dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg1.ID != 1 || msg1.Topic != "#dev" || msg1.From != "alice" || msg1.Body != "hello dev" {
+		t.Fatalf("unexpected message: %+v", msg1)
+	}
+
+	msg2, err := s.TopicPublish("#dev", "bob", "hi alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg2.ID != 2 || msg2.Topic != "#dev" || msg2.From != "bob" || msg2.Body != "hi alice" {
+		t.Fatalf("unexpected message: %+v", msg2)
+	}
+
+	// 2. Read messages since ID
+	msgs, err := s.TopicRead("#dev", 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 2 || msgs[0].ID != 1 || msgs[1].ID != 2 {
+		t.Fatalf("unexpected read result: %+v", msgs)
+	}
+
+	msgsSince, err := s.TopicRead("#dev", 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgsSince) != 1 || msgsSince[0].ID != 2 {
+		t.Fatalf("unexpected read since result: %+v", msgsSince)
+	}
+
+	// 3. Cursor management
+	cur, err := s.TopicCursorRead("carol", "#dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur != 0 {
+		t.Fatalf("expected initial cursor 0, got %d", cur)
+	}
+
+	err = s.TopicCursorUpdate("carol", "#dev", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cur, err = s.TopicCursorRead("carol", "#dev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur != 2 {
+		t.Fatalf("expected cursor 2, got %d", cur)
+	}
+}
+

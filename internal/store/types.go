@@ -56,6 +56,14 @@ type ClaimOptions struct {
 	SuggestedOwner string
 }
 
+type TopicMessage struct {
+	ID    int64   `json:"id"`
+	Topic string  `json:"topic"`
+	From  string  `json:"from"`
+	TS    float64 `json:"ts"`
+	Body  string  `json:"body"`
+}
+
 func unixFloat(t time.Time) float64 {
 	return float64(t.UnixNano()) / 1e9
 }

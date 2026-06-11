@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -259,4 +261,30 @@ func makeNoGitHistoryError() error {
 		sb.WriteString("No configured families found under ~/.botfam. Run 'botfam setup' to initialize one.\n")
 	}
 	return errors.New(strings.TrimSuffix(sb.String(), "\n"))
+}
+
+var jsonOutput bool
+
+func IsJSONOutput() bool {
+	return jsonOutput
+}
+
+func SetJSONOutput(v bool) {
+	jsonOutput = v
+}
+
+func writeJSONOutput(out io.Writer, val any) error {
+	w := json.NewEncoder(out)
+	return w.Encode(map[string]any{
+		"ok":     true,
+		"result": val,
+	})
+}
+
+func writeJSONError(out io.Writer, err error) error {
+	w := json.NewEncoder(out)
+	return w.Encode(map[string]any{
+		"ok":    false,
+		"error": err.Error(),
+	})
 }

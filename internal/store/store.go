@@ -844,3 +844,16 @@ func nonnil(m map[string]any) map[string]any {
 	}
 	return m
 }
+
+func (s *MaildirStore) TopicPublish(topic, sender, body string) (TopicMessage, error) {
+	return TopicMessage{}, errors.New("topics not supported in MaildirStore")
+}
+func (s *MaildirStore) TopicRead(topic string, sinceID int64, limit int) ([]TopicMessage, error) {
+	return nil, errors.New("topics not supported in MaildirStore")
+}
+func (s *MaildirStore) TopicCursorUpdate(agent, topic string, lastReadID int64) error {
+	return errors.New("topics not supported in MaildirStore")
+}
+func (s *MaildirStore) TopicCursorRead(agent, topic string) (int64, error) {
+	return 0, errors.New("topics not supported in MaildirStore")
+}

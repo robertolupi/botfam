@@ -35,4 +35,10 @@ type Store interface {
 	SessionListAll() ([]SessionMeta, error)
 	SessionRender(slug string) (string, error)
 	SessionClose(slug, repoRoot string) error
+
+	// Topic methods
+	TopicPublish(topic, sender, body string) (TopicMessage, error)
+	TopicRead(topic string, sinceID int64, limit int) ([]TopicMessage, error)
+	TopicCursorUpdate(agent, topic string, lastReadID int64) error
+	TopicCursorRead(agent, topic string) (int64, error)
 }
