@@ -25,14 +25,21 @@ defend work. Keep it blameless, factual, evidence-based, and action-oriented.
 Use only evidence available from the current session or repo:
 
 - commits and diffs,
-- session logs,
-- collab messages and task state,
-- review comments,
+- IRC channel logs — the primary coordination record:
+  - your own client log (`scratch/irc/<actor>/log`, timestamped),
+  - the scribe's machine-readable ledger (JSONL at `COLLAB_HISTORY`,
+    one event per line with sender/type/target/body),
+  - server-side history when available (ergo `CHATHISTORY`),
+- ccrep state from bang-verb lines in the ledger
+  (`!propose`/`!evaluate`/`!vote` and scribe `!tally` replies),
+- review comments and verdicts (sent as `!evaluate` lines),
 - tests run and failures,
-- human interventions,
+- human interventions (operator messages on the channel),
 - TODOs and unresolved questions.
 
-If evidence is missing, say so explicitly. Do not infer intent.
+If evidence is missing, say so explicitly. Do not infer intent. When client
+logs and the scribe ledger disagree, quote both and flag the divergence — that
+is itself a finding.
 
 ## Output Path
 
@@ -62,9 +69,11 @@ do not overwrite it. Start numbered files at `1`.
 ## Workflow
 
 1. Gather evidence from git status, recent commits, relevant diffs, tests,
-   `doc/collab/sessions/`, and collab state when available.
-2. Reconstruct the timeline from evidence. Use exact timestamps when available;
-   otherwise use ordered steps.
+   your IRC client log, and the scribe ledger when available.
+2. Reconstruct the timeline from evidence. IRC logs carry per-line timestamps —
+   use them verbatim; the channel log is the authoritative event order. When
+   your client was disconnected, mark the gap explicitly and fill it from the
+   scribe ledger or server history, noting the source.
 3. Identify outcomes and verification gaps.
 4. Extract durable lessons as reusable principles.
 5. Write bounded self-improvement items only when they convert into concrete
