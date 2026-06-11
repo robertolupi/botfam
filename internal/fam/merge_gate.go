@@ -16,18 +16,51 @@ import (
 )
 
 type CcrepEvent struct {
-	Type       string
-	ProposalID string
-	CommitSHA  string
-	// Reviewer is the authenticated identity of whoever produced the event:
-	// entry.Sender in the IRC history log.
-	Reviewer string
-	// ClaimedReviewer is the payload "reviewer" field, if present. When it
-	// differs from Reviewer the event is a spoof suspect and must not count.
+	Type            string
+	ProposalID      string
+	CommitSHA       string
+	Reviewer        string
 	ClaimedReviewer string
 	Verdict         string
 	TS              float64
 	SpoofSuspect    bool
+	Quorum          string
+	Deadline        string
+}
+
+func requiredIndependentApprovals(quorumType string, roster []string, author string) int {
+	if len(roster) == 0 {
+		return 1
+	}
+	isAuthorInRoster := false
+	for _, name := range roster {
+		if name == author {
+			isAuthorInRoster = true
+			break
+		}
+	}
+	totalMembers := len(roster)
+	switch strings.ToLower(quorumType) {
+	case "all":
+		if isAuthorInRoster {
+			if totalMembers <= 1 {
+				return 0
+			}
+			return totalMembers - 1
+		}
+		return totalMembers
+	case "majority":
+		needed := totalMembers/2 + 1
+		if isAuthorInRoster {
+			if needed <= 1 {
+				return 0
+			}
+			return needed - 1
+		}
+		return needed
+	default:
+		return 1
+	}
 }
 
 func MergeGateCmd(args []string, out io.Writer) error {
@@ -67,9 +100,19 @@ func MergeGateCmd(args []string, out io.Writer) error {
 
 	historyPath := os.Getenv("COLLAB_HISTORY")
 	if historyPath == "" {
-		historyPath = filepath.Join("doc", "collab", "history.jsonl")
+		info, err := (Resolver{WorkDir: "."}).Resolve()
+		if err == nil && info.Root != "" {
+			historyPath = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
+		} else {
+			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
+		}
 	}
-	events, skipped, err := CollectIrcCcrepEvents(historyPath, proposalID)
+
+	if err := ValidateHistoryPath(historyPath); err != nil {
+		return err
+	}
+
+	events, present, skipped, err := CollectIrcCcrepEvents(historyPath, proposalID)
 	if err != nil {
 		return err
 	}
@@ -106,12 +149,16 @@ func MergeGateCmd(args []string, out io.Writer) error {
 	// so the gate refuses rather than guessing.
 	var latestCommitSHA string
 	var author string
+	var quorumType string
+	var deadlineStr string
 	foundProposal := false
 	for _, ev := range events {
 		if ev.Type == "ccrep:proposal" {
 			foundProposal = true
 			author = ev.Reviewer
 			latestCommitSHA = ev.CommitSHA
+			quorumType = ev.Quorum
+			deadlineStr = ev.Deadline
 		} else if ev.Type == "ccrep:revision" {
 			if ev.CommitSHA == "" {
 				return fmt.Errorf("invalid ccrep:revision event for proposal %s (ts %.6f): missing commit_sha", proposalID, ev.TS)
@@ -125,6 +172,14 @@ func MergeGateCmd(args []string, out io.Writer) error {
 	}
 	if latestCommitSHA == "" {
 		return fmt.Errorf("ccrep:proposal event for proposal %q has no commit_sha; refusing to gate (fail closed)", proposalID)
+	}
+
+	// Check deadline
+	if deadlineStr != "" {
+		deadlineTime, err := time.Parse(time.RFC3339, deadlineStr)
+		if err == nil && time.Now().After(deadlineTime) {
+			return fmt.Errorf("proposal %s has expired (deadline: %s)", proposalID, deadlineStr)
+		}
 	}
 
 	// Approvals die on new commits: if a new commit has been proposed/revisioned,
@@ -172,13 +227,34 @@ func MergeGateCmd(args []string, out io.Writer) error {
 		}
 	}
 
-	// 1. Must have at least one independent approval
-	if len(independentApprovals) == 0 {
+	// Resolve roster from fam.toml
+	resolverInfo, err := (Resolver{WorkDir: "."}).Resolve()
+	var roster []string
+	if err == nil && resolverInfo.Root != "" {
+		reg, err := ReadRegistry(filepath.Join(resolverInfo.Root, "fam.toml"))
+		if err == nil {
+			roster = reg.Roster
+		}
+	}
+
+	// Filter roster by presence
+	var presentRoster []string
+	for _, name := range roster {
+		if present[name] {
+			presentRoster = append(presentRoster, name)
+		}
+	}
+
+	requiredApprovals := requiredIndependentApprovals(quorumType, presentRoster, author)
+
+	// 1. Must have the required number of independent approvals
+	if len(independentApprovals) < requiredApprovals {
 		suffix := ""
 		if len(spoofSuspects) > 0 {
 			suffix = fmt.Sprintf("; %d spoof-suspect event(s) ignored", len(spoofSuspects))
 		}
-		return fmt.Errorf("proposal %s commit %s has no independent approvals (author: %q)%s", proposalID, commitSHA, author, suffix)
+		return fmt.Errorf("proposal %s commit %s has %d independent approval(s), but requires %d (quorum: %s, author: %q)%s",
+			proposalID, commitSHA, len(independentApprovals), requiredApprovals, quorumType, author, suffix)
 	}
 
 	// 2. Must not have any active blocking critiques (request_changes/reject)
@@ -199,10 +275,7 @@ func printMergeGateHelp(out io.Writer) error {
 	return nil
 }
 
-// newCcrepEvent builds an event whose Reviewer is always the authenticated
-// sender of the message. If the payload claims a different reviewer, the event
-// is marked as a spoof suspect.
-func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedReviewer string, ts float64) CcrepEvent {
+func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedReviewer string, ts float64, quorum, deadline string) CcrepEvent {
 	return CcrepEvent{
 		Type:            typ,
 		ProposalID:      proposalID,
@@ -212,6 +285,8 @@ func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedRev
 		Verdict:         verdict,
 		TS:              ts,
 		SpoofSuspect:    claimedReviewer != "" && claimedReviewer != authIdentity,
+		Quorum:          quorum,
+		Deadline:        deadline,
 	}
 }
 
@@ -250,19 +325,21 @@ func parseBangLine(body string) (map[string]string, string) {
 }
 
 // CollectIrcCcrepEvents gathers ccrep:* events for a proposal from the shared
-// IRC history log file doc/collab/history.jsonl.
-func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent, int, error) {
+// IRC history log file. It also returns a map of present nicks.
+func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent, map[string]bool, int, error) {
 	var events []CcrepEvent
 	skipped := 0
 
 	file, err := os.Open(historyPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, 0, nil
+			return nil, nil, 0, nil
 		}
-		return nil, 0, fmt.Errorf("failed to open history file %s: %w", historyPath, err)
+		return nil, nil, 0, fmt.Errorf("failed to open history file %s: %w", historyPath, err)
 	}
 	defer file.Close()
+
+	joined := make(map[string]map[string]bool)
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -281,6 +358,30 @@ func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent,
 		if err := json.Unmarshal([]byte(line), &entry); err != nil {
 			skipped++
 			continue
+		}
+
+		// Track presence
+		if entry.Type == "JOIN" {
+			if joined[entry.Sender] == nil {
+				joined[entry.Sender] = make(map[string]bool)
+			}
+			joined[entry.Sender][entry.Target] = true
+		} else if entry.Type == "PART" {
+			if joined[entry.Sender] != nil {
+				delete(joined[entry.Sender], entry.Target)
+			}
+		} else if entry.Type == "QUIT" {
+			delete(joined, entry.Sender)
+		} else if entry.Type == "NICK" {
+			if chans, ok := joined[entry.Sender]; ok {
+				joined[entry.Target] = chans
+				delete(joined, entry.Sender)
+			}
+		} else if entry.Type == "PRIVMSG" {
+			if joined[entry.Sender] == nil {
+				joined[entry.Sender] = make(map[string]bool)
+			}
+			joined[entry.Sender][entry.Target] = true
 		}
 
 		if entry.Type != "PRIVMSG" {
@@ -305,7 +406,7 @@ func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent,
 			}
 		}
 
-		var typ, propID, commitSHA, verdict, claimed string
+		var typ, propID, commitSHA, verdict, claimed, quorum, deadline string
 
 		if isBang {
 			switch bangVerb {
@@ -327,6 +428,8 @@ func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent,
 			commitSHA = bangKeyVals["sha"]
 			verdict = bangKeyVals["verdict"]
 			claimed = bangKeyVals["reviewer"]
+			quorum = bangKeyVals["quorum"]
+			deadline = bangKeyVals["deadline"]
 		} else {
 			typ = getString(bodyMap, "type", "Type")
 			if !strings.HasPrefix(typ, "ccrep:") {
@@ -336,6 +439,8 @@ func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent,
 			commitSHA = getString(bodyMap, "commit_sha", "commitSha", "new_commit_sha", "newCommitSha")
 			verdict = getString(bodyMap, "verdict", "Verdict")
 			claimed = getString(bodyMap, "reviewer", "Reviewer")
+			quorum = getString(bodyMap, "quorum", "Quorum")
+			deadline = getString(bodyMap, "deadline", "Deadline")
 		}
 
 		if propID != proposalID {
@@ -348,14 +453,21 @@ func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent,
 			ts = float64(t.UnixNano()) / 1e9
 		}
 
-		events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, entry.Sender, claimed, ts))
+		events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, entry.Sender, claimed, ts, quorum, deadline))
+	}
+
+	present := make(map[string]bool)
+	for nick, chans := range joined {
+		if len(chans) > 0 {
+			present[nick] = true
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, 0, fmt.Errorf("error scanning history file: %w", err)
+		return nil, nil, 0, fmt.Errorf("error scanning history file: %w", err)
 	}
 
-	return events, skipped, nil
+	return events, present, skipped, nil
 }
 
 func getString(m map[string]any, keys ...string) string {
@@ -371,7 +483,7 @@ func getString(m map[string]any, keys ...string) string {
 
 // TallyProposal computes and returns a summarized tally for a given proposal ID.
 func TallyProposal(historyPath string, proposalID string) (string, error) {
-	events, _, err := CollectIrcCcrepEvents(historyPath, proposalID)
+	events, present, _, err := CollectIrcCcrepEvents(historyPath, proposalID)
 	if err != nil {
 		return "", err
 	}
@@ -386,6 +498,8 @@ func TallyProposal(historyPath string, proposalID string) (string, error) {
 
 	var author string
 	var latestCommitSHA string
+	var quorumType string
+	var deadlineStr string
 	foundProposal := false
 	var spoofSuspectsCount int
 
@@ -404,6 +518,8 @@ func TallyProposal(historyPath string, proposalID string) (string, error) {
 			foundProposal = true
 			author = ev.Reviewer
 			latestCommitSHA = ev.CommitSHA
+			quorumType = ev.Quorum
+			deadlineStr = ev.Deadline
 		} else if ev.Type == "ccrep:revision" {
 			latestCommitSHA = ev.CommitSHA
 		}
@@ -414,6 +530,15 @@ func TallyProposal(historyPath string, proposalID string) (string, error) {
 	}
 	if latestCommitSHA == "" {
 		return fmt.Sprintf("Proposal %q: ccrep:proposal has no commit_sha", proposalID), nil
+	}
+
+	// Check deadline expiration
+	var hasExpired bool
+	if deadlineStr != "" {
+		deadlineTime, err := time.Parse(time.RFC3339, deadlineStr)
+		if err == nil && time.Now().After(deadlineTime) {
+			hasExpired = true
+		}
 	}
 
 	verdicts := make(map[string]CcrepEvent)
@@ -448,10 +573,32 @@ func TallyProposal(historyPath string, proposalID string) (string, error) {
 		}
 	}
 
+	// Resolve roster from fam.toml
+	info, err := (Resolver{WorkDir: "."}).Resolve()
+	var roster []string
+	if err == nil && info.Root != "" {
+		reg, err := ReadRegistry(filepath.Join(info.Root, "fam.toml"))
+		if err == nil {
+			roster = reg.Roster
+		}
+	}
+
+	// Filter roster by presence
+	var presentRoster []string
+	for _, name := range roster {
+		if present[name] {
+			presentRoster = append(presentRoster, name)
+		}
+	}
+
+	requiredApprovals := requiredIndependentApprovals(quorumType, presentRoster, author)
+
 	status := "PENDING"
 	if len(blockers) > 0 {
 		status = "BLOCKED"
-	} else if len(independentApprovals) > 0 {
+	} else if hasExpired {
+		status = "EXPIRED"
+	} else if len(independentApprovals) >= requiredApprovals {
 		status = "APPROVED"
 	}
 
@@ -463,6 +610,13 @@ func TallyProposal(historyPath string, proposalID string) (string, error) {
 		details = append(details, fmt.Sprintf("approvals: %s", strings.Join(independentApprovals, ", ")))
 	} else {
 		details = append(details, "approvals: none")
+	}
+	details = append(details, fmt.Sprintf("required_approvals: %d", requiredApprovals))
+	if quorumType != "" {
+		details = append(details, fmt.Sprintf("quorum: %s", quorumType))
+	}
+	if deadlineStr != "" {
+		details = append(details, fmt.Sprintf("deadline: %s", deadlineStr))
 	}
 	if len(blockers) > 0 {
 		details = append(details, fmt.Sprintf("blockers: %s", strings.Join(blockers, ", ")))
@@ -510,7 +664,7 @@ func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, e
 			commitSHA := getString(bodyMap, "commit_sha", "commitSha", "new_commit_sha", "newCommitSha")
 			verdict := getString(bodyMap, "verdict", "Verdict")
 			claimed := getString(bodyMap, "reviewer", "Reviewer")
-			events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, entry.Actor, claimed, entry.TS))
+			events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, entry.Actor, claimed, entry.TS, "", ""))
 		}
 	} else if !errors.Is(statErr, os.ErrNotExist) {
 		return nil, 0, fmt.Errorf("checking session log for proposal %q: %w", proposalID, statErr)
@@ -566,7 +720,7 @@ func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, e
 				commitSHA := getString(msg.Payload, "commit_sha", "commitSha", "new_commit_sha", "newCommitSha")
 				verdict := getString(msg.Payload, "verdict", "Verdict")
 				claimed := getString(msg.Payload, "reviewer", "Reviewer")
-				events = append(events, newCcrepEvent(msg.Type, proposalID, commitSHA, verdict, msg.From, claimed, msg.TS))
+				events = append(events, newCcrepEvent(msg.Type, proposalID, commitSHA, verdict, msg.From, claimed, msg.TS, "", ""))
 			}
 		}
 	}

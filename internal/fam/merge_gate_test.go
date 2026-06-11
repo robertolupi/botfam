@@ -94,7 +94,7 @@ func TestMergeGate(t *testing.T) {
 	})
 
 	_, err = runMergeGate(t, commit1, proposalID)
-	if err == nil || !strings.Contains(err.Error(), "has no independent approvals") {
+	if err == nil || !strings.Contains(err.Error(), "independent approval") {
 		t.Errorf("expected no independent approvals error, got %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestMergeGate(t *testing.T) {
 		"verdict":     "approve",
 	})
 	_, err = runMergeGate(t, commit1, proposalID)
-	if err == nil || !strings.Contains(err.Error(), "has no independent approvals") {
+	if err == nil || !strings.Contains(err.Error(), "independent approval") {
 		t.Errorf("expected no independent approvals error, got %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestMergeGate(t *testing.T) {
 
 	// Try to check commit2 (the new one) -> should fail because it has no approvals yet!
 	_, err = runMergeGate(t, commit2, proposalID)
-	if err == nil || !strings.Contains(err.Error(), "has no independent approvals") {
+	if err == nil || !strings.Contains(err.Error(), "independent approval") {
 		t.Errorf("expected no independent approvals error for new commit, got %v", err)
 	}
 
@@ -204,7 +204,7 @@ func TestMergeGateSpoofedReviewer(t *testing.T) {
 	})
 
 	out, err := runMergeGate(t, commit1, proposalID)
-	if err == nil || !strings.Contains(err.Error(), "has no independent approvals") {
+	if err == nil || !strings.Contains(err.Error(), "independent approval") {
 		t.Errorf("expected spoofed approval to be rejected, got %v", err)
 	}
 	if !strings.Contains(out, "spoof-suspect") {
@@ -535,7 +535,7 @@ func TestMergeGateBangVerbs(t *testing.T) {
 	commit2 := "commit-2222222222222222222222222222222222222222"
 
 	// 1. Propose via bang line
-	appendRawHistoryEntry(t, path, "alice", fmt.Sprintf("!propose id=%s sha=%s quorum=all deadline=2026-06-11T12:00:00+02:00 summary=Test proposal with spaces", proposalID, commit1))
+	appendRawHistoryEntry(t, path, "alice", fmt.Sprintf("!propose id=%s sha=%s quorum=any deadline=2030-06-11T12:00:00+02:00 summary=Test proposal with spaces", proposalID, commit1))
 
 	// Verify tally is pending
 	summary, err := TallyProposal(path, proposalID)
@@ -604,6 +604,63 @@ func TestMergeGateBangVerbs(t *testing.T) {
 	}
 	if !strings.Contains(summary, "status: APPROVED") || !strings.Contains(summary, "approvals: bob, charlie") {
 		t.Errorf("expected approved status by bob and charlie, got %q", summary)
+	}
+}
+
+func TestRequiredIndependentApprovals(t *testing.T) {
+	roster := []string{"alice", "bob", "charlie"}
+	
+	// quorumType: all, author in roster
+	if got := requiredIndependentApprovals("all", roster, "alice"); got != 2 {
+		t.Errorf("expected 2, got %d", got)
+	}
+	// quorumType: all, author not in roster
+	if got := requiredIndependentApprovals("all", roster, "david"); got != 3 {
+		t.Errorf("expected 3, got %d", got)
+	}
+	// quorumType: majority, author in roster
+	if got := requiredIndependentApprovals("majority", roster, "alice"); got != 1 {
+		t.Errorf("expected 1, got %d", got)
+	}
+	// quorumType: majority, author not in roster
+	if got := requiredIndependentApprovals("majority", roster, "david"); got != 2 {
+		t.Errorf("expected 2, got %d", got)
+	}
+	// quorumType: any, author in roster
+	if got := requiredIndependentApprovals("any", roster, "alice"); got != 1 {
+		t.Errorf("expected 1, got %d", got)
+	}
+	// empty roster
+	if got := requiredIndependentApprovals("all", nil, "alice"); got != 1 {
+		t.Errorf("expected 1, got %d", got)
+	}
+}
+
+func TestMergeGateDeadline(t *testing.T) {
+	path := setupMergeGateHistory(t)
+	proposalID := "prop-deadline"
+	commit1 := "commit-1111111111111111111111111111111111111111"
+
+	// Propose with a deadline in the past
+	pastDeadline := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	appendRawHistoryEntry(t, path, "alice", fmt.Sprintf("!propose id=%s sha=%s quorum=any deadline=%s summary=Past deadline test", proposalID, commit1, pastDeadline))
+
+	// Evaluate (approve)
+	appendRawHistoryEntry(t, path, "bob", fmt.Sprintf("!vote id=%s sha=%s verdict=approve", proposalID, commit1))
+
+	// Merge gate should fail because it has expired
+	_, err := runMergeGate(t, commit1, proposalID)
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Errorf("expected expiration error, got %v", err)
+	}
+
+	// Tally should show EXPIRED status
+	summary, err := TallyProposal(path, proposalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "status: EXPIRED") {
+		t.Errorf("expected EXPIRED status in tally, got %q", summary)
 	}
 }
 
