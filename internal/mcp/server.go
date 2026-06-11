@@ -24,7 +24,7 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/rlupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/fam"
 )
 
 // errIdentityRequired signals that no actor identity could be resolved from

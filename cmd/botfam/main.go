@@ -11,9 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rlupi/botfam/internal/fam"
-	"github.com/rlupi/botfam/internal/mcp"
-	"github.com/rlupi/botfam/internal/server"
+	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/mcp"
+	"github.com/robertolupi/botfam/internal/server"
 )
 
 func main() {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	serverlib "github.com/rlupi/botfam/internal/server"
+	serverlib "github.com/robertolupi/botfam/internal/server"
 )
 
 func newTestServer(t *testing.T) (*server, string) {

@@ -1,4 +1,4 @@
-module github.com/rlupi/botfam
+module github.com/robertolupi/botfam
 
 go 1.25.5
 
