@@ -27,8 +27,17 @@ type HistoryEntry struct {
 func ScribeCmd(args []string, out io.Writer) error {
 	var server, channel, historyFile string
 	server = "localhost:6667"
-	channel = "#botfam"
-	historyFile = filepath.Join("doc", "collab", "history.jsonl")
+	channel = "#botfam,#ccrep"
+
+	historyFile = os.Getenv("COLLAB_HISTORY")
+	if historyFile == "" {
+		info, err := (Resolver{WorkDir: "."}).Resolve()
+		if err == nil && info.Root != "" {
+			historyFile = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
+		} else {
+			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
+		}
+	}
 
 	// Parse arguments
 	for i := 0; i < len(args); i++ {
@@ -58,6 +67,11 @@ func ScribeCmd(args []string, out io.Writer) error {
 		default:
 			return fmt.Errorf("unknown scribe argument %q", arg)
 		}
+	}
+
+	// Validate history file path
+	if err := ValidateHistoryPath(historyFile); err != nil {
+		return err
 	}
 
 	// Create directories for history file if they don't exist
@@ -90,6 +104,7 @@ func ScribeCmd(args []string, out io.Writer) error {
 	privRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+PRIVMSG\s+(\S+)\s+:(.*)$`)
 	eventRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+(JOIN|PART|QUIT|NICK)\b\s*:?(\S*)`)
 	tallyRe := regexp.MustCompile(`^!tally\s+(?:id=)?(\S+)`)
+	inviteRe := regexp.MustCompile(`^(?i):\S+\s+INVITE\s+\S+\s+:?(\S+)$`)
 
 	// Read from socket
 	reader := bufio.NewReader(conn)
@@ -111,6 +126,23 @@ func ScribeCmd(args []string, out io.Writer) error {
 		if strings.HasPrefix(line, "PING") {
 			pong := "PONG" + strings.TrimPrefix(line, "PING") + "\r\n"
 			_, _ = conn.Write([]byte(pong))
+			continue
+		}
+
+		if m := inviteRe.FindStringSubmatch(line); m != nil {
+			invitedChan := m[1]
+			_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", invitedChan)
+			var entry HistoryEntry
+			entry.Timestamp = time.Now().UTC().Format(time.RFC3339)
+			entry.Sender = "server"
+			entry.Type = "INVITE"
+			entry.Target = invitedChan
+			entry.Body = line
+			bytes, err := json.Marshal(entry)
+			if err == nil {
+				_, _ = logFile.Write(append(bytes, '\n'))
+				_ = logFile.Sync()
+			}
 			continue
 		}
 

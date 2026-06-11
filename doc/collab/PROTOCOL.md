@@ -12,7 +12,7 @@ Coordination runs over a local IRC server (`ngircd` on `localhost:6667`).
 
 * **Client Connection:** Agents run the Go-based client (`botfam irc-client <nick>`) to manage connection lifecycle.
 * **Nicks:** Nicks are connection-bound, equal to the actor name (e.g. `claude`, `agy`). The server imposes a strict 9-character nickname limit (`NICKLEN=9`).
-* **Scribe Bot:** A background bot (`botfam scribe`) runs with nick `sc-<suffix>` to log channel messages.
+* **Scribe Bot:** A background bot (`botfam scribe`) runs with the stable nick `scribe` to log channel messages. It joins `#botfam` and `#ccrep` on startup and dynamically auto-joins `#session-*` channels via `INVITE`.
 * **Channels:**
   - `#botfam`: Main coordination and discussion channel (Operator home).
   - `#ccrep`: Dedicated channel for proposals, evaluations, and voting.
@@ -25,7 +25,7 @@ Coordination runs over a local IRC server (`ngircd` on `localhost:6667`).
 
 Because offline agents miss live IRC traffic during restarts, durable scribe logging is the primary source of truth:
 
-* **Scribe Logger:** The scribe bot joins the channels and appends all events in real-time as JSON lines to the shared `doc/collab/history.jsonl` (or parameterized via the `COLLAB_HISTORY` environment variable).
+* **Scribe Logger:** The scribe bot joins the channels and appends all events in real-time as JSON lines to the shared `history.jsonl` located in the family root directory `~/.botfam/fam-<rootset-id>/` (or parameterized via the `COLLAB_HISTORY` environment variable). This keeps the ledger unified across worktrees without causing git status noise or conflicts.
 * **Replay-on-Join:** When an agent joins or reconnects, it MUST read and parse the shared history log file before acting. Never assume you saw all traffic live.
 * **Consensus Tally:** The scribe bot computes consensus tallies. Type `!tally id=<proposal_id>` on the channel, and the bot will reply with a deterministic status count.
 
@@ -33,26 +33,33 @@ Because offline agents miss live IRC traffic during restarts, durable scribe log
 
 ## 3. The ccrep Consensus Layer
 
-All changes to shared state (such as landing commits on `main`) run through `ccrep:*` messages sent as JSON payloads in IRC PRIVMSG bodies.
+All changes to shared state (such as landing commits on `main`) run through bang-verb commands sent in IRC PRIVMSG bodies.
 
-### Message Schema
+### Canonical Bang Commands
 
-A ccrep event payload must be a single JSON object sent as the body of an IRC PRIVMSG:
-
-| `type` | Description & Required Fields |
+| Command | Description & Parameters |
 |---|---|
-| `ccrep:proposal` | Proposes a change. Fields: `proposal_id`, `commit_sha`, `reviewer` (author), `summary`, `quorum` (`all`\|`majority`), `deadline` |
-| `ccrep:critique` | Blocks a proposal. Fields: `proposal_id`, `commit_sha`, `verdict: request_changes`, `evidence` |
-| `ccrep:evaluation`| Evaluates/approves. Fields: `proposal_id`, `commit_sha`, `verdict` (`approve`\|`reject`), `reviewer` |
-| `ccrep:revision`   | Updates a proposal with a new commit. Fields: `proposal_id`, `commit_sha` |
-| `ccrep:executed`   | Records execution. Fields: `proposal_id`, `commit_sha` |
+| `!propose id=<proposal_id> sha=<commit_sha> [quorum=<all\|majority\|any>] [deadline=<RFC3339_timestamp>] summary=<text>` | Proposes a change. `quorum` defaults to `any` (1 approval). `deadline` is optional. |
+| `!evaluate id=<proposal_id> sha=<commit_sha> verdict=<approve\|reject\|request_changes> [evidence=<text>]` | Evaluates/critiques a proposal. |
+| `!vote id=<proposal_id> sha=<commit_sha> verdict=<approve\|reject\|request_changes>` | Shorthand/alias for `!evaluate`. |
+| `!revision id=<proposal_id> sha=<commit_sha>` | Updates an active proposal with a new commit SHA. |
+| `!executed id=<proposal_id> sha=<commit_sha>` | Records that the proposal has been successfully merged/executed. |
+
+### Legacy JSON Payload Support
+
+For backwards compatibility with legacy tooling, the merge gate and scribe also accept JSON payloads in PRIVMSG bodies with the following schema:
+- `{"type": "ccrep:proposal", "proposal_id": "...", "commit_sha": "...", "reviewer": "...", "summary": "...", "quorum": "...", "deadline": "..."}`
+- `{"type": "ccrep:evaluation", "proposal_id": "...", "commit_sha": "...", "verdict": "...", "reviewer": "..."}`
+- `{"type": "ccrep:critique", "proposal_id": "...", "commit_sha": "...", "verdict": "request_changes", "reviewer": "..."}`
+- `{"type": "ccrep:revision", "proposal_id": "...", "commit_sha": "..."}`
+- `{"type": "ccrep:executed", "proposal_id": "...", "commit_sha": "..."}`
 
 ### Rules
 
 * **One Executor:** The proposal specifies the executor. Evaluators submit evaluations/critiques and never execute code.
-* **Approvals Die on New Commits:** Any new commit proposed via `ccrep:revision` voids all previous approvals. Re-evaluation is required.
+* **Approvals Die on New Commits:** Any new commit proposed via `!revision` voids all previous approvals. Re-evaluation is required.
 * **Persistent Critiques:** A blocking critique (`request_changes` or `reject`) persists across revisions until the critique author explicitly submits a new verdict (e.g. `approve`).
-* **Spoof Resistance:** The merge gate validates that the message sender nick matches the `reviewer` field in the JSON payload. Spoofed messages are ignored.
+* **Spoof Resistance:** The merge gate validates that the message sender nick matches the `reviewer` field in the command (or auth sender for implicit reviewer). Spoofed messages are ignored.
 
 ---
 

@@ -301,3 +301,25 @@ func writeJSONError(out io.Writer, err error) error {
 		"error": err.Error(),
 	})
 }
+
+func ValidateHistoryPath(path string) error {
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("history file path must be absolute, got %q", path)
+	}
+	repoPath := RepoPath(".")
+	if repoPath != "" {
+		absRepo, err := filepath.Abs(repoPath)
+		if err == nil {
+			absPath, err := filepath.Abs(path)
+			if err == nil {
+				absPathClean := filepath.Clean(absPath)
+				absRepoClean := filepath.Clean(absRepo)
+				if absPathClean == absRepoClean || strings.HasPrefix(absPathClean, absRepoClean+string(filepath.Separator)) {
+					return fmt.Errorf("history file path %q cannot be inside git repository %q", path, repoPath)
+				}
+			}
+		}
+	}
+	return nil
+}
+
