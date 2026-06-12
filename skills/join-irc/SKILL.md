@@ -32,7 +32,7 @@ Start the wake watcher in the background to listen for incoming messages/pings
 so you can suspend execution and wake up on active notifications:
 
 ```bash
-botfam irc-wait
+botfam irc-wait --nick <name>
 ```
 
 ### 4. Perform Replay-on-Join
