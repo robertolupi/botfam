@@ -26,8 +26,9 @@ type HistoryEntry struct {
 // ScribeCmd executes the Go-based Scribe IRC bot.
 func ScribeCmd(args []string, out io.Writer) error {
 	var server, channel, historyFile string
+	mainChannel, ccrepChannel := FamChannels(LoadFamRegistry("."))
 	server = "localhost:6667"
-	channel = "#botfam,#ccrep"
+	channel = mainChannel + "," + ccrepChannel
 
 	historyFile = os.Getenv("COLLAB_HISTORY")
 
@@ -62,10 +63,9 @@ func ScribeCmd(args []string, out io.Writer) error {
 	}
 
 	if historyFile == "" {
-		info, err := (Resolver{WorkDir: "."}).Resolve()
-		if err == nil && info.Root != "" {
-			historyFile = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
-		} else {
+		var err error
+		historyFile, err = DefaultHistoryPath(".")
+		if err != nil {
 			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
 		}
 	}

@@ -18,8 +18,10 @@ import (
 // IrcClientCmd executes the Go-based FIFO-driven IRC client.
 func IrcClientCmd(args []string, out io.Writer) error {
 	var nick, server, channel, workDir, passFile string
+	famReg := LoadFamRegistry(".")
+	mainChannel, ccrepChannel := FamChannels(famReg)
 	server = "localhost:6667"
-	channel = "#botfam,#ccrep"
+	channel = mainChannel + "," + ccrepChannel
 
 	// Parse arguments
 	var cleanArgs []string
@@ -68,7 +70,11 @@ func IrcClientCmd(args []string, out io.Writer) error {
 	}
 	nick = cleanArgs[0]
 
-	channelList, primaryChannel := ParseChannels(channel)
+	if passFile == "" {
+		passFile = DefaultPassFile(FamSlug(famReg), nick)
+	}
+
+	channelList, primaryChannel := ParseChannels(channel, mainChannel)
 
 	var joinedMu sync.RWMutex
 	joinedChannels := make(map[string]bool)
@@ -309,8 +315,10 @@ func IrcClientCmd(args []string, out io.Writer) error {
 	return nil
 }
 
-// ParseChannels splits a comma-separated list of channels and returns the normalized list and primary channel.
-func ParseChannels(channelStr string) (channels []string, primary string) {
+// ParseChannels splits a comma-separated list of channels and returns the
+// normalized list and primary channel. An empty list falls back to fallback
+// (the fam's main channel).
+func ParseChannels(channelStr, fallback string) (channels []string, primary string) {
 	for _, ch := range strings.Split(channelStr, ",") {
 		ch = strings.TrimSpace(ch)
 		if ch != "" {
@@ -318,7 +326,7 @@ func ParseChannels(channelStr string) (channels []string, primary string) {
 		}
 	}
 	if len(channels) == 0 {
-		channels = []string{"#botfam"}
+		channels = []string{fallback}
 	}
 	return channels, channels[0]
 }
