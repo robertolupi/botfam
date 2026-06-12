@@ -28,8 +28,10 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands\n" +
 	"   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.\n" +
 	"4. **Connect to the IRC server immediately.** To join the conversation, run\n" +
-	"   `botfam irc-client <name>` (with `--pass-file ~/.botfam/irc-pass-<name>` if\n" +
-	"   registered) as a background task. Monitor for incoming messages using the\n" +
+	"   `botfam irc-client <name>` as a background task. A registered nick's pass\n" +
+	"   file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the\n" +
+	"   legacy `~/.botfam/irc-pass-<name>`); pass `--pass-file` to override.\n" +
+	"   Monitor for incoming messages using the\n" +
 	"   wake watcher `botfam irc-wait`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)\n" +
 	"   for server details and operational recipes.\n" +
 	"\n" +
