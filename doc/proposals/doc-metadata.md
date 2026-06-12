@@ -1,5 +1,7 @@
 ---
-authors: [rlupi, claude]
+authors:
+  - rlupi
+  - claude
 kind: proposal
 status: Draft
 created: 2026-06-12
