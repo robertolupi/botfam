@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -161,3 +163,76 @@ func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
 		t.Errorf("expected session bound to %q, got %q", "alice", s.actor)
 	}
 }
+
+func TestIrcWriteTool(t *testing.T) {
+	s, _ := newTestServer(t)
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+
+	// Create scratch/irc/alice directory structure
+	fifoDir := filepath.Join(aliceDir, "scratch", "irc", "alice")
+	if err := os.MkdirAll(fifoDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	fifoPath := filepath.Join(fifoDir, "in")
+	// Create named pipe
+	if err := syscall.Mkfifo(fifoPath, 0666); err != nil {
+		t.Fatalf("failed to create test FIFO: %v", err)
+	}
+
+	// Open FIFO for reading in a separate goroutine so it doesn't block
+	readCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		// Open the FIFO in RDONLY mode
+		f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		defer f.Close()
+
+		// Set a read timeout using select/context
+		lineCh := make(chan string, 1)
+		go func() {
+			reader := bufio.NewReader(f)
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			lineCh <- line
+		}()
+
+		select {
+		case line := <-lineCh:
+			readCh <- line
+		case <-ctx.Done():
+			errCh <- ctx.Err()
+		case <-time.After(2 * time.Second):
+			errCh <- fmt.Errorf("timeout waiting for FIFO read")
+		}
+	}()
+
+	// Call the irc_write tool using the server
+	_, err := s.callTool(context.Background(), "irc_write", map[string]any{
+		"work_dir": aliceDir,
+		"message":  "hello irc\n",
+	})
+	if err != nil {
+		t.Fatalf("irc_write tool call failed: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("FIFO reader error: %v", err)
+	case line := <-readCh:
+		if line != "hello irc\n" {
+			t.Errorf("expected line %q, got %q", "hello irc\n", line)
+		}
+	}
+}
+
