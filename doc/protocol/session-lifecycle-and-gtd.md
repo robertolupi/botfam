@@ -1,33 +1,40 @@
 # Session Lifecycle, Reviews, and GTD State
 
-Status: **proposal / protocol design**
-Author: **ChatGPT**
+Status: **proposal / protocol design** Author: **ChatGPT**
 
-This document captures a proposed next step for Botfam after the 2026-06-11 session: make session closure, participant reviews, action extraction, and operational state explicit protocol surfaces.
+This document captures a proposed next step for Botfam after the 2026-06-11
+session: make session closure, participant reviews, action extraction, and
+operational state explicit protocol surfaces.
 
 The core idea:
 
-> A Botfam session is not closed when agents stop talking.
-> A Botfam session is closed when the transcript, reviews, action items, and protocol deltas have been materialized.
+> A Botfam session is not closed when agents stop talking. A Botfam session is
+> closed when the transcript, reviews, action items, and protocol deltas have
+> been materialized.
 
-Right now the human operator is often the memory and bridge process: remembering to generate IRC logs, ping participants for reviews, extract next actions, and carry delayed feedback between agents. That is useful during bootstrapping, but it should not remain a human-memory dependency.
+Right now the human operator is often the memory and bridge process:
+remembering to generate IRC logs, ping participants for reviews, extract next
+actions, and carry delayed feedback between agents. That is useful during
+bootstrapping, but it should not remain a human-memory dependency.
 
-Botfam should make the end of a session easier to do correctly than incorrectly.
+Botfam should make the end of a session easier to do correctly than
+incorrectly.
 
----
+______________________________________________________________________
 
 ## 1. Motivation
 
-Botfam is becoming more than a coordination trick. It is becoming a small agent runtime with:
+Botfam is becoming more than a coordination trick. It is becoming a small agent
+runtime with:
 
-* an IRC substrate;
-* a scribe;
-* versioned agents/tools;
-* session transcripts;
-* reviews;
-* proposals and votes;
-* Docker-based test/prod substrates;
-* protocol scars turning into commands and guardrails.
+- an IRC substrate;
+- a scribe;
+- versioned agents/tools;
+- session transcripts;
+- reviews;
+- proposals and votes;
+- Docker-based test/prod substrates;
+- protocol scars turning into commands and guardrails.
 
 The reviews are especially important.
 
@@ -44,9 +51,10 @@ work
 → next session starts smarter
 ```
 
-If reviews are forgotten, Botfam can still coordinate work, but it loses much of its self-improvement engine.
+If reviews are forgotten, Botfam can still coordinate work, but it loses much
+of its self-improvement engine.
 
----
+______________________________________________________________________
 
 ## 2. New Session Lifecycle Model
 
@@ -65,9 +73,10 @@ closed
 force-closed
 ```
 
-A lightweight version is fine at first. The important distinction is that “agents stopped chatting” is not the same as “session closed.”
+A lightweight version is fine at first. The important distinction is that
+“agents stopped chatting” is not the same as “session closed.”
 
----
+______________________________________________________________________
 
 ## 3. End-of-Session Protocol
 
@@ -82,22 +91,23 @@ Any participant or the human operator may propose closing a session:
 !session close-propose reason="handoff to delayed reviewer"
 ```
 
-This should mark the session as `closing-proposed` and freeze the intended boundary unless reopened.
+This should mark the session as `closing-proposed` and freeze the intended
+boundary unless reopened.
 
 The close proposal should record:
 
-* session id;
-* channel;
-* proposed close timestamp;
-* proposer;
-* reason;
-* current branch / commit SHA where available;
-* current participants;
-* known pending proposals;
-* known pending votes;
-* known open action items.
+- session id;
+- channel;
+- proposed close timestamp;
+- proposer;
+- reason;
+- current branch / commit SHA where available;
+- current participants;
+- known pending proposals;
+- known pending votes;
+- known open action items.
 
----
+______________________________________________________________________
 
 ### 3.2 Freeze the session boundary
 
@@ -109,20 +119,21 @@ When closing begins, Botfam should record the boundary explicitly:
 
 The freeze step should capture:
 
-* IRC channel;
-* session start timestamp;
-* session end timestamp;
-* participants observed in the transcript;
-* active bots and versions if known;
-* current repo branch/SHA for each participant if known;
-* transcript source path;
-* scribe identity;
-* scribe version;
-* Docker/test/prod substrate identity where relevant.
+- IRC channel;
+- session start timestamp;
+- session end timestamp;
+- participants observed in the transcript;
+- active bots and versions if known;
+- current repo branch/SHA for each participant if known;
+- transcript source path;
+- scribe identity;
+- scribe version;
+- Docker/test/prod substrate identity where relevant.
 
-This does not need to be perfect initially. A best-effort machine-readable record is already better than relying on memory.
+This does not need to be perfect initially. A best-effort machine-readable
+record is already better than relying on memory.
 
----
+______________________________________________________________________
 
 ### 3.3 Generate artifacts
 
@@ -150,7 +161,8 @@ Optional machine-readable artifact:
 doc/collab/sessions/<session-id>/actions.json
 ```
 
-The transcript generation should not depend on the human remembering to run a script manually. There should be a canonical command.
+The transcript generation should not depend on the human remembering to run a
+script manually. There should be a canonical command.
 
 Example:
 
@@ -164,7 +176,7 @@ Or through IRC:
 !session export
 ```
 
----
+______________________________________________________________________
 
 ### 3.4 Request participant reviews
 
@@ -182,7 +194,8 @@ Or:
 !session request-reviews
 ```
 
-Each participant should produce a review using the existing review skill/template.
+Each participant should produce a review using the existing review
+skill/template.
 
 Minimum review questions:
 
@@ -228,7 +241,8 @@ review:codex  = pending | submitted | waived | delayed
 review:human  = optional | submitted
 ```
 
-Delayed/offline reviewers are allowed. The important part is to make their status visible.
+Delayed/offline reviewers are allowed. The important part is to make their
+status visible.
 
 Example:
 
@@ -246,7 +260,7 @@ Reviews for session 2026-06-11-next-steps:
 - human: optional
 ```
 
----
+______________________________________________________________________
 
 ### 3.5 Extract GTD state
 
@@ -269,16 +283,16 @@ question
 
 Definitions:
 
-| Type          | Meaning                                                                   |
-| ------------- | ------------------------------------------------------------------------- |
-| `next-action` | Concrete executable action with one owner                                 |
-| `bug`         | Defect in code, protocol, docs, substrate, or workflow                    |
-| `improvement` | Enhancement to protocol/tooling/skills/tests                              |
-| `waiting-for` | Blocked on a specific agent, human, external condition, or future review  |
-| `someday`     | Useful idea, not currently committed                                      |
-| `decision`    | Resolved choice that should be remembered                                 |
-| `invariant`   | Rule learned from the session                                             |
-| `question`    | Open question to revisit                                                  |
+| Type          | Meaning                                                                  |
+| ------------- | ------------------------------------------------------------------------ |
+| `next-action` | Concrete executable action with one owner                                |
+| `bug`         | Defect in code, protocol, docs, substrate, or workflow                   |
+| `improvement` | Enhancement to protocol/tooling/skills/tests                             |
+| `waiting-for` | Blocked on a specific agent, human, external condition, or future review |
+| `someday`     | Useful idea, not currently committed                                     |
+| `decision`    | Resolved choice that should be remembered                                |
+| `invariant`   | Rule learned from the session                                            |
+| `question`    | Open question to revisit                                                 |
 
 Example IRC surface:
 
@@ -343,7 +357,7 @@ The system should be able to answer:
 !actions session=<session-id>
 ```
 
----
+______________________________________________________________________
 
 ## 4. Close Gate
 
@@ -379,11 +393,12 @@ force-closed
 
 And record the missing items as `waiting-for` or `waived`.
 
----
+______________________________________________________________________
 
 ## 5. Delayed Review Pattern
 
-Agents are not always simultaneously available, sufficiently token-rich, or attached to the same substrate.
+Agents are not always simultaneously available, sufficiently token-rich, or
+attached to the same substrate.
 
 Botfam should explicitly support delayed reviewers.
 
@@ -413,27 +428,30 @@ artifact boundary: committed transcript + action list + merge SHA
 review mode: after-the-fact audit / missed-invariant discovery
 ```
 
-This is not a weakness. It is a real distributed-systems constraint of multi-agent work.
+This is not a weakness. It is a real distributed-systems constraint of
+multi-agent work.
 
----
+______________________________________________________________________
 
 ## 6. Current Operational Invariants From 2026-06-11
 
-The 2026-06-11 session produced several important invariants that should be preserved in docs and/or tests.
+The 2026-06-11 session produced several important invariants that should be
+preserved in docs and/or tests.
 
 ### 6.1 One blessed scribe, never two
 
-Double scribe is worse than no scribe because it can corrupt or duplicate the ledger.
+Double scribe is worse than no scribe because it can corrupt or duplicate the
+ledger.
 
 The scribe should eventually have a singleton guard.
 
 Possible implementations:
 
-* lockfile in shared data dir;
-* IRC identity check;
-* heartbeat/lease;
-* fail-fast if another scribe is present;
-* explicit `--force-takeover`.
+- lockfile in shared data dir;
+- IRC identity check;
+- heartbeat/lease;
+- fail-fast if another scribe is present;
+- explicit `--force-takeover`.
 
 Expected behavior:
 
@@ -450,7 +468,7 @@ Override should be explicit:
 botfam scribe start --force-takeover
 ```
 
----
+______________________________________________________________________
 
 ### 6.2 Stale binary detection is first-class
 
@@ -463,9 +481,11 @@ botfam version
 !version
 ```
 
-The version should come from build metadata where possible, not from the current working directory at runtime.
+The version should come from build metadata where possible, not from the
+current working directory at runtime.
 
-The runtime should not allow a stale binary to lie by reading `git rev-parse HEAD` from the wrong checkout.
+The runtime should not allow a stale binary to lie by reading
+`git rev-parse HEAD` from the wrong checkout.
 
 Expected version fields:
 
@@ -477,7 +497,7 @@ build_time
 go_version / runtime version
 ```
 
----
+______________________________________________________________________
 
 ### 6.3 Docker compose is now a canonical substrate
 
@@ -495,13 +515,14 @@ The repo should document the current operational contract:
 
 This should be in README, BOOTSTRAP, or a dedicated operational doc.
 
----
+______________________________________________________________________
 
 ### 6.4 Waiting should be a protocol primitive
 
 The session exposed that agents were rebuilding IRC wait logic manually.
 
-`botfam irc-wait` is the right direction, but manual re-arming is still a footgun.
+`botfam irc-wait` is the right direction, but manual re-arming is still a
+footgun.
 
 A future command should make watcher re-arm automatic.
 
@@ -519,18 +540,19 @@ botfam wait-loop --channel '#botfam' --pattern '@agy' --exec '...'
 
 Expected properties:
 
-* automatically re-arms after each wake;
-* logs wake and re-arm events;
-* exits cleanly on session close;
-* supports timeout;
-* supports last-seen cursor;
-* avoids duplicate processing.
+- automatically re-arms after each wake;
+- logs wake and re-arm events;
+- exits cleanly on session close;
+- supports timeout;
+- supports last-seen cursor;
+- avoids duplicate processing.
 
----
+______________________________________________________________________
 
 ## 7. Distinguish Approved, Deployed, and Verified
 
-The protocol should not collapse “we agreed”, “it is live”, and “it was verified” into one state.
+The protocol should not collapse “we agreed”, “it is live”, and “it was
+verified” into one state.
 
 Suggested event types:
 
@@ -555,24 +577,27 @@ Example:
 !execute done docker-prod-v1
 ```
 
-This matters because the human may sometimes explicitly instruct a deployment before a formal proposal has completed. That is okay, but the transcript should represent the distinction.
+This matters because the human may sometimes explicitly instruct a deployment
+before a formal proposal has completed. That is okay, but the transcript should
+represent the distinction.
 
----
+______________________________________________________________________
 
 ## 8. Golden Transcript Candidate
 
-The 2026-06-11 session is a good candidate for a “golden transcript” because it demonstrates the full Botfam value proposition:
+The 2026-06-11 session is a good candidate for a “golden transcript” because it
+demonstrates the full Botfam value proposition:
 
-* agents coordinate through IRC;
-* an operational ambiguity is discovered;
-* duplicate-scribe risk is avoided;
-* a recurring annoyance becomes a tool feature;
-* stale binary risk is discovered and fixed;
-* review catches a subtle implementation issue;
-* Docker test/prod substrate is created;
-* history is preserved;
-* session state is summarized;
-* next actions emerge.
+- agents coordinate through IRC;
+- an operational ambiguity is discovered;
+- duplicate-scribe risk is avoided;
+- a recurring annoyance becomes a tool feature;
+- stale binary risk is discovered and fixed;
+- review catches a subtle implementation issue;
+- Docker test/prod substrate is created;
+- history is preserved;
+- session state is summarized;
+- next actions emerge.
 
 Suggested title:
 
@@ -586,13 +611,15 @@ Alternative title:
 From Markdown Protocol to Agent Runtime: Botfam’s First Infra Migration
 ```
 
-This transcript could be referenced from README as an example of Botfam self-improvement in the wild.
+This transcript could be referenced from README as an example of Botfam
+self-improvement in the wild.
 
----
+______________________________________________________________________
 
 ## 9. Proposed Files
 
-This proposal can remain one document initially, but over time it may split into:
+This proposal can remain one document initially, but over time it may split
+into:
 
 ```text
 doc/protocol/SESSION_LIFECYCLE.md
@@ -607,7 +634,7 @@ For now, a single file is probably more agent-legible:
 doc/protocol/session-lifecycle-and-gtd.md
 ```
 
----
+______________________________________________________________________
 
 ## 10. Immediate Action Items
 
@@ -651,7 +678,7 @@ Owner: human/claude
 Type: documentation
 ```
 
----
+______________________________________________________________________
 
 ## 11. Design Principle
 
@@ -659,12 +686,12 @@ The important design principle:
 
 > Every annoying thing Roberto had to manually mediate should become one of:
 >
-> * a command;
-> * a guardrail;
-> * a transcript convention;
-> * a machine-readable state transition;
-> * a test;
-> * or an explicit human override.
+> - a command;
+> - a guardrail;
+> - a transcript convention;
+> - a machine-readable state transition;
+> - a test;
+> - or an explicit human override.
 
 Session closure is currently one of those manually mediated things.
 

@@ -1,0 +1,5 @@
+# Shared mdformat options. Every agent must produce byte-identical output,
+# so do not override these locally. Plugins activate by being installed and
+# therefore cannot be pinned here — tools/mdformat.sh pins them.
+wrap = 79
+number = true

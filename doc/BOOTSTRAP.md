@@ -2,15 +2,14 @@
 
 > **Status (2026-06-11): historical spec, superseded as the live protocol.**
 > This document describes the v0 maildir-convention fam — the
-> protocol-as-convention experiment (verified 2026-06-10). Since the
-> IRC-first pivot (2026-06-11), the production coordination substrate is
-> IRC + bots + local sandbox-only shims — see
-> [doc/collab/PROTOCOL.md](collab/PROTOCOL.md). The maildir capability
-> layer still exists in the binary but is no longer the protocol surface,
-> and §9's trust items are now largely delivered by the IRC substrate
-> (connection-bound NickServ nicks, scribe ledger, deterministic `!tally`).
-> Keep reading for what it remains: the zero-install on-ramp that can boot
-> a fam from markdown alone, and the clearest statement of *why* the
+> protocol-as-convention experiment (verified 2026-06-10). Since the IRC-first
+> pivot (2026-06-11), the production coordination substrate is IRC + bots +
+> local sandbox-only shims — see [doc/collab/PROTOCOL.md](collab/PROTOCOL.md).
+> The maildir capability layer still exists in the binary but is no longer the
+> protocol surface, and §9's trust items are now largely delivered by the IRC
+> substrate (connection-bound NickServ nicks, scribe ledger, deterministic
+> `!tally`). Keep reading for what it remains: the zero-install on-ramp that
+> can boot a fam from markdown alone, and the clearest statement of *why* the
 > hardened runtime exists.
 
 This document is **self-contained**. With nothing but a filesystem and an agent
@@ -23,6 +22,7 @@ following this spec.
 > This bootstrap gives you the full **capability** of botfam (send, recv, ack,
 > post, claim, heartbeat, sessions, CCREP) and **none of its trust
 > guarantees.** It has:
+>
 > - **no attributable writes** — any participant can write any file, including
 >   one that claims to be from someone else;
 > - **no real identity** — an actor is whatever name a writer puts in a file;
@@ -34,13 +34,14 @@ following this spec.
 > A **single model role-playing every actor has zero independence**: "alice
 > sends, bob receives" is one model talking to itself; the files are props.
 > That is fine for prototyping, teaching, and tiny fully-cooperative fams where
-> one human reads every line. It is **not** safe when participants are genuinely
-> independent, numerous, fast, or unsupervised. Turning capability into trust —
-> attributable writes, real identity binding, deterministic tallies, sustained
-> consent, pacing — is exactly what the compiled `botfam` adds, and why it is
-> not "ergonomic sugar." See [§9](#9-what-the-binary-adds) for the precise list.
+> one human reads every line. It is **not** safe when participants are
+> genuinely independent, numerous, fast, or unsupervised. Turning capability
+> into trust — attributable writes, real identity binding, deterministic
+> tallies, sustained consent, pacing — is exactly what the compiled `botfam`
+> adds, and why it is not "ergonomic sugar." See [§9](#9-what-the-binary-adds)
+> for the precise list.
 
----
+______________________________________________________________________
 
 ## 1. The one primitive: atomic `rename`
 
@@ -68,7 +69,7 @@ Two patterns use it:
 
 That is the whole engine. Everything else is convention.
 
----
+______________________________________________________________________
 
 ## 2. Directory layout
 
@@ -100,7 +101,7 @@ default `~/.botfam/<fam>/`):
 zero-padded, a plain lexical directory sort *is* FIFO order — "oldest" needs no
 parsing.
 
----
+______________________________________________________________________
 
 ## 3. Identity (convention)
 
@@ -112,11 +113,12 @@ assign each subagent a name and have it use that as `<actor>` everywhere.
 > name. The binary binds the name to the process that actually wrote
 > ([§9](#9-what-the-binary-adds)); the bootstrap trusts the label.
 
----
+______________________________________________________________________
 
 ## 4. Messaging
 
 Message file (in `<to>/new/…json`):
+
 ```json
 {
   "id": "01781106774696000000-3f9a…c1",
@@ -131,21 +133,21 @@ Message file (in `<to>/new/…json`):
 ```
 
 - **send(to, type, payload)** — build the file in `tmp/`, then
-  `rename tmp/<id>.json → <to>/new/<id>.json`. Create `<to>/{new,processing,cur}`
-  first if missing.
+  `rename tmp/<id>.json → <to>/new/<id>.json`. Create
+  `<to>/{new,processing,cur}` first if missing.
 - **recv(match_type?, timeout_s?) [blocking]** — loop: list `<me>/new/` sorted;
   take the oldest whose `type` matches (or any). Reserve it with
-  `rename <me>/new/<f> → <me>/processing/<f>`. If the rename fails (someone/your
-  other self won), retry the next file. If `new/` is empty, `sleep` ~0.2s and
-  loop **until `timeout_s` elapses, then return empty.** Pick a `timeout_s`
-  under your tool-call ceiling (default **60 s**) and re-call in a loop if you
-  want to keep waiting — never spin forever. The rename is the reservation —
-  **delivery is at-least-once.**
+  `rename <me>/new/<f> → <me>/processing/<f>`. If the rename fails
+  (someone/your other self won), retry the next file. If `new/` is empty,
+  `sleep` ~0.2s and loop **until `timeout_s` elapses, then return empty.** Pick
+  a `timeout_s` under your tool-call ceiling (default **60 s**) and re-call in
+  a loop if you want to keep waiting — never spin forever. The rename is the
+  reservation — **delivery is at-least-once.**
 - **try_recv / peek** — same scan without blocking; `peek` reads without
   reserving (no rename).
 - **ack(id, outcome?)** — after you have *durably* handled it, in this order:
-  (1) if recording an `outcome`, build the updated file in `tmp/` and
-  `rename` it over the `processing/` copy (atomic publish in place); (2)
+  (1) if recording an `outcome`, build the updated file in `tmp/` and `rename`
+  it over the `processing/` copy (atomic publish in place); (2)
   `rename <me>/processing/<f> → <me>/cur/<f>`. `cur/` is the handled record.
 - **seen(id)** — the id exists in `<me>/cur/` ⇒ already handled (dedup).
 - **expiry** — before reading, move any `new/` file whose `expires_at` is past
@@ -154,14 +156,15 @@ Message file (in `<to>/new/…json`):
   past a **staleness window (default 5 min)** — its reader died before ack — is
   returned with `rename processing/<f> → new/<f>`. **Who/when:** there is no
   background process, so each actor sweeps *its own* `processing/` at the start
-  of every turn, before `recv`; an unswept mailbox is simply not recovered until
-  its owner next acts.
+  of every turn, before `recv`; an unswept mailbox is simply not recovered
+  until its owner next acts.
 
----
+______________________________________________________________________
 
 ## 5. Tasks (leased queue)
 
 Task file (in `tasks/open/…json`):
+
 ```json
 {
   "id": "…", "type": "build", "payload": { "title": "…" },
@@ -182,15 +185,16 @@ Task file (in `tasks/open/…json`):
   `lease_expires_at: now + lease_ttl` (default `lease_ttl` **600 s**;
   atomic-publish the update). Always re-read the file you actually got and
   confirm its id.
-- **heartbeat(id, lease_ttl)** — extend `lease_expires_at` on your claimed file.
-  Do this at every natural pause or you risk being swept.
+- **heartbeat(id, lease_ttl)** — extend `lease_expires_at` on your claimed
+  file. Do this at every natural pause or you risk being swept.
 - **complete(id, result)** — `mkdir -p tasks/done/`; set `status:"done"`,
-  `result`, `completed_at: now`; `rename tasks/claimed/<me>/<f> → tasks/done/<f>`.
+  `result`, `completed_at: now`;
+  `rename tasks/claimed/<me>/<f> → tasks/done/<f>`.
 - **abandon(id, reason)** — reset `owner:""`, `status:"open"`;
   `rename tasks/claimed/<me>/<f> → tasks/open/<f>`.
 - **sweep** — **any actor may run it; do it opportunistically before each
-  `claim`** (no daemon runs it for you). Scan `tasks/claimed/*/`; any file whose
-  `lease_expires_at` is past goes back: set `swept_from:"<actor>"`,
+  `claim`** (no daemon runs it for you). Scan `tasks/claimed/*/`; any file
+  whose `lease_expires_at` is past goes back: set `swept_from:"<actor>"`,
   `swept_at: now`, `owner:""`, `status:"open"`, `rename → tasks/open/<f>`. A
   `swept_from` on a task you then claim means *check with the previous owner
   before starting*.
@@ -200,7 +204,7 @@ Task file (in `tasks/open/…json`):
 > `tmp/` name first (so the update either owns the file or fails cleanly). The
 > bootstrap accepts the race; keep TTLs generous and heartbeat often.
 
----
+______________________________________________________________________
 
 ## 6. Sessions (the shared log)
 
@@ -214,14 +218,14 @@ Task file (in `tasks/open/…json`):
   ```
   `handoff`, if present, must have non-empty `task`, `context`, `deliverable`.
 - **session_read(slug, from?, since_ts?, limit?)** — read `session.log` line by
-  line; filter by author / timestamp. (Use large lines or chunked reads — a long
-  entry must not be silently truncated.)
+  line; filter by author / timestamp. (Use large lines or chunked reads — a
+  long entry must not be silently truncated.)
 - **session close \<slug>** — render the log to human-readable
-  `doc/collab/sessions/<slug>/session.md` in the repo, then write the `ARCHIVED`
-  tombstone. **Promotion to the repo is a human gesture** — an agent should not
-  self-archive.
+  `doc/collab/sessions/<slug>/session.md` in the repo, then write the
+  `ARCHIVED` tombstone. **Promotion to the repo is a human gesture** — an agent
+  should not self-archive.
 
----
+______________________________________________________________________
 
 ## 7. CCREP — coordinating shared-state changes (one page)
 
@@ -229,15 +233,16 @@ All changes to shared state (landing commits, store migrations) go through
 `ccrep:*` messages **and** a session-log entry for every transition. Treat
 unknown variants as protocol errors.
 
-| type | required payload |
-|---|---|
-| `ccrep:proposal` | `proposal_id`, `summary`, `executor`, `quorum` (`all`\|`majority`\|`any`\|`consensus`), `deadline`; `commit_sha` for code |
-| `ccrep:critique` | `proposal_id`, `commit_sha`, `verdict: request_changes`, findings with `severity` + `file:line` + resolution |
-| `ccrep:evaluation` | `proposal_id`, `commit_sha`, `reviewer`, `verdict` (`approve`\|`request_changes`\|`reject`), evidence |
-| `ccrep:revision` | `proposal_id`, new `commit_sha`, `addressed_critiques` (ids) |
-| `ccrep:executed` | `proposal_id`, resulting state (e.g. main sha), consent/absentee breakdown |
+| type               | required payload                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `ccrep:proposal`   | `proposal_id`, `summary`, `executor`, `quorum` (`all`\|`majority`\|`any`\|`consensus`), `deadline`; `commit_sha` for code |
+| `ccrep:critique`   | `proposal_id`, `commit_sha`, `verdict: request_changes`, findings with `severity` + `file:line` + resolution              |
+| `ccrep:evaluation` | `proposal_id`, `commit_sha`, `reviewer`, `verdict` (`approve`\|`request_changes`\|`reject`), evidence                     |
+| `ccrep:revision`   | `proposal_id`, new `commit_sha`, `addressed_critiques` (ids)                                                              |
+| `ccrep:executed`   | `proposal_id`, resulting state (e.g. main sha), consent/absentee breakdown                                                |
 
 **Rules** (each exists because a fam broke it once):
+
 1. **One executor.** The proposal names exactly one `executor`; reviewers send
    verdicts only and never act, even when approving.
 2. **Approvals die on new commits.** Any new commit voids all prior verdicts —
@@ -260,33 +265,33 @@ A **tally** for a proposal is the deterministic function over the recorded
 session's `meta.json`. A principal is **present** if it has a recorded activity
 — a session entry, a sent/acked message, or an explicit `presence` marker —
 within the **staleness window (default 30 min)**; otherwise it is **absent**,
-excluded from the denominator at the `deadline`, and listed in `ccrep:executed`.
-Then apply the session's rule over the **present eligible principals**:
-`all`/`consensus` = every present eligible principal approves; `majority` =
-approvals > half of the present eligible principals; `any` = ≥ 1 approval.
-Resolution is `MET` / `BLOCKED-by-X` / `PENDING-on-Y` / `EXPIRED`.
+excluded from the denominator at the `deadline`, and listed in
+`ccrep:executed`. Then apply the session's rule over the **present eligible
+principals**: `all`/`consensus` = every present eligible principal approves;
+`majority` = approvals > half of the present eligible principals; `any` = ≥ 1
+approval. Resolution is `MET` / `BLOCKED-by-X` / `PENDING-on-Y` / `EXPIRED`.
 
 > The bootstrap cannot *enforce* this: an agent can omit or invent activity to
 > skew the present-set, or hand-wave the count. That is the exact seam the
 > compiled runtime closes ([§9](#9-what-the-binary-adds)) — here it is
 > honor-system, so a human should sanity-check any `majority` resolution.
 
----
+______________________________________________________________________
 
 ## 8. Booting a role-play fam (what the experiment did)
 
 1. Spawn N subagents; give each a name (`alice`, `bob`, …) — that is its actor.
 2. Point them all at this file as the spec, and at one shared `<fam-root>`.
-3. They coordinate purely by the file ops above:
-   `alice` atomic-publishes into `bob/new/`; `bob` loops `list bob/new/`,
-   reserves, reads, acks into `bob/cur/`; tasks flow `open/ → claimed/ → done/`
-   by rename; decisions are negotiated as `ccrep:*` entries in a shared session.
+3. They coordinate purely by the file ops above: `alice` atomic-publishes into
+   `bob/new/`; `bob` loops `list bob/new/`, reserves, reads, acks into
+   `bob/cur/`; tasks flow `open/ → claimed/ → done/` by rename; decisions are
+   negotiated as `ccrep:*` entries in a shared session.
 
 No process is running. The maildir is the entire state, and the spec is the
 runtime. **Change this markdown and the agents pick up the new behaviour on
 their next `recv`.**
 
----
+______________________________________________________________________
 
 ## 9. What the binary adds
 
@@ -297,17 +302,19 @@ exact same maildir semantics, and adds the layer this bootstrap cannot:
   sole-writer make "who wrote this" real, so the maildir-as-log is trustworthy,
   not merely readable.
 - **Real identity binding** — the actor is bound to the *process* that wrote
-  (peer credentials + worktree), so you cannot vote, claim, or send *as* someone
-  else. The bootstrap trusts the name in the file; the binary verifies it.
+  (peer credentials + worktree), so you cannot vote, claim, or send *as*
+  someone else. The bootstrap trusts the name in the file; the binary verifies
+  it.
 - **Confabulation-resistance** — machine-derived `propose`/`approve`/`merge`
-  fill SHAs from `git rev-parse` and refuse retyped/invalid ones; the merge-gate
-  rejects stale approvals and self-spoofed reviewers. Removes the *opportunity*
-  to fabricate, rather than trusting agents not to.
-- **A deterministic tally** the program computes (no hand-narrated counts), with
-  presence-aware quorum and an operator who can vote and veto but cannot
+  fill SHAs from `git rev-parse` and refuse retyped/invalid ones; the
+  merge-gate rejects stale approvals and self-spoofed reviewers. Removes the
+  *opportunity* to fabricate, rather than trusting agents not to.
+- **A deterministic tally** the program computes (no hand-narrated counts),
+  with presence-aware quorum and an operator who can vote and veto but cannot
   impersonate an agent.
-- **Pacing** — sustained, connection-bound consent and an explicit review brake,
-  so a fast self-improving fam stays paced to what review can actually verify.
+- **Pacing** — sustained, connection-bound consent and an explicit review
+  brake, so a fast self-improving fam stays paced to what review can actually
+  verify.
 - **Race-closed primitives** — ownership-proving task updates, atomic writes
   everywhere, precise lease expiry.
 
