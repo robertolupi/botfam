@@ -151,6 +151,8 @@ func run() error {
 			return fam.IrcClientCmd(os.Args[2:], os.Stdout)
 		case "irc-wait":
 			return fam.IrcWaitCmd(os.Args[2:], os.Stdout)
+		case "irc-propose":
+			return fam.IrcProposeCmd(os.Args[2:], os.Stdout)
 		case "scribe":
 			return fam.ScribeCmd(os.Args[2:], os.Stdout)
 		case "irclog2sessions":
@@ -186,6 +188,7 @@ Usage:
   botfam merge --proposal <id>
   botfam irc-client <nick> [--server <host:port>] [--channel <channel>] [--dir <dir>] [--pass-file <file>]
   botfam irc-wait --nick <nick> [--file <path>]
+  botfam irc-propose --id <id> --summary <text> [--sha <sha>] [--quorum <q>] [--deadline <ts>] [--executor <actor>] [--as <actor>]
   botfam scribe [--server <host:port>] [--channel <channel>] [--file <path>]
   botfam irclog2sessions <chat.log>... [--out <dir>] [--gap-minutes <n>] [--channel <chan>]... [--include-open]
 
