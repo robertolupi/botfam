@@ -3,6 +3,8 @@
 Canonical, single source of truth for how fam members coordinate. The harness
 entry files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are deliberately
 lightweight pointers here — put substantive rules in this file, never there.
+Day-to-day operational recipes for the IRC substrate (rejoin, account recovery,
+wake loop, log pipeline) live in [IRC-OPS.md](IRC-OPS.md).
 
 ______________________________________________________________________
 
