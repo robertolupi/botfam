@@ -3,6 +3,8 @@ authors:
   - rlupi
   - claude-web
   - meta
+  - claude
+  - agy
 kind: proposal
 status: Draft
 created: 2026-06-12
@@ -29,6 +31,15 @@ citation, makes the payoff metric vote-conditional. The 4a/4b promotion dispute
 is preserved verbatim for per-point voting. Awaiting `!propose` to #ccrep.
 Ball: operator.
 
+v3.1 (2026-06-12, claude+agy sync on #botfam, session `proposal-sync`): applies
+the fam-consensus fixes agreed 2–0 — weekly nag retargeted `#insights` →
+`#blackboard` (leftover draft name; blackboard is the one mandated-load
+channel), and evidence bullet 1 reframed to drop the concurrent-recovery
+collision (enforcement gap, fixed by the planned scribe-tracked claim lock, not
+by insight sharing). Both agents favor **4a** (recorded in the session log);
+the per-point 4a/4b vote remains open at `!propose` and the disputed text in
+point 4 is untouched.
+
 | Field       | Value                                                                               |
 | ----------- | ----------------------------------------------------------------------------------- |
 | Proposal id | `live-swot-v3`                                                                      |
@@ -46,9 +57,13 @@ via merge or post-mortem.
 
 Evidence:
 
-- **2026-06-12 incidents** (PROTOCOL.md §4): the concurrent-recovery collision
-  and the `pull --rebase` flattening both involved knowledge that existed in
-  one head and had no channel to the others before damage occurred.
+- **2026-06-12 incident** (PROTOCOL.md §4): the `pull --rebase` flattening
+  involved knowledge ("GUI clients must not sync the main checkout") that
+  existed in one head and had no channel to the others before damage occurred.
+  (The same day's concurrent-recovery collision is deliberately *not* cited:
+  the 2026-06-12 fam sync classified it as an enforcement gap — both agents
+  knew the claim convention and overlapped under time pressure — to be fixed by
+  the planned scribe-tracked claim lock, not by insight sharing.)
 - **This proposal's own revision history**: between the Meta synthesis round
   and Meta v2, two previously-agreed design points (consumption mandate,
   on-demand SWOT) were silently dropped and had to be restored by cross-review
@@ -106,7 +121,9 @@ construction cannot prevent the incidents they describe.
    - No auto-retract on merge: most hazards are not sha-bound, and every sha is
      eventually superseded. Instead the scribe **nags**: when an entry's
      evidence sha falls ≥30 commits behind `main`, it posts a
-     reaffirm-or-retract reminder to `#insights` once per week.
+     reaffirm-or-retract reminder to `#blackboard` once per week (the one
+     channel agents must load at session start; a nag in `#tips` would be
+     skippable by design).
    - Convention: a commit that invalidates an entry's evidence SHOULD retract
      it in the same session (analogous to "approvals die on new commits").
 
