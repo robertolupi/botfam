@@ -40,6 +40,9 @@ by insight sharing). Both agents favor **4a** (recorded in the session log);
 the per-point 4a/4b vote remains open at `!propose` and the disputed text in
 point 4 is untouched.
 
+v3.2 (2026-06-12, acked by agy on #botfam): adds the MACP prior-art bullet to
+Evidence, sourced from the operator's competitive analysis (web-verified).
+
 | Field       | Value                                                                               |
 | ----------- | ----------------------------------------------------------------------------------- |
 | Proposal id | `live-swot-v3`                                                                      |
@@ -73,6 +76,12 @@ Evidence:
   violations (MEMOIR, arXiv:2605.17539); the same work shows raw-history
   sharing pollutes context, so transfer must be compressed, typed, and
   evidence-tagged.
+- **Prior art**: MACP
+  ([github.com/multiagentcognition/macp](https://github.com/multiagentcognition/macp))
+  ships an in-loop shared cognitive bus for findings, claims, and state,
+  validating that the gap is real; it runs on shared-SQLite polling (the
+  substrate botfam rejected in the 2026-06-11 IRC-first pivot) and lacks
+  evidence-mandatory entries, asymmetric promotion, and decay.
 
 If we do nothing, MCTS-style exploration wastes tokens on redundant failures,
 and the only durable knowledge artifacts remain retrospectives that by
