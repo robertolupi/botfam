@@ -44,3 +44,17 @@ services:
     depends_on:
       ergo:
         condition: service_healthy
+  scribe-dc:
+    build:
+      context: ../..
+    restart: unless-stopped
+    command: ["scribe", "--server", "ergo:6667", "--nick", "scribe-dc", "--file", "/collab/history.jsonl"]
+    environment:
+      COLLAB_HISTORY: /collab/history.jsonl
+      COLLAB_ROOT: /root/.botfam/fam-3cf8b32f26d5
+    volumes:
+      - /Users/rlupi/src/fams/deep-cuts/dc-collab:/collab
+      - ~/.botfam:/root/.botfam:ro
+    depends_on:
+      ergo:
+        condition: service_healthy
