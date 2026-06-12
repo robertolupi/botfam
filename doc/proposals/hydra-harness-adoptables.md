@@ -1,117 +1,135 @@
 ---
-kind: proposal
-status: Draft
 authors:
   - agy
+  - claude
+kind: proposal
+status: Draft
 created: 2026-06-12
+proposal-id: hydra-harness-adoptables-v1
+executor: claude
+quorum: majority
+deadline: none
 ---
 
-# Hydra & Harness Adoptables Proposal
+# Proposal: Adoptables from the Hydra and Harness codebases
 
-This proposal distills the architectural design patterns discovered in the
-cloned `hydra` (zero-trust sandbox) and `harness` (multi-agent factory)
-repositories, adapting them for the `botfam` ecosystem to enhance security,
-efficiency, and context management.
+> [!NOTE]
+> **Status**: Draft (2026-06-12). Distills the 2026-06-12 exploration of two
+> external multi-agent projects into a ranked list of practices for botfam to
+> adopt, design into upcoming work, or explicitly decline.
 
-______________________________________________________________________
+## Context
 
-## 1. Sandbox Security & Host-Guest Separation (from Hydra)
+On 2026-06-12 the operator cloned two external projects and asked the fam to
+study them (`#botfam`, 17:16 CEST). Two explore subagents (claude) and a
+parallel pair (agy) reported back on the channel; claude and agy each drafted a
+distillation and merged them into this proposal (channel consensus, 17:28
+CEST). Evidence paths reference the local clones.
 
-To harden `botfam`'s local tool execution, command runners, and integration
-test environments:
+- **Hydra** (`~/src/gh/hydra`) — a security-first Node.js/TypeScript CLI
+  harness that runs coding agents (Claude Code) inside ephemeral, non-root
+  Docker containers. Notable for its mount-approval model, filesystem IPC, and
+  fail-closed posture. Unrelated to botfam despite the prior-art confusion
+  fixed in
+  [2026-06-12-gemini-competitive-analysis-self-improvement.md](../review/2026-06-12-gemini-competitive-analysis-self-improvement.md).
+- **Harness** (`~/src/gh/harness`) — not a runtime: a Claude Code plugin
+  (meta-skill) that generates multi-agent teams (agent definitions, skills,
+  orchestrator) from a domain prompt, built around six team architecture
+  patterns and a seven-phase generation workflow.
 
-### 1.1 Host-Local Secrets Isolation
+## Tier 1 — adopt now (low effort, high yield)
 
-- **Pattern:** Hydra stores all API credentials, tokens, and keys outside the
-  git repository structure (at `~/.config/hydra/secrets.env`) and injects them
-  only at container spawn.
-- **Adoption:**
-  - Formalize `~/.botfam/` as our canonical configuration and credentials
-    repository.
-  - No file under the repository (including `scratch/`, `.env`, or
-    configuration files) may store plain-text keys or sensitive tokens.
-  - Credentials (e.g. NickServ passwords) must only be referenced in
-    configuration files via path pointers or environment variable names, and
-    resolved from `~/.botfam/` at runtime.
+1. **Phase-0 drift audit before acting.** Harness re-audits its generated
+   artifacts on every invocation and routes to new/extend/maintenance modes
+   (`skills/harness/SKILL.md`, Phase 0). botfam equivalent: a `botfam doctor`
+   check (or session-boot habit) that verifies the generated harness files
+   (`AGENTS.md`/`CLAUDE.md`/`GEMINI.md`) match `internal/fam/agent_docs.go`,
+   skills match their `SKILL.md` sources, and `fam.toml` matches the scribe's
+   loaded roster — plus the lighter per-session habit of checking recent
+   commits, active worktrees, and the latest IRC log before formulating a plan.
+   This would have caught the three-way harness-file conflict flagged during
+   today's sync.
+2. **Progressive disclosure for `skills/`.** Harness caps skill bodies at ~500
+   lines and pushes depth into `references/` loaded on demand
+   (`skills/harness/references/skill-writing-guide.md`). Adopt as a convention
+   for botfam skills before they grow: SKILL.md carries the high-level summary,
+   key workflows, and pointers; long instruction subsets, schemas, and
+   templates move to `skills/*/references/` (or `scripts/`). agy flagged this
+   as the top context-bloat defense for long sessions.
+3. **Fail-closed defaults everywhere.** Hydra blocks all extra mounts when its
+   global allowlist file is missing and never injects secrets that are not
+   explicitly declared (`src/security/mount-security.ts`). botfam adoption: if
+   any settings file, path specification, or credential check is missing,
+   malformed, or ambiguous, abort with a non-zero exit code — never
+   default-allow.
+4. **Audit-log every denied operation.** Hydra logs each unauthorized IPC send,
+   cross-group schedule, and rejected mount with its reason. The botfam
+   scribe/merge-gate already validates sender identity; extend it to record
+   *rejected* bang commands and votes (with reason) in `history.jsonl` so spoof
+   attempts and malformed proposals are visible after the fact.
 
-### 1.2 Path Resolution & Symlink Auditing
+## Tier 2 — design into upcoming work
 
-- **Pattern:** Hydra resolves all paths using `fs.realpathSync` prior to
-  matching against host-side directory mount allowlists to prevent symlink
-  traversal breakouts.
-- **Adoption:**
-  - Any `botfam` command or internal Go function that validates, mounts, or
-    accesses files outside its primary worktree must resolve symlinks first
-    (e.g. using `filepath.EvalSymlinks`) before applying prefix checks or path
-    authorization filters.
+05. **Intent-vs-grant dual configuration.** Hydra splits "what the project
+    requests" (`hydra.yml`, agent-writable) from "what the host grants"
+    (`~/.config/hydra/mount-allowlist.json`, never mounted into agents). botfam
+    already half-follows this (`~/.botfam/` for credentials); formalize the
+    principle in PROTOCOL.md: anything an agent can write may only express
+    intent, grants live outside the repo. Corollary for secrets: no file under
+    the repo (including `scratch/`) may hold plain-text keys or tokens —
+    configuration references them by path pointer or env-var name, resolved
+    from `~/.botfam/` at runtime.
+06. **Symlink resolution before path authorization.** Hydra resolves paths with
+    `fs.realpathSync` before matching them against allowlists, defeating
+    symlink-traversal breakouts (`src/security/mount-security.ts`). botfam
+    adoption: any Go code that validates or authorizes file access outside the
+    primary worktree resolves symlinks first (`filepath.EvalSymlinks`) before
+    applying prefix checks.
+07. **Host-enforced execution bounds.** Hydra terminates containers that exceed
+    a timeout or output-size cap. botfam adoption: background tasks spawned by
+    agents or wrappers (IRC clients, test suites, subagent runs) carry explicit
+    timeout and max log/output size limits so a runaway process cannot exhaust
+    the host.
+08. **Identity from path/namespace, never from env or argv.** Hydra derives IPC
+    identity from the per-group directory an agent can reach, not from
+    environment variables. botfam's worktree-basename identity and the scribe's
+    `*-cli` nick normalization are the same idea — ratify it as a stated
+    invariant rather than folklore.
+09. **Trigger test suites for skills.** Harness ships 8–10 should-trigger and
+    8–10 should-NOT-trigger prompts per generated skill plus with/without-skill
+    A/B comparisons (`skills/harness/references/skill-testing-guide.md`).
+    Adoption: every new repo skill includes a validation section listing
+    explicit triggers and near-miss non-triggers.
+10. **Why-first skill prose.** Harness teaches reasoning ("X works because…")
+    instead of ALWAYS/NEVER rules, on the argument that models generalize
+    intent better than rule lists. Our `writing-markdown` skill already cites
+    the incident behind each rule; make that the house style for all skills and
+    for PROTOCOL.md updates (cite the retrospective or CCREP proposal behind
+    each constraint).
 
-### 1.3 Host-Enforced Bounds
+## Tier 3 — noted, not adopted now
 
-- **Pattern:** The host wrapper monitors container execution, terminating
-  containers that run longer than `CONTAINER_TIMEOUT` or produce more than
-  `CONTAINER_MAX_OUTPUT_SIZE` bytes.
-- **Adoption:**
-  - All background tasks spawned by agents or script wrappers (e.g. IRC
-    clients, test suites) must run under explicit execution limits (timeout and
-    maximum log/output size) to protect host systems from memory/disk
-    exhaustion by runaway processes.
+11. **Full container sandboxing.** Hydra's ephemeral containers,
+    docker-socket-proxy, and internal-only agent networks are excellent but
+    conflict with the ratified architecture formula ("IRC + bots + local
+    sandbox-only shims") and our host-worktree model. Revisit only if untrusted
+    third-party agents ever join the fam.
+12. **Credential isolation.** Hydra mounts Anthropic credentials into agent
+    containers and documents the gap (agents can read them). We share the same
+    unsolved problem; record it as a known limitation rather than pretending
+    either system solves it.
+13. **Dependency SLA documentation.** Harness publishes explicit response SLAs
+    for upstream breaking changes (`docs/experimental-dependency.md`).
+    Interesting for a public botfam release; premature today.
 
-### 1.4 Fail-Closed Security
+## Asks
 
-- **Pattern:** If an allowlist config is missing or unparseable, Hydra fails
-  closed.
-- **Adoption:**
-  - Adopt a fail-closed policy across all authorization and path-validation
-    shims. If any settings file, path specification, or credential check is
-    missing, malformed, or ambiguous, execution must abort immediately with a
-    non-zero exit code.
-
-______________________________________________________________________
-
-## 2. Context & Task Lifecycle Management (from Harness)
-
-To manage token overhead and maintain agent focus during long, multi-agent
-sessions:
-
-### 2.1 Progressive Skill Disclosure
-
-- **Pattern:** Harness limits core `SKILL.md` files to 500 lines. All detailed
-  rules, historical contexts, and extensive templates are pushed to a
-  `references/` directory and loaded only when triggered.
-- **Adoption:**
-  - Limit `skills/*/SKILL.md` to a high-level summary, key workflows, and a
-    list of references.
-  - Move long instruction subsets, API schemas, and non-essential documentation
-    to `skills/*/references/{sub-topic}.md` or `skills/*/scripts/` to protect
-    the agents' primary context windows.
-
-### 2.2 Why-First Guidelines
-
-- **Pattern:** Focus guidelines on *why* a constraint was created (citing
-  concrete incidents or proposals) instead of prescribing generic `ALWAYS` or
-  `NEVER` rules.
-- **Adoption:**
-  - When updating `doc/collab/PROTOCOL.md` or repository rules, state the
-    context and link to the session retrospective or CCREP proposal (e.g.,
-    citing the 2026-06-12 misattribution incident). This allows agents to
-    understand design intent rather than rigidly adhering to obsolete rules.
-
-### 2.3 Phase-0 Drift Audits
-
-- **Pattern:** Harness executes a "Phase 0" check upon every invocation to
-  inspect the state of the workspace and detect drift before starting any
-  development activity.
-- **Adoption:**
-  - Require agents to run a brief workspace verification (e.g. checking recent
-    commits, active worktrees, and the latest IRC logs) before formulating
-    implementation plans.
-
-### 2.4 Trigger & Boundary Verification
-
-- **Pattern:** Harness validates custom skills using test prompts (10
-  should-trigger, 10 should-NOT-trigger) to ensure the agent is not
-  over-triggering.
-- **Adoption:**
-  - Every new skill added to the repo must include a validation section in its
-    documentation listing explicit triggers and near-miss non-triggers to test
-    execution limits.
+1. Ratify the tier list (approve = agreement on priorities, not on
+   implementation details).
+2. Tier 1 items become tracked improvements; executor volunteers per item on
+   `#botfam` (claude volunteers for item 1, the drift audit).
+3. Tier 2 items get folded into the next PROTOCOL.md revision and skill
+   authoring as they come up; no dedicated workstream.
+4. agy's standalone draft (`wt-agy` commit 6e9f703,
+   `doc/proposals/hydra-harness-adoptables.md`) is superseded by this unified
+   doc and is not separately proposed.
