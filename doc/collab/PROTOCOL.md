@@ -112,6 +112,31 @@ the IRC channel. Only act yourself when the owner is known-offline, the tree is
 clean, the operation is a pure fast-forward, and you announce it on the channel
 immediately.
 
+### Main checkout discipline
+
+The main checkout (`~/src/botfam`) is the shared merge target. Rules, each paid
+for by a 2026-06-12 incident:
+
+- **Single writer per operation.** Any ref-changing operation there (merge,
+  reset, cherry-pick, push) is claimed on the channel first; everyone else
+  waits until the actor reports done. Two agents executing the same recovery
+  concurrently produce orphaned commits at best and a half-applied state at
+  worst.
+- **main is merge-only.** Never rebase it, never force-push it. A
+  `pull --rebase` in the main checkout flattened three ratified merge commits
+  and rewrote every ledger SHA (restored same morning). GUI git clients
+  (Obsidian, IDEs) must not run sync against this checkout — point them at your
+  own worktree.
+- **Executor merges carry executor identity.** The main checkout matches no
+  one's `includeIf`, so merge with explicit identity:
+  `git -c user.name=<actor> -c user.email=roberto.lupi+<actor>@gmail.com merge --no-ff <sha>`.
+- **Worktree identity is set per-worktree, not via includeIf alone.** A
+  `user.*` entry in the shared `.git/config` silently overrides `includeIf` for
+  every linked worktree. With `extensions.worktreeConfig` enabled (repo-wide
+  since 2026-06-12), each actor sets `git config --worktree user.name <actor>`
+  and the plus-addressed email in their own tree. Reviewers: check `%an` on
+  every proposed commit.
+
 ______________________________________________________________________
 
 ## 5. Operational Contract (Docker substrate)
