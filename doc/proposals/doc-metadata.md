@@ -18,8 +18,10 @@ proposal-id: doc-metadata-claude-v1
 
 ## Canonical Properties
 
-Frontmatter is YAML between `---` fences as the first bytes of the file.
-Properties the linter would check (advisory first, see Transition Plan):
+Frontmatter is YAML between `---` fences as the first bytes of the file. All
+YAML lists/arrays must use block-style notation (e.g. `  - item` on its own
+line) for Obsidian native compatibility. Properties the linter would check
+(advisory first, see Transition Plan):
 
 ### Common to every doc kind
 

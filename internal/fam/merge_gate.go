@@ -276,6 +276,8 @@ func printMergeGateHelp(out io.Writer) error {
 }
 
 func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedReviewer string, ts float64, quorum, deadline string) CcrepEvent {
+	authIdentity = strings.TrimSuffix(authIdentity, "-cli")
+	claimedReviewer = strings.TrimSuffix(claimedReviewer, "-cli")
 	return CcrepEvent{
 		Type:            typ,
 		ProposalID:      proposalID,
