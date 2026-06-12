@@ -1493,12 +1493,16 @@ func TestIntegrationSessionConstitution(t *testing.T) {
 	cmdVoteCharlie := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "reject")
 	cmdVoteCharlie.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=charlie")
 	cmdVoteCharlie.Dir = charlieWT
+	var charlieBuf bytes.Buffer
+	cmdVoteCharlie.Stdout = &charlieBuf
+	cmdVoteCharlie.Stderr = &charlieBuf
 	if err := cmdVoteCharlie.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer cmdVoteCharlie.Process.Kill()
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	t.Logf("charlie vote output:\n%s", charlieBuf.String())
 
 	cmdTally2 := exec.Command(binPath, "tally", "--proposal", "prop1")
 	cmdTally2.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)
