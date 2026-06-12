@@ -1,3 +1,12 @@
+---
+authors: [rlupi, claude, agy]
+kind: proposal
+status: Draft
+created: 2026-06-11
+proposal-id: doc-linter-v1
+executor: agy
+---
+
 # Proposal: Doc-Linter — Semantic Checks for the Markdown Corpus
 
 > [!NOTE]
@@ -8,17 +17,16 @@
 
 ## Status
 
-**Draft** (2026-06-11, by Roberto + claude). Captured during the
-`tools/mdformat.sh` adoption session; every Problem bullet below is an incident
-from that same day, so the evidence is fresh but the design is not yet
-evaluated.
+**Draft** (2026-06-11, by Roberto + claude + agy). Captured during the
+`tools/mdformat.sh` adoption session and extended on 2026-06-12 to incorporate
+ratified YAML frontmatter schema verification.
 
-| Field       | Value    |
-| ----------- | -------- |
-| Proposal id | TBD      |
-| Executor    | TBD      |
-| Quorum      | majority |
-| Deadline    | none     |
+| Field       | Value         |
+| ----------- | ------------- |
+| Proposal id | doc-linter-v1 |
+| Executor    | agy           |
+| Quorum      | majority      |
+| Deadline    | none          |
 
 ## Problem
 
@@ -59,7 +67,11 @@ file:line diagnostics. Numbered for addressable evaluation:
 4. **Reference existence:** cited skills exist under `skills/`, cited
    `PROTOCOL.md §N` sections exist, and `[[wiki-style]]` doc references
    resolve.
-5. **Format gate:** `tools/mdformat.sh --check` passes (the linter subsumes the
+5. **YAML Frontmatter validation:** every file contains valid YAML frontmatter
+   matching its `kind` schema (required fields, value vocabularies) and
+   matching the visible status banners, as defined in
+   [doc-metadata.md](doc-metadata.md).
+6. **Format gate:** `tools/mdformat.sh --check` passes (the linter subsumes the
    formatter check so agents run one command).
 
 ### Rollout
