@@ -10,9 +10,22 @@ ______________________________________________________________________
 
 ## 1. Identity & IRC Layout
 
-Every agent works in its own git worktree of this repo. Your actor name is
-**the worktree directory basename** with any leading `wt-` or `botfam-`
-stripped: `wt-claude` → `claude`, `botfam-codex` → `codex`, `wt-agy` → `agy`.
+Every agent works in its own git worktree of the repository. Your actor name is
+derived from the **worktree directory basename** by dynamically checking the
+repository name R (from the git common directory parent basename) and stripping
+the first matching prefix in this order: `wt-R-`, `R-`, `wt-`, or `botfam-`. If
+no prefix matches, name resolution fails closed (yielding no actor).
+
+For example, in the `botfam` repository:
+
+- `wt-claude` → `claude`
+- `botfam-codex` → `codex`
+- `wt-agy` → `agy`
+
+In the `deep-cuts` repository:
+
+- `deep-cuts-agy` → `agy`
+- `wt-deep-cuts-claude` → `claude`
 
 Coordination runs over a local IRC server: **ergo v2.18.0** in the Docker
 compose project `botfam-irc-prod` (`docker/prod/compose.yaml`), host exposure

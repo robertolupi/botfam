@@ -25,21 +25,24 @@ func initGitRepo(t *testing.T, dir string) {
 
 func TestParseActor(t *testing.T) {
 	cases := []struct {
-		base string
-		want string
+		base     string
+		repoName string
+		want     string
 	}{
-		{"wt-claude", "claude"},
-		{"botfam-codex", "codex"},
-		{"wt-my-agent", "my-agent"},
-		{"deep-cuts", ""}, // no wt-/botfam- prefix: fail closed, no actor
-		{"myrepo", ""},
-		{"wt-", ""}, // empty remainder after prefix: no actor
-		{"botfam-", ""},
-		{"wt-bad.name", ""}, // remainder fails the store name validator
+		{"wt-claude", "botfam", "claude"},
+		{"botfam-codex", "botfam", "codex"},
+		{"wt-my-agent", "botfam", "my-agent"},
+		{"deep-cuts-agy", "deep-cuts", "agy"},
+		{"wt-deep-cuts-claude", "deep-cuts", "claude"},
+		{"deep-cuts", "deep-cuts", ""}, // no actor remainder
+		{"myrepo", "botfam", ""},
+		{"wt-", "botfam", ""}, // empty remainder
+		{"botfam-", "botfam", ""},
+		{"wt-bad.name", "botfam", ""},
 	}
 	for _, tc := range cases {
-		if got := ParseActor(tc.base); got != tc.want {
-			t.Errorf("ParseActor(%q) = %q, want %q", tc.base, got, tc.want)
+		if got := ParseActor(tc.base, tc.repoName); got != tc.want {
+			t.Errorf("ParseActor(%q, %q) = %q, want %q", tc.base, tc.repoName, got, tc.want)
 		}
 	}
 }

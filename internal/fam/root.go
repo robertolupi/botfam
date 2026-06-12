@@ -30,9 +30,10 @@ type RootInfo struct {
 }
 
 func (r Resolver) Resolve() (RootInfo, error) {
+	repoName := ResolveRepoName(r.WorkDir)
 	var parsedActor string
 	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
-		parsedActor = ParseActor(filepath.Base(absDir))
+		parsedActor = ParseActor(filepath.Base(absDir), repoName)
 	}
 
 	if envActor := getenv(r.Env, "COLLAB_ACTOR"); parsedActor != "" && envActor != "" && envActor != parsedActor {
@@ -76,18 +77,41 @@ func (r Resolver) Resolve() (RootInfo, error) {
 	}, nil
 }
 
+// ResolveRepoName returns the name of the main repository directory.
+func ResolveRepoName(workDir string) string {
+	common, err := gitOne(workDir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return ""
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(workDir, common)
+	}
+	if filepath.Base(common) == ".git" {
+		common = filepath.Dir(common)
+	}
+	return filepath.Base(common)
+}
+
 // ParseActor derives an actor name from a worktree directory basename per
-// doc/collab/PROTOCOL.md §1: the actor is the basename with a leading "wt-"
-// or "botfam-" prefix stripped. Basenames without one of those prefixes yield
-// no actor (fail closed); callers fall back to their existing "no actor" paths.
-func ParseActor(base string) string {
+// doc/collab/PROTOCOL.md §1. To generalize for other repositories (like deep-cuts),
+// it strips R- and wt-R- prefixes where R is the repository name, falling back to wt- and botfam-.
+func ParseActor(base string, repoName string) string {
 	var actor string
-	switch {
-	case strings.HasPrefix(base, "wt-"):
-		actor = strings.TrimPrefix(base, "wt-")
-	case strings.HasPrefix(base, "botfam-"):
-		actor = strings.TrimPrefix(base, "botfam-")
-	default:
+	var prefixes []string
+	if repoName != "" {
+		prefixes = append(prefixes, "wt-"+repoName+"-", repoName+"-")
+	}
+	prefixes = append(prefixes, "wt-", "botfam-")
+
+	matched := false
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(base, prefix) {
+			actor = strings.TrimPrefix(base, prefix)
+			matched = true
+			break
+		}
+	}
+	if !matched {
 		return ""
 	}
 	if actor == "" || validateName(actor) != nil {
