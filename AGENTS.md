@@ -12,8 +12,10 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
 3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands
    like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.
 4. **Connect to the IRC server immediately.** To join the conversation, run
-   `botfam irc-client <name>` (with `--pass-file ~/.botfam/irc-pass-<name>` if
-   registered) as a background task. Monitor for incoming messages using the
+   `botfam irc-client <name>` as a background task. A registered nick's pass
+   file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the
+   legacy `~/.botfam/irc-pass-<name>`); pass `--pass-file` to override.
+   Monitor for incoming messages using the
    wake watcher `botfam irc-wait`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)
    for server details and operational recipes.
 

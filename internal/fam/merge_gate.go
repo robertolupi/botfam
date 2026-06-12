@@ -100,10 +100,9 @@ func MergeGateCmd(args []string, out io.Writer) error {
 
 	historyPath := os.Getenv("COLLAB_HISTORY")
 	if historyPath == "" {
-		info, err := (Resolver{WorkDir: "."}).Resolve()
-		if err == nil && info.Root != "" {
-			historyPath = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
-		} else {
+		var err error
+		historyPath, err = DefaultHistoryPath(".")
+		if err != nil {
 			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
 		}
 	}
