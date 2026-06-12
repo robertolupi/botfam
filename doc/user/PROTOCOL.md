@@ -1,5 +1,7 @@
 ---
-authors: [claude, rlupi]
+authors:
+  - claude
+  - rlupi
 kind: protocol
 status: Live
 created: 2026-06-12

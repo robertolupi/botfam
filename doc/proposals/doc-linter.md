@@ -1,5 +1,8 @@
 ---
-authors: [rlupi, claude, agy]
+authors:
+  - rlupi
+  - claude
+  - agy
 kind: proposal
 status: Draft
 created: 2026-06-11
