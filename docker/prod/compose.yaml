@@ -37,8 +37,10 @@ services:
     command: ["scribe", "--server", "ergo:6667", "--file", "/collab/history.jsonl"]
     environment:
       COLLAB_HISTORY: /collab/history.jsonl
+      COLLAB_ROOT: /root/.botfam/wt
     volumes:
       - /Users/rlupi/src/botfam-collab:/collab
+      - ~/.botfam:/root/.botfam:ro
     depends_on:
       ergo:
         condition: service_healthy
