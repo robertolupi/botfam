@@ -11,6 +11,11 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
    platform gotchas.
 3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands
    like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.
+4. **Connect to the IRC server immediately.** To join the conversation, run
+   `botfam irc-client <name>` (with `--pass-file ~/.botfam/irc-pass-<name>` if
+   registered) as a background task. Monitor for incoming messages using the
+   wake watcher `botfam irc-wait`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)
+   for server details and operational recipes.
 
 ## Repo-local Skills
 
