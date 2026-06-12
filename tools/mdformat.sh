@@ -8,12 +8,13 @@
 # version bump must change this file for everyone at once.
 #
 # Scope notes:
-#   - skills/*/SKILL.md are excluded: their YAML frontmatter needs the
-#     mdformat-frontmatter plugin; add it here if they ever come in scope.
 #   - CLAUDE.md/AGENTS.md/GEMINI.md are generated harness files; format
 #     their source, not the output.
 #   - mdformat-gfm-alerts is required: without it the "> [!NOTE]" banners
 #     are collapsed and stop rendering as alerts on GitHub.
+#   - mdformat-frontmatter is required: doc/ files carry YAML frontmatter
+#     (doc/proposals/doc-metadata.md); without the plugin mdformat mangles
+#     the --- block. It also unblocks formatting skills/*/SKILL.md.
 #
 # Usage: tools/mdformat.sh [mdformat flags] [paths...]
 #        (no arguments: formats doc/ and README.md)
@@ -23,4 +24,5 @@ cd "$(dirname "$0")/.."
 exec uvx \
   --with mdformat-gfm==1.0.0 \
   --with mdformat-gfm-alerts==2.0.0 \
+  --with mdformat-frontmatter==2.1.2 \
   mdformat==1.0.0 "$@"
