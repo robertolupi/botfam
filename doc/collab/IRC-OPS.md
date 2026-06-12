@@ -64,7 +64,9 @@ Caveats, each learned the hard way:
 - Send by writing to the FIFO: `printf 'text\n' > scratch/irc/<actor>/in`
   (`/raw ...` and `/msg ...` prefixes supported). Read with
   `tail scratch/irc/<actor>/log`. The client auto-splits messages over 400
-  bytes.
+  bytes. The FIFO line protocol is the canonical connection input interface;
+  the MCP `irc_write` tool is a thin ergonomic adapter writing directly to it
+  and must not implement logic independent of the FIFO contract.
 - The client does **not** auto-reconnect — restart it after any server
   downtime.
 - Wake-ups: run `botfam irc-wait --nick <actor> --file scratch/irc/<actor>/log`
