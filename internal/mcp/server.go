@@ -177,6 +177,20 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("irc_read",
+		mcplib.WithDescription("Read lines from the IRC client's log (raw tail, no filtering)."),
+		mcplib.WithNumber("lines"),
+		mcplib.WithNumber("from_offset"),
+		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
+	))
+	add(mcplib.NewTool("irc_wait",
+		mcplib.WithDescription("Block until new IRC log lines relevant to the actor appear, or timeout."),
+		mcplib.WithNumber("timeout_s"),
+		mcplib.WithNumber("from_offset"),
+		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
+	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
@@ -236,6 +250,54 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		}
 
 		return toolResult(map[string]any{"ok": true})
+	}
+
+	if name == "irc_read" {
+		absWorkDir, err := filepath.Abs(workDir)
+		if err != nil {
+			return nil, err
+		}
+
+		logPath := filepath.Join(absWorkDir, "scratch", "irc", actor, "log")
+		if _, err := os.Stat(logPath); err != nil {
+			return nil, fmt.Errorf("IRC log not found at %s (is the client running?): %w", logPath, err)
+		}
+
+		maxLines := int(argFloatDefault(args, "lines", 0))
+		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
+		lines, nextOffset, err := fam.ReadIrcLog(logPath, fromOffset, maxLines)
+		if err != nil {
+			return nil, err
+		}
+		if lines == nil {
+			lines = []string{}
+		}
+		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
+	}
+
+	if name == "irc_wait" {
+		absWorkDir, err := filepath.Abs(workDir)
+		if err != nil {
+			return nil, err
+		}
+
+		logPath := filepath.Join(absWorkDir, "scratch", "irc", actor, "log")
+		timeoutS := argFloatDefault(args, "timeout_s", 60)
+		if timeoutS <= 0 {
+			timeoutS = 60
+		}
+		if timeoutS > 300 {
+			timeoutS = 300
+		}
+		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
+		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, actor, fromOffset, time.Duration(timeoutS*float64(time.Second)))
+		if err != nil {
+			return nil, err
+		}
+		if lines == nil {
+			lines = []string{}
+		}
+		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset, "timed_out": timedOut})
 	}
 
 	// Ensure UDS daemon is running (auto-start)
