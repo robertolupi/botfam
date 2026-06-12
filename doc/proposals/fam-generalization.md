@@ -6,7 +6,7 @@ kind: proposal
 status: Draft
 created: 2026-06-12
 proposal-id: fam-generalization-v1
-executor: TBD
+executor: claude
 quorum: majority
 deadline: none
 ---
