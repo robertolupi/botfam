@@ -29,6 +29,7 @@ func ScribeCmd(args []string, out io.Writer) error {
 	mainChannel, ccrepChannel := FamChannels(LoadFamRegistry("."))
 	server = "localhost:6667"
 	channel = mainChannel + "," + ccrepChannel
+	nick := "scribe"
 
 	historyFile = os.Getenv("COLLAB_HISTORY")
 
@@ -57,9 +58,20 @@ func ScribeCmd(args []string, out io.Writer) error {
 			if i < len(args) {
 				historyFile = args[i]
 			}
+		case strings.HasPrefix(arg, "--nick="):
+			nick = strings.TrimPrefix(arg, "--nick=")
+		case arg == "--nick":
+			i++
+			if i < len(args) {
+				nick = args[i]
+			}
 		default:
 			return fmt.Errorf("unknown scribe argument %q", arg)
 		}
+	}
+
+	if nick == "" {
+		return errors.New("--nick requires a non-empty value")
 	}
 
 	if historyFile == "" {
@@ -87,7 +99,7 @@ func ScribeCmd(args []string, out io.Writer) error {
 	}
 	defer logFile.Close()
 
-	fmt.Fprintf(out, "* Scribe bot starting. Server: %s, Channel: %s, File: %s\n", server, channel, historyFile)
+	fmt.Fprintf(out, "* Scribe bot starting. Server: %s, Nick: %s, Channel: %s, File: %s\n", server, nick, channel, historyFile)
 
 	// Connect to IRC server
 	conn, err := net.DialTimeout("tcp", server, 10*time.Second)
@@ -96,8 +108,8 @@ func ScribeCmd(args []string, out io.Writer) error {
 	}
 	defer conn.Close()
 
-	// Send initial commands (using stable nick)
-	nick := "scribe"
+	// Send initial commands (nick is stable per fam: bare "scribe" for the
+	// original botfam deployment, scribe-<slug> for additional fams)
 	_, _ = fmt.Fprintf(conn, "NICK %s\r\n", nick)
 	_, _ = fmt.Fprintf(conn, "USER %s 0 * :botfam scribe bot\r\n", nick)
 	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", channel)
