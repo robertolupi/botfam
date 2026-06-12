@@ -14,7 +14,10 @@
             "Bash(go build:*)",
             "Bash(go test:*)",
             "Bash(go vet:*)",
-            "Bash(gofmt:*)"
+            "Bash(gofmt:*)",
+            "mcp__botfam__irc_write",
+            "mcp__botfam__irc_read",
+            "mcp__botfam__irc_wait"
         ]
     }
 }
