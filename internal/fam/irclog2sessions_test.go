@@ -15,7 +15,7 @@ import (
 func TestIrcLog2SessionsGolden(t *testing.T) {
 	outDir := t.TempDir()
 	var buf bytes.Buffer
-	err := IrcLog2SessionsCmd([]string{"testdata/chat.log", "--out", outDir, "--include-open"}, &buf)
+	err := IrcLog2SessionsCmd([]string{"testdata/chat.log", "--out", outDir, "--include-open", "--timezone=UTC"}, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestIrcLog2SessionsGolden(t *testing.T) {
 func TestIrcLog2SessionsSkipsOpenSession(t *testing.T) {
 	outDir := t.TempDir()
 	var buf bytes.Buffer
-	err := IrcLog2SessionsCmd([]string{"testdata/chat.log", "--out", outDir}, &buf)
+	err := IrcLog2SessionsCmd([]string{"testdata/chat.log", "--out", outDir, "--timezone=UTC"}, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestIrcLog2SessionsChannelFilter(t *testing.T) {
 	outDir := t.TempDir()
 	var buf bytes.Buffer
 	err := IrcLog2SessionsCmd([]string{"testdata/chat.log", "--out", outDir,
-		"--channel", "#CCREP", "--include-open"}, &buf)
+		"--channel", "#CCREP", "--include-open", "--timezone=UTC"}, &buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestIrcLog2SessionsNoEvents(t *testing.T) {
 	if err := os.WriteFile(empty, []byte("not a chat.log line\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := IrcLog2SessionsCmd([]string{empty, "--out", t.TempDir()}, &bytes.Buffer{})
+	err := IrcLog2SessionsCmd([]string{empty, "--out", t.TempDir(), "--timezone=UTC"}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "no channel events found") {
 		t.Fatalf("err = %v, want 'no channel events found'", err)
 	}
