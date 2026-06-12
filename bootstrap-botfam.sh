@@ -285,7 +285,7 @@ ensure_botfam_bin() {
 
   mkdir -p "$(dirname "$install_bin")"
   commit_sha=$(git -C "$script_dir" rev-parse HEAD 2>/dev/null || echo "dev")
-  (cd "$script_dir" && go build -ldflags "-X github.com/rlupi/botfam/internal/fam.BuildSHA=$commit_sha" -o "$install_bin" ./cmd/botfam)
+  (cd "$script_dir" && go build -ldflags "-X github.com/robertolupi/botfam/internal/fam.BuildSHA=$commit_sha" -o "$install_bin" ./cmd/botfam)
   if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
     codesign --force --sign - "$install_bin" >/dev/null 2>&1 || die "codesign failed for $install_bin; macOS may block unsigned MCP binaries"
   fi

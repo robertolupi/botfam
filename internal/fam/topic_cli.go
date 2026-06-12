@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/rlupi/botfam/internal/store"
+	"github.com/robertolupi/botfam/internal/store"
 )
 
 // TopicCmd dispatches topic CLI subcommands.
