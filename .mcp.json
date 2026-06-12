@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "botfam": { "command": "botfam", "args": ["serve"] }
+  }
+}
