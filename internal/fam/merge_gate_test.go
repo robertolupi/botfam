@@ -692,4 +692,37 @@ func TestCliSuffixNormalization(t *testing.T) {
 	}
 }
 
+func TestNormalizeReviewer(t *testing.T) {
+	roster := []string{"alice", "alice-extra", "bob", "bob-cli-test"}
+
+	tests := []struct {
+		nick     string
+		expected string
+	}{
+		{"alice", "alice"},
+		{"alice-cli", "alice"},
+		{"alice-dc", "alice"},
+		{"alice-dc-cli", "alice"},
+		{"alice-extra", "alice-extra"},
+		{"alice-extra-dc", "alice-extra"},
+		{"bob", "bob"},
+		{"bob-cli", "bob"},
+		{"bob-dc", "bob"},
+		// Suffix match check: literal match wins first
+		{"bob-cli-test", "bob-cli-test"},
+		// Suffix match check: check hyphen empty remainder
+		{"alice-", "alice-"},
+		// Nick that is not in the roster and has no suffix matching roster
+		{"charlie", "charlie"},
+		{"charlie-dc", "charlie-dc"},
+	}
+
+	for _, tc := range tests {
+		got := normalizeReviewer(tc.nick, roster)
+		if got != tc.expected {
+			t.Errorf("normalizeReviewer(%q) = %q, expected %q", tc.nick, got, tc.expected)
+		}
+	}
+}
+
 
