@@ -286,7 +286,7 @@ func IrcLog2SessionsCmd(args []string, out io.Writer) error {
 	outDir := "doc/collab/sessions"
 	gapMinutes := 30.0
 	includeOpen := false
-	timezoneStr := "Local"
+	timezoneStr := "UTC"
 	var logs, channelArgs []string
 
 	for i := 0; i < len(args); i++ {
