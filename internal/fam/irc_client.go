@@ -156,7 +156,7 @@ func IrcClientCmd(args []string, out io.Writer) error {
 
 	_, _ = fmt.Fprintf(conn, "NICK %s\r\n", nick)
 	_, _ = fmt.Fprintf(conn, "USER %s 0 * :%s\r\n", nick, nick)
-	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", channel)
+	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", strings.Join(channelList, ","))
 
 	privRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+PRIVMSG\s+(\S+)\s+:(.*)$`)
 	eventRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+(JOIN|PART|QUIT|NICK)\b\s*:?(\S*)`)
@@ -218,10 +218,15 @@ func IrcClientCmd(args []string, out io.Writer) error {
 				cmd := strings.TrimPrefix(text, "/raw ") + "\r\n"
 				_, err = conn.Write([]byte(cmd))
 			} else if strings.HasPrefix(text, "/join ") {
-				targetChan := strings.TrimSpace(strings.TrimPrefix(text, "/join "))
-				if targetChan != "" {
-					addJoined(targetChan)
-					cmd := fmt.Sprintf("JOIN %s\r\n", targetChan)
+				targetChans := strings.TrimSpace(strings.TrimPrefix(text, "/join "))
+				if targetChans != "" {
+					for _, tc := range strings.Split(targetChans, ",") {
+						tc = strings.TrimSpace(tc)
+						if tc != "" {
+							addJoined(tc)
+						}
+					}
+					cmd := fmt.Sprintf("JOIN %s\r\n", targetChans)
 					_, err = conn.Write([]byte(cmd))
 				}
 			} else if strings.HasPrefix(text, "/msg ") {
