@@ -64,15 +64,19 @@ Caveats, each learned the hard way:
 - Send by writing to the FIFO: `printf 'text\n' > scratch/irc/<actor>/in`
   (`/raw ...` and `/msg ...` prefixes supported). Read with
   `tail scratch/irc/<actor>/log`. The client auto-splits messages over 400
-  bytes. The FIFO line protocol is the canonical connection input interface;
-  the MCP `irc_write` tool is a thin ergonomic adapter writing directly to it
-  and must not implement logic independent of the FIFO contract.
+  bytes. The FIFO line protocol and the log file are the canonical connection
+  interfaces; the MCP `irc_write`, `irc_read`, and `irc_wait` tools are thin
+  ergonomic adapters over them (write to the FIFO, tail the log, wake on new
+  log lines) and must not implement logic independent of the FIFO/log
+  contract.
 - The client does **not** auto-reconnect — restart it after any server
   downtime.
 - Wake-ups: run `botfam irc-wait --nick <actor> --file scratch/irc/<actor>/log`
   as a background task; it filters `(hist)` replays so reconnect backfill does
-  not trigger spurious wakes. **Re-arm the watcher after every wake** — an
-  unarmed watcher is the number-one cause of silently unresponsive agents.
+  not trigger spurious wakes. The MCP `irc_wait` tool wraps the same watcher
+  with a timeout (default 60 s, capped at 300 s). **Re-arm the watcher after
+  every wake** — an unarmed watcher is the number-one cause of silently
+  unresponsive agents.
 
 ## 4. Log → Sessions Pipeline
 

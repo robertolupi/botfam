@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -11,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 
 	serverlib "github.com/robertolupi/botfam/internal/server"
 )
@@ -23,16 +26,16 @@ func newTestServer(t *testing.T) (*server, string) {
 	t.Setenv("BOTFAM_LOCK_ACTOR", "")
 	t.Setenv("BOTFAM_TESTING", "1")
 
-	// Use scratch directory to ensure socket path is short (Darwin 104 char limit)
-	absScratch, err := filepath.Abs("../../scratch")
+	// Use the system temp dir to keep the socket path short (Darwin 104 char
+	// limit); the repo checkout itself may live under a deep worktree path.
+	udsDir, err := os.MkdirTemp("", "bf-mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = os.MkdirAll(absScratch, 0755)
-	udsPath := filepath.Join(absScratch, fmt.Sprintf("test-%d.sock", time.Now().UnixNano()))
+	udsPath := filepath.Join(udsDir, "s.sock")
 	t.Setenv("BOTFAM_SOCKET", udsPath)
 	t.Cleanup(func() {
-		_ = os.Remove(udsPath)
+		_ = os.RemoveAll(udsDir)
 	})
 
 	// Start in-process UDS server
@@ -236,3 +239,125 @@ func TestIrcWriteTool(t *testing.T) {
 	}
 }
 
+// decodeToolResult unmarshals the JSON text payload of a tool result.
+func decodeToolResult(t *testing.T, res *mcplib.CallToolResult, v any) {
+	t.Helper()
+	if res == nil || len(res.Content) == 0 {
+		t.Fatal("tool result has no content")
+	}
+	tc, ok := mcplib.AsTextContent(res.Content[0])
+	if !ok {
+		t.Fatalf("tool result content is not text: %T", res.Content[0])
+	}
+	if err := json.Unmarshal([]byte(tc.Text), v); err != nil {
+		t.Fatalf("failed to decode tool result %q: %v", tc.Text, err)
+	}
+}
+
+func TestIrcReadTool(t *testing.T) {
+	s, _ := newTestServer(t)
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+
+	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
+	content := "12:00 <bob> one\n12:01 <bob> two\n12:02 <bob> three\n"
+	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.callTool(context.Background(), "irc_read", map[string]any{
+		"work_dir": aliceDir,
+		"lines":    float64(2),
+	})
+	if err != nil {
+		t.Fatalf("irc_read tool call failed: %v", err)
+	}
+
+	var out struct {
+		Lines      []string `json:"lines"`
+		NextOffset int64    `json:"next_offset"`
+	}
+	decodeToolResult(t, res, &out)
+	want := []string{"12:01 <bob> two", "12:02 <bob> three"}
+	if len(out.Lines) != 2 || out.Lines[0] != want[0] || out.Lines[1] != want[1] {
+		t.Errorf("lines = %v, want %v", out.Lines, want)
+	}
+	if out.NextOffset != int64(len(content)) {
+		t.Errorf("next_offset = %d, want %d", out.NextOffset, len(content))
+	}
+
+	// Paging from an explicit offset returns the remainder.
+	res, err = s.callTool(context.Background(), "irc_read", map[string]any{
+		"work_dir":    aliceDir,
+		"from_offset": float64(len("12:00 <bob> one\n")),
+	})
+	if err != nil {
+		t.Fatalf("irc_read with from_offset failed: %v", err)
+	}
+	decodeToolResult(t, res, &out)
+	if len(out.Lines) != 2 || out.Lines[0] != "12:01 <bob> two" {
+		t.Errorf("paged lines = %v", out.Lines)
+	}
+	if out.NextOffset != int64(len(content)) {
+		t.Errorf("paged next_offset = %d, want %d", out.NextOffset, len(content))
+	}
+}
+
+func TestIrcReadToolMissingLog(t *testing.T) {
+	s, _ := newTestServer(t)
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+
+	_, err := s.callTool(context.Background(), "irc_read", map[string]any{
+		"work_dir": aliceDir,
+	})
+	if err == nil {
+		t.Fatal("expected error for missing IRC log, got nil")
+	}
+	wantPath := filepath.Join(aliceDir, "scratch", "irc", "alice", "log")
+	if !strings.Contains(err.Error(), wantPath) {
+		t.Errorf("error %q does not mention log path %q", err.Error(), wantPath)
+	}
+	if !strings.Contains(err.Error(), "client running") {
+		t.Errorf("error %q does not hint that the client may not be running", err.Error())
+	}
+}
+
+func TestIrcWaitToolTimeout(t *testing.T) {
+	s, _ := newTestServer(t)
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+
+	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
+	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte("12:00 <bob> static\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
+		"work_dir":  aliceDir,
+		"timeout_s": float64(0.05),
+	})
+	if err != nil {
+		t.Fatalf("irc_wait tool call failed: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("irc_wait took too long: %v", elapsed)
+	}
+
+	var out struct {
+		Lines      []string `json:"lines"`
+		NextOffset int64    `json:"next_offset"`
+		TimedOut   bool     `json:"timed_out"`
+	}
+	decodeToolResult(t, res, &out)
+	if !out.TimedOut {
+		t.Error("expected timed_out=true")
+	}
+	if len(out.Lines) != 0 {
+		t.Errorf("expected no lines, got %v", out.Lines)
+	}
+	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
+		t.Errorf("next_offset = %d, want snapshot size %d", out.NextOffset, len("12:00 <bob> static\n"))
+	}
+}
