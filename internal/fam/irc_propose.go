@@ -79,7 +79,7 @@ func IrcProposeCmd(args []string, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("--as omitted and not in a git checkout: %w", err)
 		}
-		as = strings.TrimPrefix(strings.TrimPrefix(filepath.Base(strings.TrimSpace(string(top))), "wt-"), "botfam-")
+		as = ParseActor(filepath.Base(strings.TrimSpace(string(top))), ResolveRepoName("."))
 	}
 	if executor == "" {
 		executor = as

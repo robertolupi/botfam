@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -18,7 +19,7 @@ import (
 func IrcClientCmd(args []string, out io.Writer) error {
 	var nick, server, channel, workDir, passFile string
 	server = "localhost:6667"
-	channel = "#botfam"
+	channel = "#botfam,#ccrep"
 
 	// Parse arguments
 	var cleanArgs []string
@@ -66,6 +67,26 @@ func IrcClientCmd(args []string, out io.Writer) error {
 		return errors.New("missing required nickname argument: botfam irc-client <nick>")
 	}
 	nick = cleanArgs[0]
+
+	channelList, primaryChannel := ParseChannels(channel)
+
+	var joinedMu sync.RWMutex
+	joinedChannels := make(map[string]bool)
+	for _, ch := range channelList {
+		joinedChannels[ch] = true
+	}
+
+	isJoined := func(target string) bool {
+		joinedMu.RLock()
+		defer joinedMu.RUnlock()
+		return joinedChannels[target]
+	}
+
+	addJoined := func(target string) {
+		joinedMu.Lock()
+		defer joinedMu.Unlock()
+		joinedChannels[target] = true
+	}
 
 	if workDir == "" {
 		workDir = filepath.Join("scratch", "irc", nick)
@@ -135,7 +156,7 @@ func IrcClientCmd(args []string, out io.Writer) error {
 
 	_, _ = fmt.Fprintf(conn, "NICK %s\r\n", nick)
 	_, _ = fmt.Fprintf(conn, "USER %s 0 * :%s\r\n", nick, nick)
-	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", channel)
+	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", strings.Join(channelList, ","))
 
 	privRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+PRIVMSG\s+(\S+)\s+:(.*)$`)
 	eventRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+(JOIN|PART|QUIT|NICK)\b\s*:?(\S*)`)
@@ -150,7 +171,7 @@ func IrcClientCmd(args []string, out io.Writer) error {
 			if _, err := conn.Write([]byte(cmd)); err != nil {
 				return err
 			}
-			if target == channel {
+			if isJoined(target) {
 				emitHelper(fmt.Sprintf("%s <%s> %s", target, nick, body))
 			} else {
 				emitHelper(fmt.Sprintf("(pm->%s) <%s> %s", target, nick, body))
@@ -171,7 +192,7 @@ func IrcClientCmd(args []string, out io.Writer) error {
 			if _, err := conn.Write([]byte(cmd)); err != nil {
 				return err
 			}
-			if target == channel {
+			if isJoined(target) {
 				emitHelper(fmt.Sprintf("%s <%s> %s", target, nick, chunk))
 			} else {
 				emitHelper(fmt.Sprintf("(pm->%s) <%s> %s", target, nick, chunk))
@@ -196,6 +217,18 @@ func IrcClientCmd(args []string, out io.Writer) error {
 			if strings.HasPrefix(text, "/raw ") {
 				cmd := strings.TrimPrefix(text, "/raw ") + "\r\n"
 				_, err = conn.Write([]byte(cmd))
+			} else if strings.HasPrefix(text, "/join ") {
+				targetChans := strings.TrimSpace(strings.TrimPrefix(text, "/join "))
+				if targetChans != "" {
+					for _, tc := range strings.Split(targetChans, ",") {
+						tc = strings.TrimSpace(tc)
+						if tc != "" {
+							addJoined(tc)
+						}
+					}
+					cmd := fmt.Sprintf("JOIN %s\r\n", targetChans)
+					_, err = conn.Write([]byte(cmd))
+				}
 			} else if strings.HasPrefix(text, "/msg ") {
 				parts := strings.SplitN(strings.TrimPrefix(text, "/msg "), " ", 2)
 				if len(parts) < 2 {
@@ -206,7 +239,7 @@ func IrcClientCmd(args []string, out io.Writer) error {
 				body := parts[1]
 				err = sendPrivmsg(target, body)
 			} else {
-				err = sendPrivmsg(channel, text)
+				err = sendPrivmsg(primaryChannel, text)
 			}
 
 			if err != nil {
@@ -274,4 +307,18 @@ func IrcClientCmd(args []string, out io.Writer) error {
 
 	<-done
 	return nil
+}
+
+// ParseChannels splits a comma-separated list of channels and returns the normalized list and primary channel.
+func ParseChannels(channelStr string) (channels []string, primary string) {
+	for _, ch := range strings.Split(channelStr, ",") {
+		ch = strings.TrimSpace(ch)
+		if ch != "" {
+			channels = append(channels, ch)
+		}
+	}
+	if len(channels) == 0 {
+		channels = []string{"#botfam"}
+	}
+	return channels, channels[0]
 }
