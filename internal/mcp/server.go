@@ -171,6 +171,12 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithNumber("limit"),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("irc_write",
+		mcplib.WithDescription("Write a raw line to the IRC client's input pipe."),
+		mcplib.WithString("message", mcplib.Required()),
+		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
+	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
@@ -192,6 +198,44 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, err
 		}
 		actor = ""
+	}
+
+	if name == "irc_write" {
+		message := argString(args, "message")
+		if message == "" {
+			return nil, errors.New("message is required")
+		}
+
+		absWorkDir, err := filepath.Abs(workDir)
+		if err != nil {
+			return nil, err
+		}
+
+		fifoPath := filepath.Join(absWorkDir, "scratch", "irc", actor, "in")
+		fi, err := os.Stat(fifoPath)
+		if err != nil {
+			return nil, fmt.Errorf("IRC FIFO not found at %s: %w", fifoPath, err)
+		}
+		if fi.Mode()&os.ModeNamedPipe == 0 {
+			return nil, fmt.Errorf("path %s is not a named pipe", fifoPath)
+		}
+
+		f, err := os.OpenFile(fifoPath, os.O_WRONLY|syscall.O_NONBLOCK, 0600)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open IRC FIFO (is the client running?): %w", err)
+		}
+		defer f.Close()
+
+		msg := message
+		if !strings.HasSuffix(msg, "\n") {
+			msg += "\n"
+		}
+
+		if _, err := f.WriteString(msg); err != nil {
+			return nil, fmt.Errorf("failed to write to IRC FIFO: %w", err)
+		}
+
+		return toolResult(map[string]any{"ok": true})
 	}
 
 	// Ensure UDS daemon is running (auto-start)
