@@ -5,6 +5,8 @@ status: Draft
 created: 2026-06-11
 proposal-id: doc-linter-v1
 executor: agy
+quorum: majority
+deadline: none
 ---
 
 # Proposal: Doc-Linter — Semantic Checks for the Markdown Corpus
