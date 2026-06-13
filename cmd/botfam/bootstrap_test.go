@@ -55,18 +55,16 @@ func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
 		assertFileContains(t, filepath.Join(wt, "doc/collab/PROTOCOL.md"), "botfam Coordination Protocol")
 	}
 
-	send := callBotfamTool(t, home, filepath.Join(worktrees, "wt-codex"), bin, "send", map[string]any{
-		"to":      "agy",
-		"type":    "smoke",
-		"payload": map[string]any{"msg": "hello"},
+	initRes := callBotfamTool(t, home, filepath.Join(worktrees, "wt-codex"), bin, "worktree_init", map[string]any{
+		"target_actor": "codex",
 	})
-	if send["from"] != "codex" || send["to"] != "agy" {
-		t.Fatalf("send envelope = %#v, want from codex to agy", send)
+	if ok, _ := initRes["ok"].(bool); !ok {
+		t.Fatalf("expected worktree_init to succeed, got: %#v", initRes)
 	}
 
-	got := callBotfamTool(t, home, filepath.Join(worktrees, "wt-agy"), bin, "try_recv", map[string]any{})
-	if got["id"] != send["id"] || got["from"] != "codex" || got["to"] != "agy" {
-		t.Fatalf("received envelope = %#v, want sent envelope %#v", got, send)
+	res := callBotfamTool(t, home, filepath.Join(worktrees, "wt-codex"), bin, "worktree_sync", map[string]any{})
+	if ok, _ := res["ok"].(bool); !ok {
+		t.Fatalf("expected worktree_sync to succeed, got: %#v", res)
 	}
 }
 
@@ -261,3 +259,19 @@ func writeJSONRPC(t *testing.T, w io.Writer, id int, method string, params map[s
 		t.Fatal(err)
 	}
 }
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runCmd := func(name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("failed to run %s %v: %v", name, args, err)
+		}
+	}
+	runCmd("git", "init")
+	runCmd("git", "config", "user.name", "test")
+	runCmd("git", "config", "user.email", "test@example.com")
+	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
+}
+
