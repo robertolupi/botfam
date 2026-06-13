@@ -123,7 +123,6 @@ func NewfamCmd(args []string, out io.Writer) error {
 
 	// Write Claude settings and generate agent docs in the main checkout
 	fmt.Fprintf(out, "Configuring main checkout at %s...\n", repoRoot)
-	cleanLegacyMCP(repoRoot)
 	if err := writeClaudeSettings(repoRoot); err != nil {
 		return fmt.Errorf("failed to write Claude settings in main checkout: %w", err)
 	}
@@ -195,7 +194,6 @@ func NewfamCmd(args []string, out io.Writer) error {
 		}
 
 		// Configure the worktree
-		cleanLegacyMCP(wtPath)
 		if err := writeClaudeSettings(wtPath); err != nil {
 			return fmt.Errorf("failed to write Claude settings in worktree %s: %w", wtPath, err)
 		}
@@ -290,26 +288,4 @@ func writeClaudeSettings(checkout string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-func cleanLegacyMCP(checkout string) {
-	mcpPath := filepath.Join(checkout, ".mcp.json")
-	if !isGitTracked(checkout, mcpPath) {
-		_ = os.Remove(mcpPath)
-	}
-	agentsPath := filepath.Join(checkout, ".agents", "mcp_config.json")
-	if !isGitTracked(checkout, agentsPath) {
-		_ = os.Remove(agentsPath)
-	}
-	_ = os.Remove(filepath.Join(checkout, ".codex", "config.toml"))
 
-	_ = os.Remove(filepath.Join(checkout, ".agents"))
-	_ = os.Remove(filepath.Join(checkout, ".codex"))
-}
-
-func isGitTracked(checkout string, path string) bool {
-	rel, err := filepath.Rel(checkout, path)
-	if err != nil {
-		return false
-	}
-	_, err = gitOne(checkout, "ls-files", "--error-unmatch", rel)
-	return err == nil
-}
