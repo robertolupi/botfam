@@ -111,6 +111,6 @@ ______________________________________________________________________
 ## Project history & self-improvement
 
 The fam reviews itself: per-session transcripts and reviews live on the
-[Gitea wiki](wiki) (see **Sessions** and **Reviews** index; these live in
-the wiki because they don't govern architecture and so skip double-approval PRs
-— botfam#55), and protocol proposals in `doc/protocol/` and `doc/proposals/`.
+[Gitea wiki](wiki) (see **Sessions** and **Reviews** index; these live in the
+wiki because they don't govern architecture and so skip double-approval PRs —
+botfam#55), and protocol proposals in `doc/protocol/` and `doc/proposals/`.
