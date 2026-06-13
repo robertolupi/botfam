@@ -11,7 +11,7 @@ quorum: majority
 deadline: none
 ---
 
-# Proposal: ccrep verb set + CLI/MCP alignment (cobra + viper)
+# Proposal: ccrep verb set + CLI/MCP alignment (cobra)
 
 > [!NOTE]
 > **Status**: Draft (2026-06-13). Implements Step 1 of
@@ -25,9 +25,8 @@ deadline: none
 - **Scope:** give every kept coordination operation a single core with thin
   **CLI** (operator) and **MCP** (agent) adapters; kill hand-typed SHAs; let a
   review be one call. Restructure the CLI under
-  [cobra](https://github.com/spf13/cobra), parse `fam.toml` with a typed TOML
-  unmarshaller, and layer runtime config with
-  [viper](https://github.com/spf13/viper). Retire the daemon ccrep verbs.
+  [cobra](https://github.com/spf13/cobra) and parse `fam.toml` with a typed
+  TOML unmarshaller. Retire the daemon ccrep verbs.
 
 ______________________________________________________________________
 
@@ -153,11 +152,13 @@ for the unchanged commands) but only reworks the `ccrep` group's behaviour.
   `Unmarshal` into a typed `Registry`, plus a validation pass. This finally
   supports nested `[roles.*]` tables — the prerequisite for the `human`-guard
   roster ([post-pivot-cleanup.md](post-pivot-cleanup.md) §5).
-- **Runtime config = viper.** Server host:port, `COLLAB_HISTORY`, default
-  channel, and actor override move behind viper with `flag > env > default`
-  precedence, bound to cobra flags. viper does **not** read `fam.toml` — the
-  descriptor stays a typed unmarshal, keeping "what this fam *is*" separate
-  from "how this invocation is *configured*".
+- **Runtime config = cobra flags + env.** Server host:port, `COLLAB_HISTORY`,
+  default channel, and actor override are plain cobra (`pflag`) flags with env
+  fallbacks (`flag > env > default`). No viper: ~6 settings don't justify the
+  dependency, and `pflag` already covers flag+env binding. Keeping "what this
+  fam *is*" (`fam.toml`, typed) separate from "how this invocation is
+  *configured*" (flags/env) stays an explicit boundary, not a config-library
+  feature.
 
 ## 9. MCP surface
 
@@ -175,8 +176,8 @@ they are deleted in a later proposal (§10).
 
 ## 10. Scope & phasing
 
-**In this proposal:** cobra tree + viper runtime config + typed `fam.toml`; the
-`ccrep` verb set on CLI + MCP; deletion of the daemon ccrep verbs
+**In this proposal:** cobra tree + flag/env runtime config + typed `fam.toml`;
+the `ccrep` verb set on CLI + MCP; deletion of the daemon ccrep verbs
 (`propose/vote/tally/approve/merge`) and `CollectCcrepEvents(store)` — they are
 wholesale-replaced.
 
