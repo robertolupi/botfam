@@ -46,6 +46,8 @@ func run() error {
 			return fam.WorktreeCmd(os.Args[2:], os.Stdout)
 		case "setup":
 			return fam.Setup(os.Args[2:], os.Stdout)
+		case "newfam":
+			return fam.NewfamCmd(os.Args[2:], os.Stdout)
 		case "session":
 			return fam.SessionCmd(os.Args[2:], os.Stdout)
 		case "verify":
@@ -97,6 +99,7 @@ Usage:
   botfam serve            run stdio MCP server
   botfam worktree <init|sync|register> [args]
   botfam setup <project> --agents alice,bob [--force]
+  botfam newfam <project> --agents alice,bob
   botfam session <subcommand>
   botfam verify <sha> [pkgs...]
   botfam agent-docs generate|check

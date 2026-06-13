@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
+func TestNewfamCmdCreatesWorktreesAndHarnessConfig(t *testing.T) {
 	repoRoot, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -28,25 +28,25 @@ func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
 	}
 	initGitRepo(t, target)
 
+	// Create and commit a mock PROTOCOL.md so git worktrees check it out
+	if err := os.MkdirAll(filepath.Join(target, "doc/collab"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "doc/collab/PROTOCOL.md"), []byte("botfam Coordination Protocol"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd(t, target, "git", "add", "doc/collab/PROTOCOL.md")
+	runCmd(t, target, "git", "commit", "-m", "add protocol doc")
+
 	home := filepath.Join(temp, "home")
-	worktrees := filepath.Join(temp, "worktrees")
-	script := filepath.Join(repoRoot, "bootstrap-botfam.sh")
-	runBootstrap(t, home, script, target, "--agents", "agy,codex,claude", "--botfam-bin", bin, "--worktree-dir", worktrees)
-	runBootstrap(t, home, script, target, "--agents", "agy,codex,claude", "--botfam-bin", bin, "--worktree-dir", worktrees)
+	runNewfam(t, home, bin, target, "myproject", "--agents", "agy,codex,claude")
+	// Run again to verify idempotency/already existing checkouts
+	runNewfam(t, home, bin, target, "myproject", "--agents", "agy,codex,claude")
 
 	for _, agent := range []string{"agy", "codex", "claude"} {
-		wt := filepath.Join(worktrees, "wt-"+agent)
+		wt := filepath.Join(temp, "wt-"+agent)
 		if got := strings.TrimSpace(string(runCmdOutput(t, wt, "git", "branch", "--show-current"))); got != "agent/"+agent {
 			t.Fatalf("%s branch = %q, want %q", wt, got, "agent/"+agent)
-		}
-		if _, err := os.Stat(filepath.Join(wt, ".mcp.json")); !os.IsNotExist(err) {
-			t.Fatalf("expected wt/.mcp.json to be deleted/not exist, got: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(wt, ".codex")); !os.IsNotExist(err) {
-			t.Fatalf("expected wt/.codex directory to be deleted/not exist, got: %v", err)
-		}
-		if _, err := os.Stat(filepath.Join(wt, ".agents")); !os.IsNotExist(err) {
-			t.Fatalf("expected wt/.agents directory to be deleted/not exist, got: %v", err)
 		}
 		assertFileContains(t, filepath.Join(wt, ".claude", "settings.json"), `"Bash(botfam:*)"`)
 		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "doc/collab/PROTOCOL.md")
@@ -55,20 +55,20 @@ func TestBootstrapScriptCreatesWorktreesAndHarnessConfig(t *testing.T) {
 		assertFileContains(t, filepath.Join(wt, "doc/collab/PROTOCOL.md"), "botfam Coordination Protocol")
 	}
 
-	initRes := callBotfamTool(t, home, filepath.Join(worktrees, "wt-codex"), bin, "worktree_init", map[string]any{
+	initRes := callBotfamTool(t, home, filepath.Join(temp, "wt-codex"), bin, "worktree_init", map[string]any{
 		"target_actor": "codex",
 	})
 	if ok, _ := initRes["ok"].(bool); !ok {
 		t.Fatalf("expected worktree_init to succeed, got: %#v", initRes)
 	}
 
-	res := callBotfamTool(t, home, filepath.Join(worktrees, "wt-codex"), bin, "worktree_sync", map[string]any{})
+	res := callBotfamTool(t, home, filepath.Join(temp, "wt-codex"), bin, "worktree_sync", map[string]any{})
 	if ok, _ := res["ok"].(bool); !ok {
 		t.Fatalf("expected worktree_sync to succeed, got: %#v", res)
 	}
 }
 
-func TestBootstrapScriptRejectsUnsafeInputs(t *testing.T) {
+func TestNewfamCmdRejectsUnsafeInputs(t *testing.T) {
 	repoRoot, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
@@ -84,28 +84,25 @@ func TestBootstrapScriptRejectsUnsafeInputs(t *testing.T) {
 	}
 	initGitRepo(t, target)
 
-	script := filepath.Join(repoRoot, "bootstrap-botfam.sh")
+	// Create and commit a mock PROTOCOL.md so git worktrees check it out
+	if err := os.MkdirAll(filepath.Join(target, "doc/collab"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "doc/collab/PROTOCOL.md"), []byte("botfam Coordination Protocol"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd(t, target, "git", "add", "doc/collab/PROTOCOL.md")
+	runCmd(t, target, "git", "commit", "-m", "add protocol doc")
+
 	home := filepath.Join(temp, "home")
-	if out := runBootstrapError(t, home, script, target, "--agents", "../agy", "--botfam-bin", bin); !strings.Contains(out, "invalid agent name") {
+	if out := runNewfamError(t, home, bin, target, "myproj", "--agents", "../agy"); !strings.Contains(out, "invalid agent") {
 		t.Fatalf("unsafe agent output = %q, want invalid agent name", out)
 	}
-
-	if err := os.Mkdir(filepath.Join(target, ".codex"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(target, ".codex", "config.toml"), []byte("[mcp_servers.other]\ncommand = \"other\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runCmd(t, target, "git", "add", ".codex/config.toml")
-	runCmd(t, target, "git", "commit", "-m", "track codex config")
 
 	if err := os.WriteFile(filepath.Join(target, "AGENTS.md"), []byte("# botfam fam member — read this first\n\nold identity text\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	runBootstrap(t, home, script, target, "--agents", "agy", "--botfam-bin", bin, "--no-worktrees")
-	if _, err := os.Stat(filepath.Join(target, ".codex")); !os.IsNotExist(err) {
-		t.Fatalf("expected target/.codex to be deleted/not exist, got: %v", err)
-	}
+	runNewfam(t, home, bin, target, "myproject", "--agents", "agy")
 	assertFileContains(t, filepath.Join(target, "AGENTS.md"), "doc/collab/PROTOCOL.md")
 	assertFileContains(t, filepath.Join(target, "CLAUDE.md"), "doc/collab/PROTOCOL.md")
 	assertFileContains(t, filepath.Join(target, "GEMINI.md"), "doc/collab/PROTOCOL.md")
@@ -113,11 +110,11 @@ func TestBootstrapScriptRejectsUnsafeInputs(t *testing.T) {
 	assertFileNotContains(t, filepath.Join(target, "AGENTS.md"), "old identity text")
 }
 
-func runBootstrap(t *testing.T, home, script, repo string, args ...string) {
+func runNewfam(t *testing.T, home, bin, repo string, args ...string) {
 	t.Helper()
-	allArgs := append([]string{script, repo}, args...)
-	cmd := exec.Command("sh", allArgs...)
-	cmd.Env = append(os.Environ(), "HOME="+home)
+	cmd := exec.Command(bin, append([]string{"newfam"}, args...)...)
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "HOME="+home, "USER=testoperator")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -126,11 +123,11 @@ func runBootstrap(t *testing.T, home, script, repo string, args ...string) {
 	}
 }
 
-func runBootstrapError(t *testing.T, home, script, repo string, args ...string) string {
+func runNewfamError(t *testing.T, home, bin, repo string, args ...string) string {
 	t.Helper()
-	allArgs := append([]string{script, repo}, args...)
-	cmd := exec.Command("sh", allArgs...)
-	cmd.Env = append(os.Environ(), "HOME="+home)
+	cmd := exec.Command(bin, append([]string{"newfam"}, args...)...)
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "HOME="+home, "USER=testoperator")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -274,4 +271,3 @@ func initGitRepo(t *testing.T, dir string) {
 	runCmd("git", "config", "user.email", "test@example.com")
 	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
 }
-

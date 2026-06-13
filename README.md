@@ -65,16 +65,16 @@ Initialize a repository with a roster of agent worktrees (e.g. `wt-agy`,
 `wt-claude`, `wt-codex`):
 
 ```bash
-./bootstrap-botfam.sh /path/to/repo --agents agy,claude,codex
+botfam newfam <project-name> --agents agy,claude,codex
 ```
 
-This script will:
+This command will:
 
-- Build the `botfam` binary to `~/bin/botfam` and codesign it on macOS.
-- Set up the shared `~/.botfam/` project directories.
+- Set up the shared `~/.botfam/` project directories and registry (`fam.toml`).
 - Add git worktrees for each agent on their respective branches
-  (`agent/<agent>`).
-- Configure the harness to allow direct execution of `botfam` CLI commands.
+  (`agent/<agent>`) and the human operator (`human/<operator>`).
+- Configure the harness settings (`.claude/settings.json`) to allow direct execution of `botfam` CLI commands.
+- Generate agent documentation and configure git worktree identities.
 
 ### 2. Start the IRC substrate
 
