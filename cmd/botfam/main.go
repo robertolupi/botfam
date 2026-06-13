@@ -58,6 +58,8 @@ func run() error {
 			return fam.IrcWaitCmd(os.Args[2:], os.Stdout)
 		case "forge-wait":
 			return fam.ForgeWaitCmd(os.Args[2:], os.Stdout)
+		case "external-review":
+			return fam.ExternalReviewCmd(os.Args[2:], os.Stdout)
 		case "scribe":
 			return fam.ScribeCmd(os.Args[2:], os.Stdout)
 		case "irclog2sessions":
@@ -101,6 +103,7 @@ Usage:
   botfam irc-client <nick> [--server <host:port>] [--channel <channel>] [--dir <dir>] [--pass-file <file>]
   botfam irc-wait --nick <nick> [--file <path>]
   botfam forge-wait [--once] [--interval <s>] [--timeout <s>] [--mark-read]
+  botfam external-review [--pr <index>] --ollama|--openai|--gemini <model> [MATERIAL...]
   botfam scribe [--server <host:port>] [--channel <channel>] [--file <path>]
   botfam irclog2sessions <chat.log>... [--out <dir>] [--gap-minutes <n>] [--channel <chan>]... [--include-open]
 
