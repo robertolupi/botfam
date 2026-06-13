@@ -13,12 +13,12 @@
 #
 # Usage:
 #   tools/forge-login.sh --host <url> [--user <name>] [--actor <name>]
-#                        [--fam <name>] [--scopes <csv>] [--token-file <path>]
+#                        [--fam <name>] [--scopes <csv>] [--token-file <path>] [--yes]
 #
 set -euo pipefail
 set +x  # never trace — keep credentials out of any log
 
-HOST=""; USER_IN=""; ACTOR=""; FAM=""; TOKEN_FILE=""
+HOST=""; USER_IN=""; ACTOR=""; FAM=""; TOKEN_FILE=""; ASSUME_YES=""
 SCOPES="read:repository,read:issue,read:organization,read:user,read:misc"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -28,6 +28,7 @@ while [ $# -gt 0 ]; do
     --fam) FAM="$2"; shift 2;;
     --scopes) SCOPES="$2"; shift 2;;
     --token-file) TOKEN_FILE="$2"; shift 2;;
+    --yes|-y) ASSUME_YES=1; shift;;
     -h|--help) sed -n '2,20p' "$0"; exit 0;;
     *) echo "error: unknown arg $1" >&2; exit 2;;
   esac
@@ -46,6 +47,21 @@ fi
 [ -n "$TOKEN_FILE" ] || TOKEN_FILE="$HOME/.botfam/token-${FAM}-${ACTOR}"
 
 [ -n "$USER_IN" ] || read -rp "Forge username: " USER_IN
+
+# Footgun guard: the token FILENAME is keyed to <actor> (derived from the cwd),
+# but you authenticate as <user>. If they disagree (e.g. running inside wt-claude
+# with --user agy-bot), you'd overwrite the wrong actor's token. Warn + confirm.
+if [ "${USER_IN%-bot}" != "$ACTOR" ]; then
+  echo "WARNING: forge user '$USER_IN' does not match actor '$ACTOR'." >&2
+  echo "  Token would be written to: $TOKEN_FILE  (actor '$ACTOR')." >&2
+  echo "  That OVERWRITES '$ACTOR''s token and is NOT '${USER_IN%-bot}''s file." >&2
+  echo "  To set up '${USER_IN%-bot}': run from its worktree, or pass --actor ${USER_IN%-bot}." >&2
+  if [ "$ASSUME_YES" != "1" ]; then
+    printf "  Continue anyway? [y/N] " >&2; read -r ans
+    case "$ans" in y|Y|yes|YES) ;; *) echo "aborted." >&2; exit 1 ;; esac
+  fi
+fi
+
 read -rsp "Forge password (or existing PAT): " PASS; echo
 
 name="botfam-${FAM}-${ACTOR}-$(date +%Y%m%d%H%M%S)"
