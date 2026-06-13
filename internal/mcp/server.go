@@ -704,7 +704,7 @@ func argFloatPtr(args map[string]any, key string) *float64 {
 func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	mcpSrv.AddResource(
 		mcplib.NewResource(
-			"botfam://protocol",
+			"botfam://fam/docs/protocol",
 			"botfam Coordination Protocol",
 			mcplib.WithMIMEType("text/markdown"),
 		),
@@ -712,7 +712,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	)
 	mcpSrv.AddResource(
 		mcplib.NewResource(
-			"botfam://ops",
+			"botfam://fam/docs/ops",
 			"botfam Operations Guide",
 			mcplib.WithMIMEType("text/markdown"),
 		),
@@ -729,9 +729,9 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 
 	var filename string
 	switch req.Params.URI {
-	case "botfam://protocol":
+	case "botfam://fam/docs/protocol":
 		filename = filepath.Join(repoRoot, "doc", "collab", "PROTOCOL.md")
-	case "botfam://ops":
+	case "botfam://fam/docs/ops":
 		filename = filepath.Join(repoRoot, "doc", "collab", "IRC-OPS.md")
 	default:
 		return nil, fmt.Errorf("unknown resource URI %q", req.Params.URI)
