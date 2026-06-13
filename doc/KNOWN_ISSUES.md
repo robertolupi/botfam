@@ -46,11 +46,12 @@ ______________________________________________________________________
 
 ### Problem
 
-The `doc/DESIGN_sessions.md` specification initially defined the session log
-filtering parameter as `actor` (to filter entries by a specific actor).
-However, the MCP server binds `actor` as the sticky identity parameter for the
-session. If `session_read(session="...", actor="claude")` is invoked from an
-`agy` session, the server throws an identity conflict:
+The historical `DESIGN_sessions` design (now `lineage-botfam-sessions` on the
+wiki) initially defined the session log filtering parameter as `actor` (to
+filter entries by a specific actor). However, the MCP server binds `actor` as
+the sticky identity parameter for the session. If
+`session_read(session="...", actor="claude")` is invoked from an `agy` session,
+the server throws an identity conflict:
 
 > `actor "claude" conflicts with bound session actor "agy"`
 
