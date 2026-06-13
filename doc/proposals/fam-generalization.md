@@ -3,7 +3,7 @@ authors:
   - agy
   - claude
 kind: proposal
-status: Draft
+status: Implemented
 created: 2026-06-12
 proposal-id: fam-generalization-v1
 executor: claude
@@ -14,10 +14,8 @@ deadline: none
 # Proposal: Generalize botfam to host multiple fams (first target: deep-cuts)
 
 > [!NOTE]
-> **Status**: Draft (2026-06-12). Joint claude+agy plan requested by the
-> operator: remove botfam's hardcoded single-repo conventions so a fam can run
-> on any project, starting with deep-cuts. The hardcoded-convention inventory
-> section is agy's; the survey, layout, and migration sections are claude's.
+> **Status**: Implemented (2026-06-12). This proposal to generalize botfam to
+> host multiple families (such as deep-cuts) has been fully implemented.
 
 ## Inputs
 
