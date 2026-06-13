@@ -557,4 +557,22 @@ func TestMcpResources(t *testing.T) {
 			t.Errorf("expected text %q, got %q", dummyContent, tr.Text)
 		}
 	}
+
+	// 3. Negative cases: unknown path, unsupported scheme, and an unknown
+	// named authority must all error rather than read an unintended file.
+	negatives := []struct {
+		name string
+		uri  string
+	}{
+		{"unknown path", "botfam:///docs/nonexistent"},
+		{"traversal attempt", "botfam:///../../etc/passwd"},
+		{"unsupported scheme", "file:///docs/protocol"},
+		{"unknown authority", "botfam://definitely-not-a-real-fam/docs/protocol"},
+	}
+	for _, tc := range negatives {
+		req.Params.URI = tc.uri
+		if _, err := s.handleReadResource(context.Background(), req); err == nil {
+			t.Errorf("%s: expected error for URI %q, got nil", tc.name, tc.uri)
+		}
+	}
 }

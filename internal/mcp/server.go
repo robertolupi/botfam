@@ -742,23 +742,23 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	if u.Host == "" {
 		targetRepoRoot = localRepoRoot
 	} else {
-		// Named authority: search under ~/.botfam/ for a family with a matching name or slug
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		botfamDir := filepath.Join(home, ".botfam")
-		entries, err := os.ReadDir(botfamDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read ~/.botfam: %w", err)
-		}
-
-		// Also check local family first to avoid file scanning if possible
+		// Named authority. Resolve the local family first so a name/slug that
+		// refers to this fam never scans ~/.botfam.
 		localInfo, errInfo := (fam.Resolver{WorkDir: cwd}).Resolve()
 		localReg := fam.LoadFamRegistry(cwd)
 		if (errInfo == nil && u.Host == localInfo.Name) || u.Host == localReg.Name || u.Host == localReg.Slug {
 			targetRepoRoot = localRepoRoot
 		} else {
+			// Cross-fam: search ~/.botfam/ for a family matching name or slug.
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			botfamDir := filepath.Join(home, ".botfam")
+			entries, err := os.ReadDir(botfamDir)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read ~/.botfam: %w", err)
+			}
 			found := false
 			for _, entry := range entries {
 				if !entry.IsDir() {
