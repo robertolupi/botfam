@@ -346,15 +346,3 @@ func ValidateHistoryPath(path string) error {
 	}
 	return nil
 }
-
-func UseForge() bool {
-	execName := filepath.Base(os.Args[0])
-	if strings.Contains(execName, "next") {
-		return true
-	}
-	if os.Getenv("BOTFAM_USE_FORGE") == "1" || os.Getenv("BOTFAM_USE_FORGE") == "true" {
-		return true
-	}
-	return false
-}
-

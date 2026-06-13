@@ -1,19 +1,12 @@
 package main
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strconv"
-	"strings"
 
 	"github.com/robertolupi/botfam/internal/fam"
 	"github.com/robertolupi/botfam/internal/mcp"
-	"github.com/robertolupi/botfam/internal/server"
 )
 
 func main() {
@@ -55,111 +48,14 @@ func run() error {
 			return fam.Setup(os.Args[2:], os.Stdout)
 		case "session":
 			return fam.SessionCmd(os.Args[2:], os.Stdout)
-		case "topic":
-			return fam.TopicCmd(os.Args[2:], os.Stdout)
-		case "merge-gate":
-			return fam.MergeGateCmd(os.Args[2:], os.Stdout)
 		case "verify":
 			return fam.VerifyCmd(os.Args[2:], os.Stdout)
 		case "agent-docs":
 			return fam.AgentDocsCmd(os.Args[2:], os.Stdout)
-		case "vote":
-			return fam.VoteCmd(os.Args[2:], os.Stdout)
-		case "tally":
-			return fam.TallyCmd(os.Args[2:], os.Stdout)
-		case "propose":
-			return fam.ProposeCmd(os.Args[2:], os.Stdout)
-		case "approve":
-			return fam.ApproveCmd(os.Args[2:], os.Stdout)
-		case "merge":
-			return fam.MergeCmd(os.Args[2:], os.Stdout)
-		case "send":
-			return fam.SendCmd(os.Args[2:], os.Stdout)
-		case "recv":
-			return fam.RecvCmd(os.Args[2:], os.Stdout)
-		case "try-recv", "try_recv":
-			return fam.TryRecvCmd(os.Args[2:], os.Stdout)
-		case "peek":
-			return fam.PeekCmd(os.Args[2:], os.Stdout)
-		case "ack":
-			return fam.AckCmd(os.Args[2:], os.Stdout)
-		case "seen":
-			return fam.SeenCmd(os.Args[2:], os.Stdout)
-		case "inbox":
-			return fam.InboxCmd(os.Args[2:], os.Stdout)
-		case "post":
-			return fam.PostCmd(os.Args[2:], os.Stdout)
-		case "claim":
-			return fam.ClaimCmd(os.Args[2:], os.Stdout)
-		case "complete":
-			return fam.CompleteCmd(os.Args[2:], os.Stdout)
-		case "heartbeat":
-			return fam.HeartbeatCmd(os.Args[2:], os.Stdout)
-		case "abandon":
-			return fam.AbandonCmd(os.Args[2:], os.Stdout)
-		case "sweep":
-			return fam.SweepCmd(os.Args[2:], os.Stdout)
-		case "session-append", "session_append":
-			return fam.SessionAppendCmd(os.Args[2:], os.Stdout)
-		case "session-read", "session_read":
-			return fam.SessionReadCmd(os.Args[2:], os.Stdout)
-		case "server":
-			var udsPath string
-			tcpPort := 8080
-			for i := 2; i < len(os.Args); i++ {
-				arg := os.Args[i]
-				if arg == "--socket" || arg == "-s" {
-					i++
-					if i < len(os.Args) {
-						udsPath = os.Args[i]
-					}
-				} else if strings.HasPrefix(arg, "--socket=") {
-					udsPath = strings.TrimPrefix(arg, "--socket=")
-				} else if arg == "--port" || arg == "-p" {
-					i++
-					if i < len(os.Args) {
-						var err error
-						tcpPort, err = strconv.Atoi(os.Args[i])
-						if err != nil {
-							return fmt.Errorf("invalid port: %w", err)
-						}
-					}
-				} else if strings.HasPrefix(arg, "--port=") {
-					var err error
-					tcpPort, err = strconv.Atoi(strings.TrimPrefix(arg, "--port="))
-					if err != nil {
-						return fmt.Errorf("invalid port: %w", err)
-					}
-				} else {
-					return fmt.Errorf("unknown server argument %q", arg)
-				}
-			}
-
-			if udsPath == "" {
-				if envPath := os.Getenv("BOTFAM_SOCKET"); envPath != "" {
-					udsPath = envPath
-				} else {
-					home, err := os.UserHomeDir()
-					if err != nil {
-						return err
-					}
-					udsPath = filepath.Join(home, ".botfam", "daemon.sock")
-					if len(udsPath) > 104 {
-						h := sha256.Sum256([]byte(home))
-						udsPath = filepath.Join("/tmp", fmt.Sprintf("bf-%s.sock", hex.EncodeToString(h[:])))
-					}
-				}
-			}
-
-			srv := server.NewServer(udsPath, tcpPort)
-			fmt.Printf("Starting botfam server UDS daemon on %s, HTTP/SSE on localhost:%d\n", udsPath, tcpPort)
-			return srv.Start(context.Background())
 		case "irc-client":
 			return fam.IrcClientCmd(os.Args[2:], os.Stdout)
 		case "irc-wait":
 			return fam.IrcWaitCmd(os.Args[2:], os.Stdout)
-		case "irc-propose":
-			return fam.IrcProposeCmd(os.Args[2:], os.Stdout)
 		case "scribe":
 			return fam.ScribeCmd(os.Args[2:], os.Stdout)
 		case "irclog2sessions":
@@ -198,38 +94,12 @@ Usage:
   botfam worktree <init|sync|register> [args]
   botfam setup <project> --agents alice,bob [--force]
   botfam session <subcommand>
-  botfam topic <subcommand>
-  botfam merge-gate --commit <sha> --proposal <id>
   botfam verify <sha> [pkgs...]
   botfam agent-docs generate|check
-  botfam server [--socket <path>] [--port <port>]
-  botfam vote --proposal <id> --verdict <verdict>
-  botfam tally --proposal <id>
-  botfam propose --proposal <id> [--quorum <quorum>] [--deadline <deadline>]
-  botfam approve --proposal <id> [--verdict <verdict>]
-  botfam merge --proposal <id>
   botfam irc-client <nick> [--server <host:port>] [--channel <channel>] [--dir <dir>] [--pass-file <file>]
   botfam irc-wait --nick <nick> [--file <path>]
-  botfam irc-propose --id <id> --summary <text> [--sha <sha>] [--quorum <q>] [--deadline <ts>] [--executor <actor>] [--as <actor>]
   botfam scribe [--server <host:port>] [--channel <channel>] [--file <path>]
   botfam irclog2sessions <chat.log>... [--out <dir>] [--gap-minutes <n>] [--channel <chan>]... [--include-open]
-
-Collab Subcommands (debugging / direct CLI):
-  botfam send --to <actor> --type <type> [--payload <json>] [--in-reply-to <id>] [--expires-at <secs>]
-  botfam recv [--match-type <type>] [--timeout <secs>]
-  botfam try-recv [--match-type <type>]
-  botfam peek [--match-type <type>]
-  botfam ack --id <id> [--outcome <json>]
-  botfam seen --id <id>
-  botfam inbox
-  botfam post --type <type> [--payload <json>]
-  botfam claim [--lease-ttl <secs>] [--task-id <id>] [--type <type>] [--suggested-owner <name>]
-  botfam complete --task-id <id> [--result <json>]
-  botfam heartbeat --task-id <id> [--lease-ttl <secs>]
-  botfam abandon --task-id <id> [--reason <text>]
-  botfam sweep
-  botfam session-append --session <slug> --body <body> [--handoff <json>]
-  botfam session-read --session <slug> [--from <actor>] [--since <ts>] [--limit <n>]
 
 Global Flags:
   --json, -j              output results as structured JSON lines

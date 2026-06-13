@@ -116,7 +116,6 @@ func ScribeCmd(args []string, out io.Writer) error {
 
 	privRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+PRIVMSG\s+(\S+)\s+:(.*)$`)
 	eventRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+(JOIN|PART|QUIT|NICK)\b\s*:?(\S*)`)
-	tallyRe := regexp.MustCompile(`^!tally\s+(?:id=)?(\S+)`)
 	inviteRe := regexp.MustCompile(`^(?i):\S+\s+INVITE\s+\S+\s+:?(\S+)$`)
 
 	// Read from socket
@@ -190,21 +189,9 @@ func ScribeCmd(args []string, out io.Writer) error {
 			_ = logFile.Sync()
 		}
 
-		// Handle !tally and !version requests on the channel
+		// Handle !version requests on the channel
 		if entry.Type == "PRIVMSG" {
-			if m := tallyRe.FindStringSubmatch(entry.Body); m != nil {
-				proposalID := m[1]
-				summary, err := TallyProposal(historyFile, proposalID)
-				if err != nil {
-					summary = fmt.Sprintf("Error calculating tally for %q: %v", proposalID, err)
-				}
-				replyTarget := entry.Target
-				if !strings.HasPrefix(replyTarget, "#") {
-					replyTarget = entry.Sender
-				}
-				cmd := fmt.Sprintf("PRIVMSG %s :%s\r\n", replyTarget, summary)
-				_, _ = conn.Write([]byte(cmd))
-			} else if strings.HasPrefix(strings.TrimSpace(entry.Body), "!version") {
+			if strings.HasPrefix(strings.TrimSpace(entry.Body), "!version") {
 				replyTarget := entry.Target
 				if !strings.HasPrefix(replyTarget, "#") {
 					replyTarget = entry.Sender
