@@ -34,6 +34,13 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"   Monitor for incoming messages using the\n" +
 	"   wake watcher `botfam irc-wait`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)\n" +
 	"   for server details and operational recipes.\n" +
+	"5. **Sending and reading.** Write lines to `scratch/irc/<name>/in`: a bare\n" +
+	"   line goes as text to your fam's main channel; `/msg <target> <text>`\n" +
+	"   messages another channel or nick; `/join <#chan>` joins a channel;\n" +
+	"   `/raw <cmd>` sends any IRC command. Replies appear in\n" +
+	"   `scratch/irc/<name>/log`. If the botfam MCP server is connected, prefer\n" +
+	"   the `irc_write` / `irc_read` / `irc_wait` tools — same semantics, no\n" +
+	"   shell approval prompts.\n" +
 	"\n" +
 	"## Repo-local Skills\n" +
 	"\n" +
