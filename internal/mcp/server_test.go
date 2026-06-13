@@ -199,17 +199,20 @@ func TestIrcWriteTool(t *testing.T) {
 	// Open FIFO for reading in a separate goroutine so it doesn't block
 	readCh := make(chan string, 1)
 	errCh := make(chan error, 1)
+	ready := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
-		// Open the FIFO in RDONLY mode
-		f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+		// Open the FIFO in RDWR mode so it returns immediately and guarantees a reader
+		f, err := os.OpenFile(fifoPath, os.O_RDWR, 0)
 		if err != nil {
 			errCh <- err
 			return
 		}
 		defer f.Close()
+
+		close(ready)
 
 		// Set a read timeout using select/context
 		lineCh := make(chan string, 1)
@@ -232,6 +235,15 @@ func TestIrcWriteTool(t *testing.T) {
 		}
 	}()
 
+	// Wait for reader to be ready before calling irc_write (O_WRONLY|O_NONBLOCK)
+	select {
+	case <-ready:
+	case err := <-errCh:
+		t.Fatalf("failed to start FIFO reader: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for FIFO reader to start")
+	}
+
 	// Call the irc_write tool using the server
 	_, err := s.callTool(context.Background(), "irc_write", map[string]any{
 		"work_dir": aliceDir,
@@ -253,16 +265,19 @@ func TestIrcWriteTool(t *testing.T) {
 	// Test writing with target parameter
 	readCh2 := make(chan string, 1)
 	errCh2 := make(chan error, 1)
+	ready2 := make(chan struct{})
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 
 	go func() {
-		f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+		f, err := os.OpenFile(fifoPath, os.O_RDWR, 0)
 		if err != nil {
 			errCh2 <- err
 			return
 		}
 		defer f.Close()
+
+		close(ready2)
 
 		lineCh := make(chan string, 1)
 		go func() {
@@ -283,6 +298,15 @@ func TestIrcWriteTool(t *testing.T) {
 			errCh2 <- fmt.Errorf("timeout waiting for FIFO read (target test)")
 		}
 	}()
+
+	// Wait for reader to be ready before calling irc_write (O_WRONLY|O_NONBLOCK)
+	select {
+	case <-ready2:
+	case err := <-errCh2:
+		t.Fatalf("failed to start FIFO reader 2: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for FIFO reader 2 to start")
+	}
 
 	_, err = s.callTool(context.Background(), "irc_write", map[string]any{
 		"work_dir": aliceDir,
