@@ -288,7 +288,11 @@ func (g *GiteaVersionControl) MergeNoFF(ctx context.Context, dir, sha, message s
 
 	// Resolve the new HEAD of the target base branch on the Gitea remote
 	ref := "refs/heads/" + pr.Base.Ref
-	lsOut, err := gitOne(g.WorkDir, "ls-remote", "gitea", ref)
+	remoteName := g.Client.Remote
+	if remoteName == "" {
+		remoteName = "gitea"
+	}
+	lsOut, err := gitOne(g.WorkDir, "ls-remote", remoteName, ref)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve Gitea remote branch HEAD: %w", err)
 	}

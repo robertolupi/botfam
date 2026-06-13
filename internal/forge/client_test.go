@@ -162,3 +162,68 @@ func TestClient_MergePR(t *testing.T) {
 		t.Fatalf("failed to merge PR: %v", err)
 	}
 }
+
+func TestParseGitRemoteURL(t *testing.T) {
+	tests := []struct {
+		url       string
+		wantBase  string
+		wantOwner string
+		wantRepo  string
+		wantErr   bool
+	}{
+		{
+			url:       "http://gitea:3000/botfam/botfam.git",
+			wantBase:  "http://gitea:3000/",
+			wantOwner: "botfam",
+			wantRepo:  "botfam",
+			wantErr:   false,
+		},
+		{
+			url:       "git@github.com:robertolupi/botfam.git",
+			wantBase:  "https://github.com/",
+			wantOwner: "robertolupi",
+			wantRepo:  "botfam",
+			wantErr:   false,
+		},
+		{
+			url:       "git@gitea:botfam/botfam.git",
+			wantBase:  "http://gitea:3000/",
+			wantOwner: "botfam",
+			wantRepo:  "botfam",
+			wantErr:   false,
+		},
+		{
+			url:       "ssh://git@gitea/botfam/botfam.git",
+			wantBase:  "http://gitea:3000/",
+			wantOwner: "botfam",
+			wantRepo:  "botfam",
+			wantErr:   false,
+		},
+		{
+			url:       "ssh://git@github.com/owner/repo.git",
+			wantBase:  "https://github.com/",
+			wantOwner: "owner",
+			wantRepo:  "repo",
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			base, owner, repo, err := parseGitRemoteURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseGitRemoteURL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if base != tt.wantBase {
+				t.Errorf("base = %q, want %q", base, tt.wantBase)
+			}
+			if owner != tt.wantOwner {
+				t.Errorf("owner = %q, want %q", owner, tt.wantOwner)
+			}
+			if repo != tt.wantRepo {
+				t.Errorf("repo = %q, want %q", repo, tt.wantRepo)
+			}
+		})
+	}
+}

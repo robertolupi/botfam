@@ -22,6 +22,7 @@ type Client struct {
 	Owner   string // e.g. "botfam"
 	Repo    string // e.g. "botfam"
 	Token   string
+	Remote  string
 }
 
 type PullRequest struct {
@@ -98,7 +99,11 @@ func parseGitRemoteURL(rawURL string) (baseURL, owner, repo string, err error) {
 		if idx := strings.Index(hostPart, ":"); idx != -1 {
 			hostPart = hostPart[:idx]
 		}
-		baseURL = fmt.Sprintf("https://%s/", hostPart)
+		if hostPart == "gitea" {
+			baseURL = "http://gitea:3000/"
+		} else {
+			baseURL = fmt.Sprintf("https://%s/", hostPart)
+		}
 		return baseURL, owner, repo, nil
 	}
 
@@ -119,7 +124,11 @@ func parseGitRemoteURL(rawURL string) (baseURL, owner, repo string, err error) {
 		owner = pathParts[0]
 		repo = pathParts[1]
 
-		baseURL = fmt.Sprintf("https://%s/", hostPart)
+		if hostPart == "gitea" {
+			baseURL = "http://gitea:3000/"
+		} else {
+			baseURL = fmt.Sprintf("https://%s/", hostPart)
+		}
 		return baseURL, owner, repo, nil
 	}
 
@@ -142,15 +151,23 @@ func NewClient(workDir string, actor string) (*Client, error) {
 		}
 	}
 
-	if baseURL == "" || owner == "" || repo == "" {
-		remoteName := os.Getenv("BOTFAM_FORGE_REMOTE")
-		if remoteName == "" && famTOMLPath != "" {
+	remoteName := os.Getenv("BOTFAM_FORGE_REMOTE")
+	if remoteName == "" && famTOMLPath != "" {
+		remoteName = readConfigValueFromFamTOML(famTOMLPath, "forge_remote", "forge-remote")
+	}
+	if remoteName == "" {
+		if famTOMLPath == "" {
+			famTOMLPath = resolveFamTOMLPath(workDir)
+		}
+		if famTOMLPath != "" {
 			remoteName = readConfigValueFromFamTOML(famTOMLPath, "forge_remote", "forge-remote")
 		}
-		if remoteName == "" {
-			remoteName = "gitea"
-		}
+	}
+	if remoteName == "" {
+		remoteName = "gitea"
+	}
 
+	if baseURL == "" || owner == "" || repo == "" {
 		cmd := exec.Command("git", "config", "--get", fmt.Sprintf("remote.%s.url", remoteName))
 		cmd.Dir = workDir
 		var out bytes.Buffer
@@ -234,6 +251,7 @@ func NewClient(workDir string, actor string) (*Client, error) {
 		Owner:   owner,
 		Repo:    repo,
 		Token:   token,
+		Remote:  remoteName,
 	}, nil
 }
 
