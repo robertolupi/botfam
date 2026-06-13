@@ -1,7 +1,10 @@
 package forge
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -94,7 +98,7 @@ func parseGitRemoteURL(rawURL string) (baseURL, owner, repo string, err error) {
 		if idx := strings.Index(hostPart, ":"); idx != -1 {
 			hostPart = hostPart[:idx]
 		}
-		baseURL = fmt.Sprintf("http://%s:3000/", hostPart)
+		baseURL = fmt.Sprintf("https://%s/", hostPart)
 		return baseURL, owner, repo, nil
 	}
 
@@ -115,7 +119,7 @@ func parseGitRemoteURL(rawURL string) (baseURL, owner, repo string, err error) {
 		owner = pathParts[0]
 		repo = pathParts[1]
 
-		baseURL = fmt.Sprintf("http://%s:3000/", hostPart)
+		baseURL = fmt.Sprintf("https://%s/", hostPart)
 		return baseURL, owner, repo, nil
 	}
 
@@ -128,8 +132,26 @@ func NewClient(workDir string, actor string) (*Client, error) {
 	repo := os.Getenv("GITEA_REPO")
 	token := os.Getenv("GITEA_TOKEN")
 
+	var famTOMLPath string
 	if baseURL == "" || owner == "" || repo == "" {
-		cmd := exec.Command("git", "config", "--get", "remote.gitea.url")
+		famTOMLPath = resolveFamTOMLPath(workDir)
+		if famTOMLPath != "" {
+			if baseURL == "" {
+				baseURL = readConfigValueFromFamTOML(famTOMLPath, "forge_url", "forge-url")
+			}
+		}
+	}
+
+	if baseURL == "" || owner == "" || repo == "" {
+		remoteName := os.Getenv("BOTFAM_FORGE_REMOTE")
+		if remoteName == "" && famTOMLPath != "" {
+			remoteName = readConfigValueFromFamTOML(famTOMLPath, "forge_remote", "forge-remote")
+		}
+		if remoteName == "" {
+			remoteName = "gitea"
+		}
+
+		cmd := exec.Command("git", "config", "--get", fmt.Sprintf("remote.%s.url", remoteName))
 		cmd.Dir = workDir
 		var out bytes.Buffer
 		cmd.Stdout = &out
@@ -150,13 +172,13 @@ func NewClient(workDir string, actor string) (*Client, error) {
 	}
 
 	if baseURL == "" {
-		baseURL = "http://gitea:3000/"
+		return nil, errors.New("cannot resolve Gitea baseURL: remote URL could not be resolved and no forge_url is configured in fam.toml")
 	}
 	if owner == "" {
-		owner = "botfam"
+		return nil, errors.New("cannot resolve Gitea owner")
 	}
 	if repo == "" {
-		repo = "botfam"
+		return nil, errors.New("cannot resolve Gitea repo")
 	}
 
 	if !strings.HasSuffix(baseURL, "/") {
@@ -323,4 +345,72 @@ func (c *Client) MergePR(prNum int, style string, msg string) error {
 
 	_, err = c.request("POST", path, b)
 	return err
+}
+
+func resolveFamTOMLPath(workDir string) string {
+	if root := os.Getenv("COLLAB_ROOT"); root != "" {
+		return filepath.Join(root, "fam.toml")
+	}
+	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+	cmd.Dir = workDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(l)
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	id := hex.EncodeToString(sum[:])[:12]
+	name := "fam-" + id
+	if suffix := os.Getenv("BOTFAM_FAM"); suffix != "" {
+		var cleaned []rune
+		for _, char := range suffix {
+			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
+				cleaned = append(cleaned, char)
+			}
+		}
+		name += "-" + string(cleaned)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".botfam", name, "fam.toml")
+}
+
+func readConfigValueFromFamTOML(path string, keys ...string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		for _, wantKey := range keys {
+			if k == wantKey {
+				v = strings.TrimSpace(v)
+				if strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
+					return v[1 : len(v)-1]
+				}
+				if strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'") {
+					return v[1 : len(v)-1]
+				}
+				return v
+			}
+		}
+	}
+	return ""
 }

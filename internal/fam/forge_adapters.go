@@ -229,7 +229,19 @@ func (g *GitVersionControl) MainCheckout(ctx context.Context) (string, error) {
 }
 
 func (g *GitVersionControl) MergeNoFF(ctx context.Context, dir, sha, message string) (string, error) {
-	_, err := gitOutput(dir, "-c", "user.name=agy", "-c", "user.email=roberto.lupi+agy@gmail.com", "merge", "--no-ff", "-m", message, sha)
+	actorName, _ := gitOne(g.WorkDir, "config", "user.name")
+	actorEmail, _ := gitOne(g.WorkDir, "config", "user.email")
+	actorName = strings.TrimSpace(actorName)
+	actorEmail = strings.TrimSpace(actorEmail)
+
+	if actorName == "" {
+		actorName = "operator"
+	}
+	if actorEmail == "" {
+		actorEmail = "operator@localhost"
+	}
+
+	_, err := gitOutput(dir, "-c", "user.name="+actorName, "-c", "user.email="+actorEmail, "merge", "--no-ff", "-m", message, sha)
 	if err != nil {
 		return "", err
 	}
