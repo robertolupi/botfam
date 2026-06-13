@@ -1,6 +1,6 @@
 ---
 name: external-review
-description: Use when running a multi-model external review of a botfam session, doc, or change — fan the canonical prompt across configured models with tools/external-review.sh, keep the raw reviews out-of-repo, then spawn a consolidation subagent to merge them into one unified review.
+description: Use when running a multi-model external review of a botfam session, doc, or change — fan the canonical prompt across configured models with botfam external-review, keep the raw reviews out-of-repo, then spawn a consolidation subagent to merge them into one unified review.
 ---
 
 # External Review in the botfam Repo
@@ -11,7 +11,7 @@ verdict — not N raw transcripts dumped into your context.
 
 The workflow has two stages on purpose:
 
-1. **Fan out** with `tools/external-review.sh`, which writes one raw review per
+1. **Fan out** with `botfam external-review`, which writes one raw review per
    model **out-of-repo** under `~/.botfam/reviews/<ts>-<slug>/`.
 2. **Consolidate** by spawning a subagent that reads those raw files and writes
    a single unified review. The raw reviews stay out of the main agent's
@@ -28,25 +28,24 @@ reading.
 
 ## Stage 1 — fan out
 
-Run the script with at least one material file and at least one model. Models
+Run the command with at least one material file and at least one model. Models
 are chosen entirely via flags — the script bakes in no defaults, because the
 operator knows the current best model names and the script does not.
 
 ```sh
-tools/external-review.sh [options] MATERIAL [MATERIAL...]
-tools/external-review.sh --pr <index> [options]   # review a Gitea PR directly
+botfam external-review [options] MATERIAL [MATERIAL...]
+botfam external-review --pr <index> [options]   # review a Gitea PR directly
 ```
 
 **Reviewing a Gitea PR (`--pr <index>`).** Instead of local files, the script
 pulls the PR's metadata, description, discussion comments, reviews, and unified
 diff via the Gitea API — host/owner/repo are resolved from the active git
-remote and the token comes from `lib-botfam.sh`
-(`~/.botfam/token-<fam>-<actor>`). It assembles them into one material doc and
-slugs the out dir `pr-<index>`. Use this to fan an external review across a
-code change under review rather than a session or doc:
+remote and the token from `~/.botfam/token-<fam>-<actor>`. It assembles them
+into one material doc and slugs the out dir `pr-<index>`. Use this to fan an
+external review across a code change under review rather than a session or doc:
 
 ```sh
-tools/external-review.sh --pr 34 --gemini gemini-2.5-pro --openai gpt-5
+botfam external-review --pr 34 --gemini gemini-2.5-pro --openai gpt-5
 ```
 
 Provider/model selection (repeatable — pass as many as you like):
@@ -68,22 +67,21 @@ Options:
   derived from the first material file's basename (or `pr-<index>` with
   `--pr`).
 - `--ollama-host URL` — default `http://localhost:11434`.
-- `--gemini-api-version V` — default `v1beta`.
 - `-h` | `--help` — print usage.
 
 Example — review a session against two local models:
 
 ```sh
-tools/external-review.sh \
+botfam external-review \
   --ollama qwen3.5:35b \
   --ollama gemma4:31b \
   doc/collab/sessions/2026-06-12-doc-update/session.md
 ```
 
-The script requires `jq` and `curl`. It runs `set +x` and reads
-`GEMINI_API_KEY` / `OPENAI_API_KEY` from the environment only, never printing
-or writing them — do not change that. Unreachable ollama or unset API keys are
-skipped with a warning, not a hard failure.
+`botfam external-review` is a Go subcommand: all providers are reached over the
+OpenAI-compatible chat API (one client). It reads `GEMINI_API_KEY` /
+`OPENAI_API_KEY` from the environment only and never prints them. Unreachable
+ollama or an unset API key is skipped with a warning, not a hard failure.
 
 ### What stage 1 produces
 
