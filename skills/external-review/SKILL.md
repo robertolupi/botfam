@@ -110,7 +110,7 @@ material path(s). Instruct it to:
 - **Flag wrong-premise / confabulation.** A reviewer working from stale ground
   truth, or one that fabricated facts not present in the material, produces
   confidently wrong advice (verified failure mode — see the wiki's
-  `reviews/2026-06-11-meta` page). Call these out and discount them rather than
+  `review-2026-06-11-meta` page). Call these out and discount them rather than
   averaging them in.
 - **Preserve the canonical section shape** from the prompt — what landed
   cleanly, pain points, blind spots, proposals, action items, open questions —
