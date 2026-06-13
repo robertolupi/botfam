@@ -28,10 +28,19 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands\n" +
 	"   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.\n" +
 	"4. **Connect to the IRC server immediately.** To join the conversation, run\n" +
-	"   `botfam irc-client <name>` (with `--pass-file ~/.botfam/irc-pass-<name>` if\n" +
-	"   registered) as a background task. Monitor for incoming messages using the\n" +
+	"   `botfam irc-client <name>` as a background task. A registered nick's pass\n" +
+	"   file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the\n" +
+	"   legacy `~/.botfam/irc-pass-<name>`); pass `--pass-file` to override.\n" +
+	"   Monitor for incoming messages using the\n" +
 	"   wake watcher `botfam irc-wait`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)\n" +
 	"   for server details and operational recipes.\n" +
+	"5. **Sending and reading.** Write lines to `scratch/irc/<name>/in`: a bare\n" +
+	"   line goes as text to your fam's main channel; `/msg <target> <text>`\n" +
+	"   messages another channel or nick; `/join <#chan>` joins a channel;\n" +
+	"   `/raw <cmd>` sends any IRC command. Replies appear in\n" +
+	"   `scratch/irc/<name>/log`. If the botfam MCP server is connected, prefer\n" +
+	"   the `irc_write` / `irc_read` / `irc_wait` tools — same semantics, no\n" +
+	"   shell approval prompts.\n" +
 	"\n" +
 	"## Repo-local Skills\n" +
 	"\n" +

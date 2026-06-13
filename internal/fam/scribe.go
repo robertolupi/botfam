@@ -26,8 +26,10 @@ type HistoryEntry struct {
 // ScribeCmd executes the Go-based Scribe IRC bot.
 func ScribeCmd(args []string, out io.Writer) error {
 	var server, channel, historyFile string
+	mainChannel, ccrepChannel := FamChannels(LoadFamRegistry("."))
 	server = "localhost:6667"
-	channel = "#botfam,#ccrep"
+	channel = mainChannel + "," + ccrepChannel
+	nick := "scribe"
 
 	historyFile = os.Getenv("COLLAB_HISTORY")
 
@@ -56,16 +58,26 @@ func ScribeCmd(args []string, out io.Writer) error {
 			if i < len(args) {
 				historyFile = args[i]
 			}
+		case strings.HasPrefix(arg, "--nick="):
+			nick = strings.TrimPrefix(arg, "--nick=")
+		case arg == "--nick":
+			i++
+			if i < len(args) {
+				nick = args[i]
+			}
 		default:
 			return fmt.Errorf("unknown scribe argument %q", arg)
 		}
 	}
 
+	if nick == "" {
+		return errors.New("--nick requires a non-empty value")
+	}
+
 	if historyFile == "" {
-		info, err := (Resolver{WorkDir: "."}).Resolve()
-		if err == nil && info.Root != "" {
-			historyFile = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
-		} else {
+		var err error
+		historyFile, err = DefaultHistoryPath(".")
+		if err != nil {
 			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
 		}
 	}
@@ -87,7 +99,7 @@ func ScribeCmd(args []string, out io.Writer) error {
 	}
 	defer logFile.Close()
 
-	fmt.Fprintf(out, "* Scribe bot starting. Server: %s, Channel: %s, File: %s\n", server, channel, historyFile)
+	fmt.Fprintf(out, "* Scribe bot starting. Server: %s, Nick: %s, Channel: %s, File: %s\n", server, nick, channel, historyFile)
 
 	// Connect to IRC server
 	conn, err := net.DialTimeout("tcp", server, 10*time.Second)
@@ -96,8 +108,8 @@ func ScribeCmd(args []string, out io.Writer) error {
 	}
 	defer conn.Close()
 
-	// Send initial commands (using stable nick)
-	nick := "scribe"
+	// Send initial commands (nick is stable per fam: bare "scribe" for the
+	// original botfam deployment, scribe-<slug> for additional fams)
 	_, _ = fmt.Fprintf(conn, "NICK %s\r\n", nick)
 	_, _ = fmt.Fprintf(conn, "USER %s 0 * :botfam scribe bot\r\n", nick)
 	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", channel)

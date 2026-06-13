@@ -100,10 +100,9 @@ func MergeGateCmd(args []string, out io.Writer) error {
 
 	historyPath := os.Getenv("COLLAB_HISTORY")
 	if historyPath == "" {
-		info, err := (Resolver{WorkDir: "."}).Resolve()
-		if err == nil && info.Root != "" {
-			historyPath = filepath.Join(info.Root, "botfam-collab", "history.jsonl")
-		} else {
+		var err error
+		historyPath, err = DefaultHistoryPath(".")
+		if err != nil {
 			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
 		}
 	}
@@ -292,6 +291,38 @@ func newCcrepEvent(typ, proposalID, commitSHA, verdict, authIdentity, claimedRev
 	}
 }
 
+func normalizeReviewer(nick string, roster []string) string {
+	// Trim any "-cli" suffix first (since both agy-dc-cli and agy-cli exist)
+	nick = strings.TrimSuffix(nick, "-cli")
+
+	// Exact roster match wins first
+	for _, name := range roster {
+		if nick == name {
+			return name
+		}
+	}
+
+	// Try to match roster names as prefixes followed by a hyphen
+	// Match longest roster name first to avoid prefix conflicts (e.g. "alice" vs "alice-extra")
+	var sortedRoster []string
+	sortedRoster = append(sortedRoster, roster...)
+	sort.Slice(sortedRoster, func(i, j int) bool {
+		return len(sortedRoster[i]) > len(sortedRoster[j])
+	})
+
+	for _, name := range sortedRoster {
+		if strings.HasPrefix(nick, name+"-") {
+			// Ensure there is a non-empty suffix after the hyphen
+			suffix := strings.TrimPrefix(nick, name+"-")
+			if len(suffix) > 0 {
+				return name
+			}
+		}
+	}
+
+	return nick
+}
+
 func parseBangLine(body string) (map[string]string, string) {
 	if !strings.HasPrefix(body, "!") {
 		return nil, ""
@@ -331,6 +362,16 @@ func parseBangLine(body string) (map[string]string, string) {
 func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent, map[string]bool, int, error) {
 	var events []CcrepEvent
 	skipped := 0
+
+	// Resolve roster from fam.toml
+	resolverInfo, err := (Resolver{WorkDir: "."}).Resolve()
+	var roster []string
+	if err == nil && resolverInfo.Root != "" {
+		reg, err := ReadRegistry(filepath.Join(resolverInfo.Root, "fam.toml"))
+		if err == nil {
+			roster = reg.Roster
+		}
+	}
 
 	file, err := os.Open(historyPath)
 	if err != nil {
@@ -455,13 +496,16 @@ func CollectIrcCcrepEvents(historyPath string, proposalID string) ([]CcrepEvent,
 			ts = float64(t.UnixNano()) / 1e9
 		}
 
-		events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, entry.Sender, claimed, ts, quorum, deadline))
+		sender := normalizeReviewer(entry.Sender, roster)
+		claimedReviewer := normalizeReviewer(claimed, roster)
+		events = append(events, newCcrepEvent(typ, proposalID, commitSHA, verdict, sender, claimedReviewer, ts, quorum, deadline))
 	}
 
 	present := make(map[string]bool)
 	for nick, chans := range joined {
 		if len(chans) > 0 {
-			present[nick] = true
+			normalized := normalizeReviewer(nick, roster)
+			present[normalized] = true
 		}
 	}
 

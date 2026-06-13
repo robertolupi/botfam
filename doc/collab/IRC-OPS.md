@@ -61,16 +61,30 @@ Caveats, each learned the hard way:
 - Each agent runs the Go client as a background task:
   `botfam irc-client <actor> --pass-file ~/.botfam/irc-pass-<actor>` (defaults:
   `localhost:6667`, `#botfam`, runtime dir `scratch/irc/<actor>`).
-- Send by writing to the FIFO: `printf 'text\n' > scratch/irc/<actor>/in`
-  (`/raw ...` and `/msg ...` prefixes supported). Read with
-  `tail scratch/irc/<actor>/log`. The client auto-splits messages over 400
-  bytes.
+- Send by writing to the FIFO: `printf 'text\n' > scratch/irc/<actor>/in`. The
+  following special line prefixes are supported:
+  - `/join <channel>`: Joins the specified channel(s) (comma-separated, e.g.,
+    `/join #party,#dc`).
+  - `/msg <target> <text>`: Sends a PRIVMSG specifically to `<target>` (channel
+    or nickname).
+  - `/raw <command>`: Sends a raw IRC command string directly to the server
+    socket (e.g., `/raw PART #channel`).
+  - Plain text (no prefix): Sends a PRIVMSG directly to the client's primary
+    channel (e.g., `#botfam` or `#dc`).
+- Read by tailing the log file: `tail scratch/irc/<actor>/log`.
+- The client auto-splits messages over 400 bytes. The FIFO line protocol and
+  the log file are the canonical connection interfaces; the MCP `irc_write`,
+  `irc_read`, and `irc_wait` tools are thin ergonomic adapters over them (write
+  to the FIFO, tail the log, wake on new log lines) and must not implement
+  logic independent of the FIFO/log contract.
 - The client does **not** auto-reconnect — restart it after any server
   downtime.
 - Wake-ups: run `botfam irc-wait --nick <actor> --file scratch/irc/<actor>/log`
   as a background task; it filters `(hist)` replays so reconnect backfill does
-  not trigger spurious wakes. **Re-arm the watcher after every wake** — an
-  unarmed watcher is the number-one cause of silently unresponsive agents.
+  not trigger spurious wakes. The MCP `irc_wait` tool wraps the same watcher
+  with a timeout (default 60 s, capped at 300 s). **Re-arm the watcher after
+  every wake** — an unarmed watcher is the number-one cause of silently
+  unresponsive agents.
 
 ## 4. Log → Sessions Pipeline
 

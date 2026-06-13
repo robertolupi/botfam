@@ -664,4 +664,65 @@ func TestMergeGateDeadline(t *testing.T) {
 	}
 }
 
+func TestCliSuffixNormalization(t *testing.T) {
+	path := setupMergeGateHistory(t)
+	proposalID := "prop-cli-norm"
+	commit1 := "commit-1111111111111111111111111111111111111111"
+
+	// Propose from a sender with -cli suffix
+	appendRawHistoryEntry(t, path, "alice-cli", fmt.Sprintf("!propose id=%s sha=%s quorum=any summary=CLI normalization test", proposalID, commit1))
+
+	// Vote to approve from the same base actor name but without -cli
+	appendRawHistoryEntry(t, path, "alice", fmt.Sprintf("!vote id=%s sha=%s verdict=approve", proposalID, commit1))
+
+	// The merge gate should fail because the proposer ("alice-cli" -> normalized to "alice")
+	// and the voter ("alice") are normalized to the same identity, which is NOT independent.
+	_, err := runMergeGate(t, commit1, proposalID)
+	if err == nil || !strings.Contains(err.Error(), "independent approval") {
+		t.Errorf("expected no independent approvals error, got %v", err)
+	}
+
+	// Vote to approve from a different sender with -cli suffix ("bob-cli" -> normalized to "bob")
+	appendRawHistoryEntry(t, path, "bob-cli", fmt.Sprintf("!vote id=%s sha=%s verdict=approve", proposalID, commit1))
+
+	// Now it should pass because "bob" is independent of "alice"
+	_, err = runMergeGate(t, commit1, proposalID)
+	if err != nil {
+		t.Errorf("expected success after independent approval, got %v", err)
+	}
+}
+
+func TestNormalizeReviewer(t *testing.T) {
+	roster := []string{"alice", "alice-extra", "bob", "bob-cli-test"}
+
+	tests := []struct {
+		nick     string
+		expected string
+	}{
+		{"alice", "alice"},
+		{"alice-cli", "alice"},
+		{"alice-dc", "alice"},
+		{"alice-dc-cli", "alice"},
+		{"alice-extra", "alice-extra"},
+		{"alice-extra-dc", "alice-extra"},
+		{"bob", "bob"},
+		{"bob-cli", "bob"},
+		{"bob-dc", "bob"},
+		// Suffix match check: literal match wins first
+		{"bob-cli-test", "bob-cli-test"},
+		// Suffix match check: check hyphen empty remainder
+		{"alice-", "alice-"},
+		// Nick that is not in the roster and has no suffix matching roster
+		{"charlie", "charlie"},
+		{"charlie-dc", "charlie-dc"},
+	}
+
+	for _, tc := range tests {
+		got := normalizeReviewer(tc.nick, roster)
+		if got != tc.expected {
+			t.Errorf("normalizeReviewer(%q) = %q, expected %q", tc.nick, got, tc.expected)
+		}
+	}
+}
+
 

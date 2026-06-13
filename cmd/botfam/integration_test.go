@@ -180,12 +180,16 @@ func startBotfam(t *testing.T, root, actor string) *botClient {
 	t.Helper()
 
 	testServerOnce.Do(func() {
-		absScratch, err := filepath.Abs("../../scratch")
+		// Use the system temp dir to keep the socket path short (Darwin 104 char
+		// limit); the repo checkout itself may live under a deep worktree path.
+		// No cleanup: the socket is shared by every test in the package via
+		// testServerOnce, so removing it when the first test ends would break
+		// the rest.
+		udsDir, err := os.MkdirTemp("", "bf-int")
 		if err != nil {
-			t.Fatalf("failed to resolve scratch path: %v", err)
+			t.Fatalf("failed to create temp dir for socket: %v", err)
 		}
-		_ = os.MkdirAll(absScratch, 0755)
-		testSocketPath = filepath.Join(absScratch, fmt.Sprintf("integration-%d.sock", time.Now().UnixNano()))
+		testSocketPath = filepath.Join(udsDir, "s.sock")
 
 		srv := server.NewServer(testSocketPath, 0)
 		ctx := context.Background()
@@ -428,14 +432,14 @@ func TestIntegrationSessionsOverStdio(t *testing.T) {
 	binPath := filepath.Join(root, "botfam")
 	buildBotfam(t, binPath)
 
-	absScratch, err := filepath.Abs("../../scratch")
+	// Use the system temp dir to keep the socket path short (Darwin 104 char
+	// limit); the repo checkout itself may live under a deep worktree path.
+	udsDir, err := os.MkdirTemp("", "bf-stdio-sess")
 	if err != nil {
-		t.Fatalf("failed to resolve scratch path: %v", err)
+		t.Fatalf("failed to create temp dir for socket: %v", err)
 	}
-	_ = os.MkdirAll(absScratch, 0755)
-	testSocketPath := filepath.Join(absScratch, fmt.Sprintf("bf-stdio-sess-%d.sock", time.Now().UnixNano()))
-	_ = os.Remove(testSocketPath)
-	t.Cleanup(func() { _ = os.Remove(testSocketPath) })
+	t.Cleanup(func() { _ = os.RemoveAll(udsDir) })
+	testSocketPath := filepath.Join(udsDir, "s.sock")
 	srv := server.NewServer(testSocketPath, 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1493,12 +1497,16 @@ func TestIntegrationSessionConstitution(t *testing.T) {
 	cmdVoteCharlie := exec.Command(binPath, "vote", "--proposal", "prop1", "--verdict", "reject")
 	cmdVoteCharlie.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath, "COLLAB_ACTOR=charlie")
 	cmdVoteCharlie.Dir = charlieWT
+	var charlieBuf bytes.Buffer
+	cmdVoteCharlie.Stdout = &charlieBuf
+	cmdVoteCharlie.Stderr = &charlieBuf
 	if err := cmdVoteCharlie.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer cmdVoteCharlie.Process.Kill()
 
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+	t.Logf("charlie vote output:\n%s", charlieBuf.String())
 
 	cmdTally2 := exec.Command(binPath, "tally", "--proposal", "prop1")
 	cmdTally2.Env = append(os.Environ(), "COLLAB_ROOT="+gitDir, "BOTFAM_SOCKET="+udsPath)

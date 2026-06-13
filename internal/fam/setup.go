@@ -12,9 +12,11 @@ import (
 
 type Registry struct {
 	Name         string
+	Slug         string
 	RootSet      []string
 	Origin       string
 	Roster       []string
+	Channels     []string
 	RepoPaths    []string
 	ObjectStores []string
 	CreatedAt    string
@@ -147,6 +149,8 @@ func ReadRegistry(path string) (Registry, error) {
 		switch k {
 		case "name":
 			reg.Name = parseString(v)
+		case "slug":
+			reg.Slug = parseString(v)
 		case "origin":
 			reg.Origin = parseString(v)
 		case "created_at":
@@ -155,6 +159,8 @@ func ReadRegistry(path string) (Registry, error) {
 			reg.RootSet = parseArray(v)
 		case "roster":
 			reg.Roster = parseArray(v)
+		case "channels":
+			reg.Channels = parseArray(v)
 		case "repo_paths":
 			reg.RepoPaths = parseArray(v)
 		case "object_stores":
@@ -167,9 +173,15 @@ func ReadRegistry(path string) (Registry, error) {
 func WriteRegistry(path string, reg Registry) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "name = %q\n", reg.Name)
+	if reg.Slug != "" {
+		fmt.Fprintf(&b, "slug = %q\n", reg.Slug)
+	}
 	fmt.Fprintf(&b, "created_at = %q\n", reg.CreatedAt)
 	writeArray(&b, "root_set", reg.RootSet)
 	writeArray(&b, "roster", reg.Roster)
+	if len(reg.Channels) > 0 {
+		writeArray(&b, "channels", reg.Channels)
+	}
 	writeArray(&b, "repo_paths", reg.RepoPaths)
 	writeArray(&b, "object_stores", reg.ObjectStores)
 	tmp := path + ".tmp"

@@ -19,7 +19,7 @@ import (
 func IrcProposeCmd(args []string, out io.Writer) error {
 	var id, sha, quorum, deadline, executor, summary, as string
 	server := "localhost:6667"
-	channel := "#botfam"
+	channel, _ := FamChannels(LoadFamRegistry("."))
 	quorum = "majority"
 
 	for i := 0; i < len(args); i++ {

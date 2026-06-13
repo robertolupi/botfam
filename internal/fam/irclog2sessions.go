@@ -181,10 +181,10 @@ func sessionTitle(session []ircEvent) string {
 	return ""
 }
 
-func sessionDirname(channel string, session []ircEvent, loc *time.Location, taken map[string]bool) string {
+func sessionDirname(channel, mainChannel string, session []ircEvent, loc *time.Location, taken map[string]bool) string {
 	start := session[0].ts.In(loc)
 	chanSuffix := ""
-	if channel != "#botfam" {
+	if channel != mainChannel {
 		chanSuffix = "-" + strings.TrimLeft(channel, "#")
 	}
 	name := ""
@@ -383,6 +383,9 @@ func IrcLog2SessionsCmd(args []string, out io.Writer) error {
 	sort.Strings(chans)
 
 	written, skippedOpen := 0, 0
+	// Sessions on the fam's main channel get no dirname suffix; every other
+	// channel is suffixed with its name.
+	mainChannel, _ := FamChannels(LoadFamRegistry("."))
 	taken := map[string]bool{}
 	for _, channel := range chans {
 		var chanEvents []ircEvent
@@ -399,7 +402,7 @@ func IrcLog2SessionsCmd(args []string, out io.Writer) error {
 				skippedOpen++
 				continue
 			}
-			dir := filepath.Join(outDir, sessionDirname(channel, session, loc, taken))
+			dir := filepath.Join(outDir, sessionDirname(channel, mainChannel, session, loc, taken))
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return err
 			}
