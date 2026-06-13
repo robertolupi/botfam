@@ -252,11 +252,29 @@ func cloneWiki(repoRoot, wtPath string, out io.Writer) {
 		fmt.Fprintf(out, "  wiki already present: %s\n", dest)
 		return
 	}
+
+	// Read git identity config from the worktree to replicate in the cloned wiki repo.
+	name, _ := gitOne(wtPath, "config", "user.name")
+	email, _ := gitOne(wtPath, "config", "user.email")
+	name = strings.TrimSpace(name)
+	email = strings.TrimSpace(email)
+
 	if _, err := gitOutput(repoRoot, "clone", wikiURL, dest); err != nil {
 		fmt.Fprintf(out, "  warning: could not clone wiki %s: %v\n", wikiURL, err)
 		return
 	}
 	fmt.Fprintf(out, "  cloned wiki into %s\n", dest)
+
+	if name != "" {
+		if _, err := gitOutput(dest, "config", "user.name", name); err != nil {
+			fmt.Fprintf(out, "  warning: could not configure wiki user.name: %v\n", err)
+		}
+	}
+	if email != "" {
+		if _, err := gitOutput(dest, "config", "user.email", email); err != nil {
+			fmt.Fprintf(out, "  warning: could not configure wiki user.email: %v\n", err)
+		}
+	}
 }
 
 func writeClaudeSettings(checkout string) error {
