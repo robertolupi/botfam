@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/spf13/cobra"
 )
 
 // ExtractOptions holds flags for the session extract command.
@@ -27,64 +28,40 @@ type ExtractOptions struct {
 	SnapshotTimestamp string
 }
 
+// sessionExtract is the thin args/io entry point retained for tests; it builds
+// the Cobra command and runs it against args.
 func sessionExtract(args []string, out io.Writer) error {
-	opts := ExtractOptions{
-		Redact: true,
-	}
+	return runCobra(newSessionExtractCmd(), args, out)
+}
 
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		need := func() (string, error) {
-			i++
-			if i >= len(args) {
-				return "", fmt.Errorf("%s requires a value", a)
-			}
-			return args[i], nil
-		}
-		switch a {
-		case "--milestone":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			opts.Milestone = v
-		case "--out":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			opts.Out = v
-		case "--since":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			opts.Since = v
-		case "--until":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			opts.Until = v
-		case "--snapshot-timestamp":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			opts.SnapshotTimestamp = v
-		case "--redact":
-			opts.Redact = true
-		case "--no-redact":
-			opts.Redact = false
-		case "--interaction-only":
-			opts.InteractionOnly = true
-		case "--with-diffs":
-			opts.WithDiffs = true
-		default:
-			return fmt.Errorf("unknown argument %q", a)
-		}
+// newSessionExtractCmd builds the `botfam session extract` Cobra command.
+func newSessionExtractCmd() *cobra.Command {
+	var opts ExtractOptions
+	var noRedact bool
+	c := &cobra.Command{
+		Use:           "extract --milestone <title-or-id>",
+		Short:         "Extract a milestone's chronological session timeline for review",
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.Redact = opts.Redact && !noRedact
+			return extractSession(opts, cmd.OutOrStdout())
+		},
 	}
+	c.Flags().StringVar(&opts.Milestone, "milestone", "", "milestone title or numeric ID (required)")
+	c.Flags().StringVar(&opts.Out, "out", "", "output file path (default: stdout)")
+	c.Flags().StringVar(&opts.Since, "since", "", "only include events at/after this RFC3339 timestamp")
+	c.Flags().StringVar(&opts.Until, "until", "", "only include events at/before this RFC3339 timestamp")
+	c.Flags().StringVar(&opts.SnapshotTimestamp, "snapshot-timestamp", "", "freeze the timeline at this RFC3339 timestamp for reproducibility")
+	c.Flags().BoolVar(&opts.Redact, "redact", true, "scrub secrets/paths before output")
+	c.Flags().BoolVar(&noRedact, "no-redact", false, "disable redaction (trusts the input)")
+	c.Flags().BoolVar(&opts.InteractionOnly, "interaction-only", false, "omit the technical diff summary")
+	c.Flags().BoolVar(&opts.WithDiffs, "with-diffs", false, "append full raw diffs instead of a summary")
+	return c
+}
 
+func extractSession(opts ExtractOptions, out io.Writer) error {
 	if opts.Milestone == "" {
 		return errors.New("missing required flag: --milestone <title-or-id>")
 	}

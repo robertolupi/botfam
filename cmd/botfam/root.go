@@ -67,7 +67,7 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		fam.NewWorktreeCmd(),
 		fam.NewSetupCmd(),
 		fam.NewNewfamCmd(),
-		newSessionCmd(),
+		fam.NewSessionCmd(),
 		fam.NewVerifyCmd(),
 		fam.NewAgentDocsCmd(),
 		newIrcClientCmd(),
@@ -117,11 +117,6 @@ func newServeCmd() *cobra.Command {
 			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
 		},
 	}
-}
-
-func newSessionCmd() *cobra.Command {
-	return passthrough("session <subcommand>",
-		"Manage coordination sessions (open/list/render/close/extract)", fam.SessionCmd)
 }
 
 func newIrcClientCmd() *cobra.Command {

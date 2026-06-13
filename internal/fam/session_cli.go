@@ -12,96 +12,74 @@ import (
 	"golang.org/x/term"
 
 	"github.com/robertolupi/botfam/internal/store"
+	"github.com/spf13/cobra"
 )
 
 var IsTerminal = func(fd int) bool {
 	return term.IsTerminal(fd)
 }
 
-// SessionCmd dispatches session CLI subcommands.
+// SessionCmd is the thin args/io entry point retained for tests; it builds the
+// Cobra command and runs it against args.
 func SessionCmd(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return printSessionHelp(out)
-	}
-
-	sub := args[0]
-	switch sub {
-	case "new":
-		return sessionNew(args[1:], out)
-	case "list":
-		return sessionList(args[1:], out)
-	case "render":
-		return sessionRender(args[1:], out)
-	case "close":
-		return sessionClose(args[1:], out)
-	case "extract":
-		return sessionExtract(args[1:], out)
-	case "-h", "--help", "help":
-		return printSessionHelp(out)
-	default:
-		return fmt.Errorf("unknown session command %q", sub)
-	}
+	return runCobra(NewSessionCmd(), args, out)
 }
 
-func printSessionHelp(out io.Writer) error {
-	fmt.Fprint(out, `Usage:
-  botfam session new <slug> [--participants a,b] [--rule consensus|majority|all|any] [--goals g1,g2] [--guardrails r1,r2]
-  botfam session list
-  botfam session render <slug>
-  botfam session close <slug>
-  botfam session extract --milestone <milestone-title-or-id> [options]
-`)
-	return nil
+// NewSessionCmd builds the `botfam session` Cobra command and its subcommands.
+func NewSessionCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:           "session",
+		Short:         "Manage coordination sessions (new/list/render/close/extract)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+
+	var participants, rule, goals, guardrails string
+	newCmd := &cobra.Command{
+		Use:           "new <slug>",
+		Short:         "Open a new session",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return sessionNew(args[0], splitCSV(participants), rule, splitCSV(goals), splitCSV(guardrails), cmd.OutOrStdout())
+		},
+	}
+	newCmd.Flags().StringVar(&participants, "participants", "", "comma-separated participant actors")
+	newCmd.Flags().StringVar(&rule, "rule", "", "consensus rule: consensus|majority|all|any")
+	newCmd.Flags().StringVar(&goals, "goals", "", "comma-separated session goals")
+	newCmd.Flags().StringVar(&guardrails, "guardrails", "", "comma-separated guardrails")
+
+	listCmd := &cobra.Command{
+		Use:           "list",
+		Short:         "List active sessions",
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          func(cmd *cobra.Command, args []string) error { return sessionList(cmd.OutOrStdout()) },
+	}
+	renderCmd := &cobra.Command{
+		Use:           "render <slug>",
+		Short:         "Render a session transcript to stdout",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          func(cmd *cobra.Command, args []string) error { return sessionRender(args[0], cmd.OutOrStdout()) },
+	}
+	closeCmd := &cobra.Command{
+		Use:           "close <slug>",
+		Short:         "Close and archive a session (operator gesture)",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          func(cmd *cobra.Command, args []string) error { return sessionClose(args[0], cmd.OutOrStdout()) },
+	}
+
+	c.AddCommand(newCmd, listCmd, renderCmd, closeCmd, newSessionExtractCmd())
+	return c
 }
 
-func sessionNew(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return errors.New("usage: botfam session new <slug> [--participants a,b] [--rule <rule>] [--goals <goals>] [--guardrails <guardrails>]")
-	}
-	slug := args[0]
-	participants := []string{}
-	rule := ""
-	goals := []string{}
-	guardrails := []string{}
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "--participants=") {
-			participants = splitCSV(strings.TrimPrefix(arg, "--participants="))
-		} else if arg == "--participants" {
-			i++
-			if i >= len(args) {
-				return errors.New("--participants requires a value")
-			}
-			participants = splitCSV(args[i])
-		} else if strings.HasPrefix(arg, "--rule=") {
-			rule = strings.TrimPrefix(arg, "--rule=")
-		} else if arg == "--rule" {
-			i++
-			if i >= len(args) {
-				return errors.New("--rule requires a value")
-			}
-			rule = args[i]
-		} else if strings.HasPrefix(arg, "--goals=") {
-			goals = splitCSV(strings.TrimPrefix(arg, "--goals="))
-		} else if arg == "--goals" {
-			i++
-			if i >= len(args) {
-				return errors.New("--goals requires a value")
-			}
-			goals = splitCSV(args[i])
-		} else if strings.HasPrefix(arg, "--guardrails=") {
-			guardrails = splitCSV(strings.TrimPrefix(arg, "--guardrails="))
-		} else if arg == "--guardrails" {
-			i++
-			if i >= len(args) {
-				return errors.New("--guardrails requires a value")
-			}
-			guardrails = splitCSV(args[i])
-		} else {
-			return fmt.Errorf("unknown argument %q", arg)
-		}
-	}
-
+func sessionNew(slug string, participants []string, rule string, goals, guardrails []string, out io.Writer) error {
 	info, err := (Resolver{WorkDir: "."}).Resolve()
 	if err != nil {
 		return err
@@ -127,7 +105,7 @@ func sessionNew(args []string, out io.Writer) error {
 	return nil
 }
 
-func sessionList(args []string, out io.Writer) error {
+func sessionList(out io.Writer) error {
 	info, err := (Resolver{WorkDir: "."}).Resolve()
 	if err != nil {
 		return err
@@ -150,12 +128,7 @@ func sessionList(args []string, out io.Writer) error {
 	return nil
 }
 
-func sessionRender(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return errors.New("usage: botfam session render <slug>")
-	}
-	slug := args[0]
-
+func sessionRender(slug string, out io.Writer) error {
 	info, err := (Resolver{WorkDir: "."}).Resolve()
 	if err != nil {
 		return err
@@ -170,12 +143,7 @@ func sessionRender(args []string, out io.Writer) error {
 	return nil
 }
 
-func sessionClose(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return errors.New("usage: botfam session close <slug>")
-	}
-	slug := args[0]
-
+func sessionClose(slug string, out io.Writer) error {
 	if os.Getenv("BOTFAM_FORCE_CLOSE") != "1" && !IsTerminal(int(os.Stdin.Fd())) {
 		return errors.New("session close is the operator's promotion gesture and requires a terminal; agents: write your closeout entry and hand back")
 	}
