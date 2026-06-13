@@ -2,7 +2,6 @@ package fam
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,62 +12,43 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
-// IrcClientCmd executes the Go-based FIFO-driven IRC client.
+// IrcClientCmd is the thin args/io entry point retained for tests; it builds
+// the Cobra command and runs it against args.
 func IrcClientCmd(args []string, out io.Writer) error {
-	var nick, server, channel, workDir, passFile string
+	return runCobra(NewIrcClientCmd(), args, out)
+}
+
+// NewIrcClientCmd builds the `botfam irc-client` Cobra command (FIFO-driven
+// IRC client).
+func NewIrcClientCmd() *cobra.Command {
+	mainChannel, ccrepChannel := FamChannels(LoadFamRegistry("."))
+	server := "localhost:6667"
+	channel := mainChannel + "," + ccrepChannel
+	var workDir, passFile string
+	c := &cobra.Command{
+		Use:           "irc-client <nick>",
+		Short:         "Run the FIFO-driven IRC client",
+		Args:          cobra.MinimumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runIrcClient(args[0], server, channel, workDir, passFile, cmd.OutOrStdout())
+		},
+	}
+	c.Flags().StringVar(&server, "server", server, "IRC server host:port")
+	c.Flags().StringVar(&channel, "channel", channel, "comma-separated channels to join")
+	c.Flags().StringVar(&workDir, "dir", "", "FIFO/log working dir (default scratch/irc/<nick>)")
+	c.Flags().StringVar(&passFile, "pass-file", "", "NickServ pass file (default ~/.botfam/irc-pass-<fam>-<nick>)")
+	return c
+}
+
+func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer) error {
 	famReg := LoadFamRegistry(".")
-	mainChannel, ccrepChannel := FamChannels(famReg)
-	server = "localhost:6667"
-	channel = mainChannel + "," + ccrepChannel
-
-	// Parse arguments
-	var cleanArgs []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case strings.HasPrefix(arg, "--server="):
-			server = strings.TrimPrefix(arg, "--server=")
-		case arg == "--server":
-			i++
-			if i < len(args) {
-				server = args[i]
-			}
-		case strings.HasPrefix(arg, "--channel="):
-			channel = strings.TrimPrefix(arg, "--channel=")
-		case arg == "--channel":
-			i++
-			if i < len(args) {
-				channel = args[i]
-			}
-		case strings.HasPrefix(arg, "--dir="):
-			workDir = strings.TrimPrefix(arg, "--dir=")
-		case arg == "--dir":
-			i++
-			if i < len(args) {
-				workDir = args[i]
-			}
-		case strings.HasPrefix(arg, "--pass-file="):
-			passFile = strings.TrimPrefix(arg, "--pass-file=")
-		case arg == "--pass-file":
-			i++
-			if i < len(args) {
-				passFile = args[i]
-			}
-		default:
-			if !strings.HasPrefix(arg, "-") {
-				cleanArgs = append(cleanArgs, arg)
-			} else {
-				return fmt.Errorf("unknown argument %q", arg)
-			}
-		}
-	}
-
-	if len(cleanArgs) < 1 {
-		return errors.New("missing required nickname argument: botfam irc-client <nick>")
-	}
-	nick = cleanArgs[0]
+	mainChannel, _ := FamChannels(famReg)
 
 	if passFile == "" {
 		passFile = DefaultPassFile(FamSlug(famReg), nick)

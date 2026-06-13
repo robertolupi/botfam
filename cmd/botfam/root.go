@@ -70,12 +70,12 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		fam.NewSessionCmd(),
 		fam.NewVerifyCmd(),
 		fam.NewAgentDocsCmd(),
-		newIrcClientCmd(),
+		fam.NewIrcClientCmd(),
 		fam.NewIrcWaitCmd(),
 		fam.NewForgeWaitCmd(),
 		newExternalReviewCmd(),
 		fam.NewScribeCmd(),
-		newIrclog2SessionsCmd(),
+		fam.NewIrclog2SessionsCmd(),
 	)
 	return root
 }
@@ -119,19 +119,9 @@ func newServeCmd() *cobra.Command {
 	}
 }
 
-func newIrcClientCmd() *cobra.Command {
-	return passthrough("irc-client <nick> [flags]",
-		"Run the FIFO-driven IRC client", fam.IrcClientCmd)
-}
-
 func newExternalReviewCmd() *cobra.Command {
 	return passthrough("external-review [flags] [MATERIAL...]",
 		"Fan a review prompt across one or more LLMs", fam.ExternalReviewCmd)
-}
-
-func newIrclog2SessionsCmd() *cobra.Command {
-	return passthrough("irclog2sessions <chat.log>... [flags]",
-		"Compile IRC channel logs into session transcripts", fam.IrcLog2SessionsCmd)
 }
 
 func isTerminal(f *os.File) bool {
