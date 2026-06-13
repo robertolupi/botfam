@@ -10,8 +10,7 @@ created: 2026-06-13
 Phased roadmap for the forge-backing era. Milestones are `#` headings (paste
 the title + the *Goal* line as the Gitea milestone name + description); issues
 are `##` headings under their milestone (assign each open issue to that
-milestone). New work that has no issue yet is marked **(new issue)** — create
-it, then file it under the milestone.
+milestone). All items below now have filed issues.
 
 Already shipped (no milestone needed): `botfam verify` (#7), the
 `internal/ccrep` core + ports (#8, PR #15 merged), `botfam-next` compile-sha
@@ -56,7 +55,7 @@ Goal: collapse the two parallel ccrep-over-forge implementations onto one
 authoritative substrate — the `internal/ccrep` Engine + ports — and finish the
 review tooling. Removes the "which codepath is real?" ambiguity from Phase 1.
 
-## #N — Migrate legacy internal/fam forge wiring onto the internal/ccrep Engine + ports (new issue)
+## #25 — Migrate legacy internal/fam forge wiring onto the internal/ccrep Engine + ports
 
 The green/blue design call from PR #13: #13 wires forge into the legacy
 `internal/fam` commands behind `UseForge()`, while #15 landed the clean
@@ -67,7 +66,7 @@ so there is one ccrep path, not two.
 
 PR #16, agy-approved, `mdformat --check` clean. Ready to merge.
 
-## #N — Fix stale fam.toml repo_paths so the roster sees all worktrees (new issue)
+## #26 — Fix stale fam.toml repo_paths so the roster sees all worktrees
 
 Root cause of #20: `fam.toml` `repo_paths` lists only `main` + `wt-agy` but six
 worktrees exist on disk. Regenerate / wire `botfam worktree sync` so presence
