@@ -64,7 +64,7 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 	root.AddCommand(
 		newVersionCmd(),
 		newServeCmd(),
-		newWorktreeCmd(),
+		fam.NewWorktreeCmd(),
 		fam.NewSetupCmd(),
 		fam.NewNewfamCmd(),
 		newSessionCmd(),
@@ -117,11 +117,6 @@ func newServeCmd() *cobra.Command {
 			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
 		},
 	}
-}
-
-func newWorktreeCmd() *cobra.Command {
-	return passthrough("worktree <init|sync|register> [args]",
-		"Manage agent git worktrees", fam.WorktreeCmd)
 }
 
 func newSessionCmd() *cobra.Command {
