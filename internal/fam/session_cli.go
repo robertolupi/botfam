@@ -205,7 +205,7 @@ func sessionClose(args []string, out io.Writer) error {
 
 	// Stage and commit the rendered file (skipped if BOTFAM_FORCE_CLOSE=1)
 	if os.Getenv("BOTFAM_FORCE_CLOSE") != "1" {
-		relFile := filepath.Join("doc", "collab", "sessions", slug, "session.md")
+		relFile := filepath.Join("wiki", "session-"+slug+".md")
 		if _, err := gitOutput(repoRoot, "add", relFile); err != nil {
 			return fmt.Errorf("staging session markdown: %w", err)
 		}
@@ -220,9 +220,9 @@ func sessionClose(args []string, out io.Writer) error {
 			return fmt.Errorf("git commit: %w", err)
 		}
 
-		fmt.Fprintf(out, "Closed, rendered, and committed session %q to doc/collab/sessions/%s/session.md\n", slug, slug)
+		fmt.Fprintf(out, "Closed, rendered, and committed session %q to wiki/session-%s.md\n", slug, slug)
 	} else {
-		fmt.Fprintf(out, "Closed and rendered session %q to doc/collab/sessions/%s/session.md\n", slug, slug)
+		fmt.Fprintf(out, "Closed and rendered session %q to wiki/session-%s.md\n", slug, slug)
 	}
 	return nil
 }

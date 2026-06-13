@@ -283,7 +283,7 @@ func isSessionEmpty(session []ircEvent) bool {
 // reruns are idempotent. The trailing, possibly still-running session of each
 // channel is skipped unless --include-open is given.
 func IrcLog2SessionsCmd(args []string, out io.Writer) error {
-	outDir := "doc/collab/sessions"
+	outDir := "wiki"
 	gapMinutes := 30.0
 	includeOpen := false
 	timezoneStr := "Europe/Zurich"
@@ -402,11 +402,10 @@ func IrcLog2SessionsCmd(args []string, out io.Writer) error {
 				skippedOpen++
 				continue
 			}
-			dir := filepath.Join(outDir, sessionDirname(channel, mainChannel, session, loc, taken))
-			if err := os.MkdirAll(dir, 0o755); err != nil {
+			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
 			}
-			path := filepath.Join(dir, "session.md")
+			path := filepath.Join(outDir, "session-"+sessionDirname(channel, mainChannel, session, loc, taken)+".md")
 			if err := os.WriteFile(path, []byte(renderSession(channel, session, loc)), 0o644); err != nil {
 				return err
 			}

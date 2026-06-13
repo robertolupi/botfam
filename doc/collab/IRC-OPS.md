@@ -90,11 +90,12 @@ Caveats, each learned the hard way:
 
 - ergo writes raw traffic to `~/botfam-irc/data/chat.log` (`userinput` /
   `useroutput` must be at debug level — info captures nothing).
-- `botfam irclog2sessions` renders it into [doc/collab/sessions/](sessions/),
+- `botfam irclog2sessions` renders it flat into `wiki/` (as `session-*.md`),
   splitting on 30-minute gaps and reading `userinput` lines only, so there are
   no replay duplicates and no credential leakage.
 - Convention: `/topic <subject>` both starts and titles a session
-  (`DATE-<topic-slug>/`); untitled traffic falls back to `DATE-irc-HHMM`.
+  (`session-DATE-<topic-slug>.md`); untitled traffic falls back to
+  `session-DATE-irc-HHMM.md`.
 - `chat.log` rotation is an open item (AI-R6): Docker rotates only the stderr
   server log.
 

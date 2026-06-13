@@ -1733,12 +1733,12 @@ func (s *SqliteStore) SessionClose(slug, repoRoot string) error {
 		return err
 	}
 
-	destDir := filepath.Join(repoRoot, "doc", "collab", "sessions", slug)
+	destDir := filepath.Join(repoRoot, "wiki")
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return err
 	}
 
-	destFile := filepath.Join(destDir, "session.md")
+	destFile := filepath.Join(destDir, "session-"+slug+".md")
 	if err := os.WriteFile(destFile, []byte(rendered), 0o644); err != nil {
 		return err
 	}

@@ -221,9 +221,9 @@ ______________________________________________________________________
   line; filter by author / timestamp. (Use large lines or chunked reads — a
   long entry must not be silently truncated.)
 - **session close \<slug>** — render the log to human-readable
-  `doc/collab/sessions/<slug>/session.md` in the repo, then write the
-  `ARCHIVED` tombstone. **Promotion to the repo is a human gesture** — an agent
-  should not self-archive.
+  `wiki/session-<slug>.md` (the Gitea wiki), then write the `ARCHIVED`
+  tombstone. **Promotion to the wiki is a human gesture** — an agent should not
+  self-archive.
 
 ______________________________________________________________________
 

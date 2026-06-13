@@ -150,15 +150,14 @@ protocol-deltas.md, if applicable
 Minimum artifact set:
 
 ```text
-doc/collab/sessions/<session-id>/session.md
-doc/collab/sessions/<session-id>/reviews/<participant>.md
-doc/collab/sessions/<session-id>/actions.md
+wiki/session-<session-id>.md
+wiki/review-YYYY-MM-DD-<participant>_<N>.md
 ```
 
 Optional machine-readable artifact:
 
 ```text
-doc/collab/sessions/<session-id>/actions.json
+wiki/session-<session-id>-actions.json
 ```
 
 The transcript generation should not depend on the human remembering to run a
@@ -167,7 +166,7 @@ script manually. There should be a canonical command.
 Example:
 
 ```text
-botfam session export --channel '#botfam' --since <timestamp> --until <timestamp> --out doc/collab/sessions/<session-id>/session.md
+botfam session export --channel '#botfam' --since <timestamp> --until <timestamp> --out wiki/session-<session-id>.md
 ```
 
 Or through IRC:
