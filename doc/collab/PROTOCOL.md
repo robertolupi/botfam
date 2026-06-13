@@ -94,17 +94,6 @@ bang-verb commands sent in IRC PRIVMSG bodies.
 | `!revision id=<proposal_id> sha=<commit_sha>`                                                                            | Updates an active proposal with a new commit SHA.                                   |
 | `!executed id=<proposal_id> sha=<commit_sha>`                                                                            | Records that the proposal has been successfully merged/executed.                    |
 
-### Legacy JSON Payload Support
-
-For backwards compatibility with legacy tooling, the merge gate and scribe also
-accept JSON payloads in PRIVMSG bodies with the following schema:
-
-- `{"type": "ccrep:proposal", "proposal_id": "...", "commit_sha": "...", "reviewer": "...", "summary": "...", "quorum": "...", "deadline": "..."}`
-- `{"type": "ccrep:evaluation", "proposal_id": "...", "commit_sha": "...", "verdict": "...", "reviewer": "..."}`
-- `{"type": "ccrep:critique", "proposal_id": "...", "commit_sha": "...", "verdict": "request_changes", "reviewer": "..."}`
-- `{"type": "ccrep:revision", "proposal_id": "...", "commit_sha": "..."}`
-- `{"type": "ccrep:executed", "proposal_id": "...", "commit_sha": "..."}`
-
 ### Rules
 
 - **One Executor:** The proposal specifies the executor. Evaluators submit
@@ -271,8 +260,4 @@ details of a single process, never as inter-agent coordination.
   longer than 400 bytes at space boundaries to prevent connection termination.
 - **macOS Gatekeeper:** Rebuilt binaries must be codesigned:
   `codesign --force --sign - ~/bin/botfam`.
-- **Legacy mailbox/queue layer:** the SQLite-backed
-  `send`/`recv`/`post`/`claim` subcommands and UDS daemon predate the IRC-first
-  pivot (2026-06-11). They remain in the binary but are **not** a coordination
-  surface; their retirement is a pending proposal. All active status checks
-  query the flat JSONL history file.
+

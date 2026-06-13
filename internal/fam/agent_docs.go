@@ -26,7 +26,7 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"   coordination tools, the ccrep change protocol, worktree ownership, and\n" +
 	"   platform gotchas.\n" +
 	"3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands\n" +
-	"   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.\n" +
+	"   like `botfam worktree`, `botfam session`, `botfam verify`, etc. directly.\n" +
 	"4. **Connect to the IRC server immediately.** To join the conversation, run\n" +
 	"   `botfam irc-client <name>` as a background task. A registered nick's pass\n" +
 	"   file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the\n" +
@@ -56,8 +56,6 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"\n" +
 	"Keep this file lightweight: substantive rules belong in PROTOCOL.md, never\n" +
 	"here. This file is generated from the same source as the other harness files.\n"
-
-var agentDocsTemplate = template.Must(template.New("agent-docs").Parse(agentDocsTemplateText))
 
 type repoSkill struct {
 	Name        string
@@ -148,15 +146,26 @@ func RenderAgentDocs(repoRoot string) ([]byte, error) {
 		return nil, err
 	}
 
+	tmplText := agentDocsTemplateText
+	tmplPath := filepath.Join(repoRoot, "doc", "template", "AGENTS.tmpl")
+	if data, err := os.ReadFile(tmplPath); err == nil {
+		tmplText = string(data)
+	}
+
+	tmpl, err := template.New("agent-docs").Parse(tmplText)
+	if err != nil {
+		return nil, fmt.Errorf("parse agent docs template: %w", err)
+	}
+
 	var b bytes.Buffer
-	if err := agentDocsTemplate.Execute(&b, struct {
+	if err := tmpl.Execute(&b, struct {
 		Skills []repoSkill
 	}{
 		Skills: skills,
 	}); err != nil {
 		return nil, err
 	}
-	return []byte(b.String()), nil
+	return b.Bytes(), nil
 }
 
 func readRepoSkills(repoRoot string) ([]repoSkill, error) {

@@ -53,16 +53,6 @@ Operator (rlupi)    ── any IRC client    ──┤      #botfam  #ccrep  #bo
    logged, replayable, and rendered into per-session transcripts under
    `doc/collab/sessions/`.
 
-## Legacy: the mailbox/queue layer
-
-Earlier waves built SQLite-backed messaging (`send`/`recv`/`inbox`) and a
-lease-based task queue (`post`/`claim`/`complete`) plus a UDS daemon. These
-subcommands still exist in the binary but were **superseded as the coordination
-surface by the IRC-first pivot (2026-06-11)**; their retirement is a pending
-proposal. Do not design new coordination against them. The zero-code,
-markdown-only bootstrap of that era is preserved in
-[doc/BOOTSTRAP.md](doc/BOOTSTRAP.md) (historical spec with a status note).
-
 ______________________________________________________________________
 
 ## Developer Quickstart

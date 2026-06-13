@@ -47,7 +47,7 @@ every "don't" below is annotated with the incident that created it.
 - **Don't let setup wizards write your identity into a shared `.git/config`.**
   Repo-local `user.*` overrides every worktree's identity; it misattributed
   agent commits within minutes on 2026-06-12. In your worktree run
-  `tools/setup-worktree-identity.sh rlupi` once instead — it sets the
+  `botfam worktree init rlupi` once instead — it sets the
   per-worktree config that nothing can override.
 - **Don't keep anything you need in `scratch/`.** It is /tmp by convention; a
   cleanup destroyed claude's IRC credentials there on 2026-06-12.

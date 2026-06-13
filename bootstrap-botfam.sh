@@ -166,46 +166,31 @@ write_agent_doc() {
       cat > "$tmp" <<EOF
 # botfam fam member — read this first
 
-This checkout is one agent's worktree in a botfam coordination fam. Every
-agent works in its own worktree of this repo, shares a maildir under
-\`~/.botfam/\`, and talks through the \`collab\` MCP server.
+This checkout is one agent's **worktree** in a botfam coordination fam.
 
-## Your name
-
-Your actor name is this worktree's directory basename, with any leading
-\`wt-\` or \`botfam-\` stripped:
-
-- \`wt-claude\` -> \`claude\`
-- \`wt-codex\` -> \`codex\`
-- \`wt-agy\` -> \`agy\`
-
-Configured roster: $agents
-
-If in doubt, run \`basename "\$PWD"\` and apply that rule before your first
-collab call.
-
-## Identity rule (important)
-
-The server binds an actor name to the session — it is sticky and immutable.
-
-- Automatic resolution (recommended): if you run inside a named worktree folder
-  such as \`wt-agy\`, the server parses the directory basename to resolve the
-  actor as \`agy\`. The family root is derived from repository git history, so
-  every worktree and the main checkout share one coordination plane. In this
-  case, you do not need to pass \`actor\` on tool calls.
-- Explicit naming: alternatively, on your first \`collab\` tool call, pass
-  \`actor: "<your-name>"\`. A conflicting \`actor\` is rejected. If no automatic
-  resolution is possible and no \`actor\` is provided on the first call, the call
-  is refused.
-
-## Coordination tools
-
-- Messaging: \`send\`, \`recv\`, \`try_recv\`, \`peek\`, \`ack\`, \`seen\`, \`inbox\`
-- Task queue: \`post\`, \`claim\`, \`complete\`, \`heartbeat\`, \`abandon\`, \`sweep\`
-
-\`recv\` blocks cheaply until a message arrives. Delivery is at-least-once:
-\`ack(id)\` after you durably handle a message, and use \`seen(id)\` to dedup
-when needed.
+1. **Your name** is this worktree's directory basename with any leading
+   \`wt-\` or \`botfam-\` stripped (\`wt-\$NAME\` → \`\$NAME\`). If in doubt:
+   \`basename "\$PWD"\`.
+2. **Read [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md) before your first
+   collab call.** It is the single source of truth for identity rules,
+   coordination tools, the ccrep change protocol, worktree ownership, and
+   platform gotchas.
+3. Talk to the fam through the **\`botfam\`** CLI tool. You can invoke commands
+   like \`botfam worktree\`, \`botfam session\`, \`botfam verify\`, etc. directly.
+4. **Connect to the IRC server immediately.** To join the conversation, run
+   \`botfam irc-client <name>\` as a background task. A registered nick's pass
+   file is found automatically at \`~/.botfam/irc-pass-<fam>-<name>\` (or the
+   legacy \`~/.botfam/irc-pass-<name>\`); pass \`--pass-file\` to override.
+   Monitor for incoming messages using the
+   wake watcher \`botfam irc-wait\`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)
+   for server details and operational recipes.
+5. **Sending and reading.** Write lines to \`scratch/irc/<name>/in\`: a bare
+   line goes as text to your fam's main channel; \`/msg <target> <text>\`
+   messages another channel or nick; \`/join <#chan>\` joins a channel;
+   \`/raw <cmd>\` sends any IRC command. Replies appear in
+   \`scratch/irc/<name>/log\`. If the botfam MCP server is connected, prefer
+   the \`irc_write\` / \`irc_read\` / \`irc_wait\` tools — same semantics, no
+   shell approval prompts.
 EOF
       mv "$tmp" "$path"
       return
@@ -215,46 +200,31 @@ EOF
   cat >> "$path" <<EOF
 # botfam fam member — read this first
 
-This checkout is one agent's worktree in a botfam coordination fam. Every
-agent works in its own worktree of this repo, shares a maildir under
-\`~/.botfam/\`, and talks through the \`collab\` MCP server.
+This checkout is one agent's **worktree** in a botfam coordination fam.
 
-## Your name
-
-Your actor name is this worktree's directory basename, with any leading
-\`wt-\` or \`botfam-\` stripped:
-
-- \`wt-claude\` -> \`claude\`
-- \`wt-codex\` -> \`codex\`
-- \`wt-agy\` -> \`agy\`
-
-Configured roster: $agents
-
-If in doubt, run \`basename "\$PWD"\` and apply that rule before your first
-collab call.
-
-## Identity rule (important)
-
-The server binds an actor name to the session — it is sticky and immutable.
-
-- Automatic resolution (recommended): if you run inside a named worktree folder
-  such as \`wt-agy\`, the server parses the directory basename to resolve the
-  actor as \`agy\`. The family root is derived from repository git history, so
-  every worktree and the main checkout share one coordination plane. In this
-  case, you do not need to pass \`actor\` on tool calls.
-- Explicit naming: alternatively, on your first \`collab\` tool call, pass
-  \`actor: "<your-name>"\`. A conflicting \`actor\` is rejected. If no automatic
-  resolution is possible and no \`actor\` is provided on the first call, the call
-  is refused.
-
-## Coordination tools
-
-- Messaging: \`send\`, \`recv\`, \`try_recv\`, \`peek\`, \`ack\`, \`seen\`, \`inbox\`
-- Task queue: \`post\`, \`claim\`, \`complete\`, \`heartbeat\`, \`abandon\`, \`sweep\`
-
-\`recv\` blocks cheaply until a message arrives. Delivery is at-least-once:
-\`ack(id)\` after you durably handle a message, and use \`seen(id)\` to dedup
-when needed.
+1. **Your name** is this worktree's directory basename with any leading
+   \`wt-\` or \`botfam-\` stripped (\`wt-\$NAME\` → \`\$NAME\`). If in doubt:
+   \`basename "\$PWD"\`.
+2. **Read [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md) before your first
+   collab call.** It is the single source of truth for identity rules,
+   coordination tools, the ccrep change protocol, worktree ownership, and
+   platform gotchas.
+3. Talk to the fam through the **\`botfam\`** CLI tool. You can invoke commands
+   like \`botfam worktree\`, \`botfam session\`, \`botfam verify\`, etc. directly.
+4. **Connect to the IRC server immediately.** To join the conversation, run
+   \`botfam irc-client <name>\` as a background task. A registered nick's pass
+   file is found automatically at \`~/.botfam/irc-pass-<fam>-<name>\` (or the
+   legacy \`~/.botfam/irc-pass-<name>\`); pass \`--pass-file\` to override.
+   Monitor for incoming messages using the
+   wake watcher \`botfam irc-wait\`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)
+   for server details and operational recipes.
+5. **Sending and reading.** Write lines to \`scratch/irc/<name>/in\`: a bare
+   line goes as text to your fam's main channel; \`/msg <target> <text>\`
+   messages another channel or nick; \`/join <#chan>\` joins a channel;
+   \`/raw <cmd>\` sends any IRC command. Replies appear in
+   \`scratch/irc/<name>/log\`. If the botfam MCP server is connected, prefer
+   the \`irc_write\` / \`irc_read\` / \`irc_wait\` tools — same semantics, no
+   shell approval prompts.
 EOF
 }
 
@@ -435,7 +405,9 @@ fi
 for checkout in $all_checkouts; do
   note "writing harness config in $checkout"
   # Clean up legacy MCP configurations
-  rm -f "$checkout/.mcp.json"
+  if ! is_git_tracked "$checkout" "$checkout/.mcp.json"; then
+    rm -f "$checkout/.mcp.json"
+  fi
   rm -f "$checkout/.agents/mcp_config.json"
   rm -f "$checkout/.codex/config.toml"
   # Delete empty directories if empty

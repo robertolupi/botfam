@@ -37,8 +37,7 @@ addressable ("reject on point 3").
 ### Rollout
 
 Phases, cheapest validation first. Phase 0 should ideally need zero code, so
-the idea can be falsified before plumbing lands. Code-bearing phases go through
-`!propose` with a machine-derived sha (`botfam propose`).
+the idea can be falsified before plumbing lands. Code-bearing phases go through Gitea Pull Requests (PRs).
 
 ## Costs and Risks
 
