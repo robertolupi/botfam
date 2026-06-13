@@ -145,7 +145,13 @@ another adapter" rather than "refactor the core".
   - **MCP** (`ccrep_*`): calls `Engine`, marshals JSON, FIFO transport via
     `irc_write`. No interactivity.
   - **Future TUI / web**: call the same `Engine` for actions and
-    `Ledger.Subscribe` for live state; nothing in the core changes.
+    `Ledger.Subscribe` for live state; nothing in the core changes. **Fam-
+    scoped** — launched from a worktree, deriving fam + actor from cwd like
+    every other command (same composition root as the CLI adapter). Being
+    presentation-only, they are **non-load-bearing on the protocol**: they
+    drive the engine but cannot change consensus semantics, so they can iterate
+    freely on a branch once core CLI/MCP is in place, without the per-change
+    ceremony load-bearing changes need.
 
 Two seams future-proof the reactive UIs specifically:
 
