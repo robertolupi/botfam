@@ -133,37 +133,6 @@ func TestClient_PostCommitStatus(t *testing.T) {
 	}
 }
 
-func TestClient_MergePR(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/1/merge" {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("failed to decode body: %v", err)
-		}
-		if payload["Do"] != "merge" || payload["MergeMessageField"] != "msg" {
-			t.Errorf("unexpected payload: %v", payload)
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	client := &Client{
-		BaseURL: server.URL,
-		Owner:   "botfam",
-		Repo:    "botfam",
-		Token:   "test-token",
-	}
-
-	err := client.MergePR(1, "merge", "msg")
-	if err != nil {
-		t.Fatalf("failed to merge PR: %v", err)
-	}
-}
-
 func TestParseGitRemoteURL(t *testing.T) {
 	tests := []struct {
 		url       string

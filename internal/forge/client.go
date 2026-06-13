@@ -369,21 +369,6 @@ func (c *Client) PostCommitStatus(commitSHA string, state string, context string
 	return err
 }
 
-func (c *Client) MergePR(prNum int, style string, msg string) error {
-	path := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", c.Owner, c.Repo, prNum)
-	payload := map[string]any{
-		"Do":                style,
-		"MergeMessageField": msg,
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	_, err = c.request("POST", path, b)
-	return err
-}
-
 func resolveFamTOMLPath(workDir string) string {
 	if root := os.Getenv("COLLAB_ROOT"); root != "" {
 		return filepath.Join(root, "fam.toml")
