@@ -16,6 +16,7 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/robertolupi/botfam/internal/fam"
 	serverlib "github.com/robertolupi/botfam/internal/server"
 )
 
@@ -494,5 +495,84 @@ func TestWorktreeMcpTools(t *testing.T) {
 	}
 	if !strings.Contains(syncOut.Output, "Merging main into branch") {
 		t.Errorf("unexpected output: %s", syncOut.Output)
+	}
+}
+
+func TestMcpResources(t *testing.T) {
+	s, root := newTestServer(t)
+
+	// Make root a mock git repository so fam.RepoPath resolves to it
+	initGitRepo(t, root)
+
+	// Save cwd and chdir to root
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCwd)
+	})
+
+	// Create a dummy PROTOCOL.md under the temp root's doc/collab/
+	collabDir := filepath.Join(root, "doc", "collab")
+	if err := os.MkdirAll(collabDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	dummyContent := "dummy protocol content"
+	if err := os.WriteFile(filepath.Join(collabDir, "PROTOCOL.md"), []byte(dummyContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Test empty authority (local family docs)
+	req := mcplib.ReadResourceRequest{}
+	req.Params.URI = "botfam:///docs/protocol"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read empty authority resource: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatal("no resource contents returned")
+	}
+	tr, ok := res[0].(mcplib.TextResourceContents)
+	if !ok {
+		t.Fatalf("expected text resource contents, got %T", res[0])
+	}
+	if tr.Text != dummyContent {
+		t.Errorf("expected text %q, got %q", dummyContent, tr.Text)
+	}
+
+	// 2. Test named authority matching local family
+	resolved, err := (fam.Resolver{WorkDir: root}).Resolve()
+	if err == nil && resolved.Name != "" {
+		req.Params.URI = fmt.Sprintf("botfam://%s/docs/protocol", resolved.Name)
+		res, err = s.handleReadResource(context.Background(), req)
+		if err != nil {
+			t.Fatalf("failed to read local named authority resource: %v", err)
+		}
+		tr = res[0].(mcplib.TextResourceContents)
+		if tr.Text != dummyContent {
+			t.Errorf("expected text %q, got %q", dummyContent, tr.Text)
+		}
+	}
+
+	// 3. Negative cases: unknown path, unsupported scheme, and an unknown
+	// named authority must all error rather than read an unintended file.
+	negatives := []struct {
+		name string
+		uri  string
+	}{
+		{"unknown path", "botfam:///docs/nonexistent"},
+		{"traversal attempt", "botfam:///../../etc/passwd"},
+		{"unsupported scheme", "file:///docs/protocol"},
+		{"unknown authority", "botfam://definitely-not-a-real-fam/docs/protocol"},
+	}
+	for _, tc := range negatives {
+		req.Params.URI = tc.uri
+		if _, err := s.handleReadResource(context.Background(), req); err == nil {
+			t.Errorf("%s: expected error for URI %q, got nil", tc.name, tc.uri)
+		}
 	}
 }
