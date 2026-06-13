@@ -172,11 +172,27 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			return nil, fmt.Errorf("failed to get user home dir: %w", err)
 		}
 
-		tokenFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s", actor))
+		fam := os.Getenv("BOTFAM_FAM")
+		if fam == "" {
+			absPath, err := filepath.Abs(workDir)
+			if err == nil {
+				fam = filepath.Base(filepath.Dir(absPath))
+			}
+		}
+		if fam == "" {
+			fam = "botfam"
+		}
+
+		tokenFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", fam, actor))
 		if _, err := os.Stat(tokenFile); os.IsNotExist(err) {
-			testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
-			if _, err := os.Stat(testFile); err == nil {
-				tokenFile = testFile
+			legacyFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s", actor))
+			if _, err := os.Stat(legacyFile); err == nil {
+				tokenFile = legacyFile
+			} else {
+				testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
+				if _, err := os.Stat(testFile); err == nil {
+					tokenFile = testFile
+				}
 			}
 		}
 

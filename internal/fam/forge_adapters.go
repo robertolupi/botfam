@@ -3,6 +3,7 @@ package fam
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,6 +46,18 @@ func (l *GiteaLedger) Tally(ctx context.Context, proposalID string) (ccrep.Tally
 		verdicts[normalizeReviewer(r.User.Login, l.Roster)] = r
 	}
 
+	// Load presence from IRC history file (if available)
+	present := make(map[string]bool)
+	historyPath := os.Getenv("COLLAB_HISTORY")
+	if historyPath == "" {
+		historyPath, _ = DefaultHistoryPath(l.WorkDir)
+	}
+	if historyPath != "" && ValidateHistoryPath(historyPath) == nil {
+		if _, p, _, err := CollectIrcCcrepEvents(historyPath, proposalID); err == nil {
+			present = p
+		}
+	}
+
 	var votes []ccrep.Vote
 	var approvals []string
 	var hasBlocker bool
@@ -59,7 +72,7 @@ func (l *GiteaLedger) Tally(ctx context.Context, proposalID string) (ccrep.Tally
 					Actor:   reviewer,
 					Verdict: verdict,
 					SHA:     pr.Head.SHA,
-					Present: true,
+					Present: present[reviewer] || len(present) == 0,
 				})
 				approvals = append(approvals, reviewer)
 			}
@@ -70,14 +83,28 @@ func (l *GiteaLedger) Tally(ctx context.Context, proposalID string) (ccrep.Tally
 				Actor:   reviewer,
 				Verdict: verdict,
 				SHA:     pr.Head.SHA,
-				Present: true,
+				Present: present[reviewer] || len(present) == 0,
 			})
 		}
 	}
 
+	// Filter roster by presence
+	var presentRoster []string
+	for _, name := range l.Roster {
+		if present[name] {
+			presentRoster = append(presentRoster, name)
+		}
+	}
+
+	// Fallback/Warning: if no presence info is found (e.g. IRC log is missing or empty),
+	// we fall back to all roster members present but log a warning.
+	if len(presentRoster) == 0 {
+		presentRoster = l.Roster
+		fmt.Fprintf(os.Stderr, "warning: no active IRC presence found for proposal %s; falling back to full roster\n", proposalID)
+	}
+
 	// Calculate required approvals
-	// Gitea mode: everyone in the roster is considered present
-	requiredApprovals := requiredIndependentApprovals("majority", l.Roster, author)
+	requiredApprovals := requiredIndependentApprovals("majority", presentRoster, author)
 
 	status := ccrep.StatusPending
 	if hasBlocker {
