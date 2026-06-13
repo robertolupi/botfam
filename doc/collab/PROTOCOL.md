@@ -129,11 +129,69 @@ immediately.
 
 ### Repository Family Boundaries
 
-A multi-family orchestration setup (e.g., `botfam` and `deep-cuts` running on the same host) has strict isolation boundaries:
-- **Read-only access is permitted**: An agent is allowed to read files, status, or logs in another repository family's directory for reference and cross-checking.
-- **No cross-family writing, execution, or process management**: An agent must never write to files, run modifying shell commands, or spawn, manage, or terminate background processes/daemons (such as IRC clients, wait watchers, or MCP servers) in worktrees or environments belonging to a different repository family.
-- **No identity impersonation**: An agent must never impersonate or act on behalf of another agent or bot from a different repository family, nor use their credentials or local workspace configurations.
-- **Coordination must occur over IRC**: Any request requiring action (writing or execution) in another family's checkout must be requested and discussed on the target family's shared IRC channel (e.g., `#dc`). The corresponding agent belonging to that family must execute the actions themselves.
+A multi-family orchestration setup (e.g., `botfam` and `deep-cuts` running on
+the same host) has strict isolation boundaries:
+
+- **Read-only access is permitted**: An agent is allowed to read files, status,
+  or logs in another repository family's directory for reference and
+  cross-checking.
+- **No cross-family writing, execution, or process management**: An agent must
+  never write to files, run modifying shell commands, or spawn, manage, or
+  terminate background processes/daemons (such as IRC clients, wait watchers,
+  or MCP servers) in worktrees or environments belonging to a different
+  repository family.
+- **No identity impersonation**: An agent must never impersonate or act on
+  behalf of another agent or bot from a different repository family, nor use
+  their credentials or local workspace configurations.
+- **Coordination must occur over IRC**: Any request requiring action (writing
+  or execution) in another family's checkout must be requested and discussed on
+  the target family's shared IRC channel (e.g., `#dc`). The corresponding agent
+  belonging to that family must execute the actions themselves.
+
+### Offline Cross-Family Issue Logging
+
+To allow asynchronous, offline issue tracking between repository families
+(where agents in different families may not be online at the same time), a
+shared file-system-based ledger is established:
+
+- **Shared Directory**: The directory `~/.botfam/cross-fam/issues/` acts as the
+  shared queue.
+- **Filename Format**: Issue files must be written in JSON format with the
+  filename matching the pattern:
+  `~/.botfam/cross-fam/issues/<yyyy-mm-dd>-<source-family>-<source-nick>-<slug>.json`
+  For example: `2026-06-13-deep-cuts-claude-dc-stale-venv.json`
+- **JSON Payload Format**: The issue log file should conform to the following
+  schema:
+  ```json
+  {
+    "version": "1.0",
+    "timestamp": "2026-06-13T06:30:00Z",
+    "id": "dc-stale-venv-v1",
+    "source": {
+      "family": "deep-cuts",
+      "nick": "claude-dc",
+      "worktree": "wt-claude"
+    },
+    "target": {
+      "family": "botfam",
+      "nick": "agy"
+    },
+    "title": "Short descriptive title of the issue",
+    "description": "Detailed description of the issue or feature request",
+    "status": "reported",
+    "evidence": "Log trace, error snippet, or command output if applicable"
+  }
+  ```
+- **Lifecycle & Processing**:
+  - **Writer**: Any agent encountering an issue with code or tooling in another
+    family writes a new JSON file to the shared directory.
+  - **Reader/Processor**: The target family's agents (specifically the
+    designated issues coordinator, typically `agy` in `botfam`) read and
+    process new issues.
+  - **Archiving**: Once processed or registered in the target family's local
+    issue tracking system (or merged/fixed), the processor agent renames the
+    file suffix from `.json` to `.processed` (or moves it to
+    `~/.botfam/cross-fam/issues/processed/`) to avoid double-processing.
 
 ### Main checkout discipline
 
