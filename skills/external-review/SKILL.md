@@ -1,0 +1,127 @@
+---
+name: external-review
+description: Use when running a multi-model external review of a botfam session, doc, or change — fan the canonical prompt across configured models with tools/external-review.sh, keep the raw reviews out-of-repo, then spawn a consolidation subagent to merge them into one unified review.
+---
+
+# External Review in the botfam Repo
+
+Use this skill when you want several outside models (local ollama and/or API
+providers) to review the same material and you need one trustworthy, deduped
+verdict — not N raw transcripts dumped into your context.
+
+The workflow has two stages on purpose:
+
+1. **Fan out** with `tools/external-review.sh`, which writes one raw review per
+   model **out-of-repo** under `~/.botfam/reviews/<ts>-<slug>/`.
+2. **Consolidate** by spawning a subagent that reads those raw files and writes
+   a single unified review. The raw reviews stay out of the main agent's
+   context — only the consolidated result comes back.
+
+## Why keep the raw reviews out of context
+
+Each model returns a full multi-section review (see the canonical prompt at
+`doc/review/EXTERNAL-REVIEW-PROMPT.md`). Reading three or four of them directly
+floods the main context and biases you toward whichever reviewer you read last.
+The script deliberately writes them to disk and prints
+`NEXT: spawn a consolidation subagent on this dir`. Honor that: delegate the
+reading.
+
+## Stage 1 — fan out
+
+Run the script with at least one material file and at least one model. Models
+are chosen entirely via flags — the script bakes in no defaults, because the
+operator knows the current best model names and the script does not.
+
+```sh
+tools/external-review.sh [options] MATERIAL [MATERIAL...]
+```
+
+Provider/model selection (repeatable — pass as many as you like):
+
+- `--ollama MODEL` — run a local ollama model (e.g. `--ollama qwen3.5:35b`).
+- `--gemini MODEL` — run a Gemini model; needs `GEMINI_API_KEY` in the env.
+- `--openai MODEL` — run an OpenAI model; needs `OPENAI_API_KEY` in the env.
+
+Options:
+
+- `--prompt FILE` — canonical prompt; default
+  `doc/review/EXTERNAL-REVIEW-PROMPT.md`. Only the text **below** the
+  `PROMPT BEGINS BELOW THIS LINE` marker is used; the operator instructions
+  above it are skipped.
+- `--out DIR` — output dir; default
+  `${BOTFAM_REVIEW_DIR:-$HOME/.botfam/reviews}/<ts>-<slug>`, where `<slug>` is
+  derived from the first material file's basename.
+- `--ollama-host URL` — default `http://localhost:11434`.
+- `--gemini-api-version V` — default `v1beta`.
+- `-h` | `--help` — print usage.
+
+Example — review a session against two local models and one API model:
+
+```sh
+tools/external-review.sh \
+  --ollama qwen3.5:35b \
+  --ollama gemma4:31b \
+  --gemini gemini-2.5-pro \
+  doc/collab/sessions/2026-06-12-doc-update/session.md
+```
+
+The script requires `jq` and `curl`. It runs `set +x` and reads
+`GEMINI_API_KEY` / `OPENAI_API_KEY` from the environment only, never printing
+or writing them — do not change that. Unreachable ollama or unset API keys are
+skipped with a warning, not a hard failure.
+
+### What stage 1 produces
+
+In the out dir:
+
+- `review-<provider>-<model>.md` — one raw review per model that ran.
+- `combined-prompt.txt` — the prompt below the marker plus the material(s).
+- `MANIFEST.txt` — timestamp, prompt path, material list, and the models that
+  actually ran.
+
+Before consolidating, **read `MANIFEST.txt`** (small, safe to read) to confirm
+which models ran and which were skipped. Do not read the `review-*.md` files
+yourself.
+
+## Stage 2 — spawn the consolidation subagent
+
+Spawn a subagent whose entire job is to read every `review-*.md` in the out dir
+and return one unified review. Pass it the out dir path and the original
+material path(s). Instruct it to:
+
+- **Dedupe.** Collapse the same finding raised by multiple models into one
+  entry; do not list it N times.
+- **Weight convergence.** A point several models reach independently is
+  stronger than one model's lone claim; say how many reviewers raised each
+  point.
+- **Flag wrong-premise / confabulation.** A reviewer working from stale ground
+  truth, or one that fabricated facts not present in the material, produces
+  confidently wrong advice (verified failure mode — see
+  `doc/review/2026-06-11-meta.md`). Call these out and discount them rather
+  than averaging them in.
+- **Preserve the canonical section shape** from the prompt — what landed
+  cleanly, pain points, blind spots, proposals, action items, open questions —
+  so the unified review is comparable to past ones.
+- **Recommend concrete edits**, each actionable by a single owner.
+
+The subagent returns the unified review text. It should NOT echo the raw
+reviews back. Keep its output as the only review artifact that enters the main
+context.
+
+## Recording the result
+
+If the review is worth keeping, record the unified result under
+`doc/review/YYYY-MM-DD-<reviewer>.md` (per the operator instructions in
+`doc/review/EXTERNAL-REVIEW-PROMPT.md`) and format it with
+`tools/mdformat.sh <file>` before committing. The raw per-model reviews stay
+out-of-repo under `~/.botfam/reviews/` — do not commit them.
+
+## Don't
+
+- Don't read the raw `review-*.md` files into the main context — that defeats
+  the whole point. Delegate to the consolidation subagent.
+- Don't bake model names into scripts or docs; pass them as flags so the
+  operator controls which models run.
+- Don't trust a reviewer's claims about the codebase that aren't grounded in
+  the material you fed it; treat any reviewer with cross-session memory as
+  warm, not cold.

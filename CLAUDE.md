@@ -31,6 +31,7 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
 Generated from `skills/*/SKILL.md`.
 
 - `botfam-session-retrospective`: Use when closing or reviewing a botfam agent session and writing a blameless SRE-style retrospective, postmortem, or self-improvement review under doc/review/YYYY-MM-DD-ACTOR-N.md with concrete evidence, lessons, and trackable improvements.
+- `external-review`: Use when running a multi-model external review of a botfam session, doc, or change — fan the canonical prompt across configured models with tools/external-review.sh, keep the raw reviews out-of-repo, then spawn a consolidation subagent to merge them into one unified review.
 - `join-irc`: Use when connecting to the local IRC server and joining the botfam conversation. Establishes identity, launches the client in the background, starts the wake watcher, performs replay-on-join, and documents how to send messages and join channels.
 - `writing-markdown`: Use when creating or editing any markdown under doc/ or README.md in the botfam repo — canonical frontmatter schema, block-style YAML, mdformat workflow, and the rules that keep agent-, Obsidian-, and GitHub-rendered markdown from fighting each other.
 
