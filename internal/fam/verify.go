@@ -1,1 +1,136 @@
-cGFja2FnZSBmYW0KCmltcG9ydCAoCgkiYnl0ZXMiCgkiZm10IgoJImlvIgoJIm9zIgoJIm9zL2V4ZWMiCgkicGF0aC9maWxlcGF0aCIKCSJzdHJpbmdzIgopCgovLyBWZXJpZnlDbWQgaGFuZGxlcyAiYm90ZmFtIHZlcmlmeSA8c2hhPiBbcGtncy4uLl0iLgovLwovLyBJdCBjcmVhdGVzIGEgREVUQUNIRUQgZXBoZW1lcmFsIGdpdCB3b3JrdHJlZSBhdCA8c2hhPiB1bmRlciBhIHRlbXAgZGlyLAovLyBydW5zIGBnbyBidWlsZCAuLy4uLmAgYW5kIGBnbyB0ZXN0IDxwa2dzIG9yIC4vLi4uPmAgaW5zaWRlIGl0LCB0aGVuIGFsd2F5cwovLyByZW1vdmVzIHRoZSB3b3JrdHJlZSAoZXZlbiBvbiBmYWlsdXJlKSwgYW5kIHJlcG9ydHMgcGFzcy9mYWlsIHBsdXMgYSBzaG9ydAovLyBzdW1tYXJ5LiBUaGlzIGF1dG9tYXRlcyB0aGUgbWFudWFsCi8vCi8vCWdpdCB3b3JrdHJlZSBhZGQgLS1kZXRhY2ggL3RtcC94IDxzaGE+OyAoY2QgL3RtcC94ICYmIGdvIGJ1aWxkL3Rlc3QpOyBnaXQgd29ya3RyZWUgcmVtb3ZlCi8vCi8vIGRhbmNlIHVzZWQgYmVmb3JlIGNjcmVwIGFwcHJvdmFscy4KZnVuYyBWZXJpZnlDbWQoYXJncyBbXXN0cmluZywgb3V0IGlvLldyaXRlcikgZXJyb3IgewoJdmFyIHNoYSBzdHJpbmcKCXZhciBwa2dzIFtdc3RyaW5nCglmb3IgaSA6PSAwOyBpIDwgbGVuKGFyZ3MpOyBpKysgewoJCWFyZyA6PSBhcmdzW2ldCgkJc3dpdGNoIHsKCQljYXNlIGFyZyA9PSAiLWgiIHx8IGFyZyA9PSAiLS1oZWxwIiB8fCBhcmcgPT0gImhlbHAiOgoJCQlyZXR1cm4gcHJpbnRWZXJpZnlIZWxwKG91dCkKCQljYXNlIHN0cmluZ3MuSGFzUHJlZml4KGFyZywgIi0iKToKCQkJcmV0dXJuIGZtdC5FcnJvcmYoInVua25vd24gYXJndW1lbnQgJXEiLCBhcmcpCgkJY2FzZSBzaGEgPT0gIiI6CgkJCXNoYSA9IGFyZwoJCWRlZmF1bHQ6CgkJCXBrZ3MgPSBhcHBlbmQocGtncywgYXJnKQoJCX0KCX0KCglpZiBzaGEgPT0gIiIgewoJCXJldHVybiBmbXQuRXJyb3JmKCJ1c2FnZTogYm90ZmFtIHZlcmlmeSA8c2hhPiBbcGtncy4uLl0iKQoJfQoJaWYgbGVuKHBrZ3MpID09IDAgewoJCXBrZ3MgPSBbXXN0cmluZ3siLi8uLi4ifQoJfQoKCXJlcG8gOj0gUmVwb1BhdGgoIi4iKQoKCS8vIFJlc29sdmUgdGhlIHNoYSB0byBhIGNvbmNyZXRlIGNvbW1pdCBzbyB0aGUgcmVwb3J0IGFuZCB0aGUgd29ya3RyZWUKCS8vIHJlZmVyZW5jZSB0aGUgc2FtZSByZXZpc2lvbiwgYW5kIHNvIHdlIGZhaWwgZWFybHkgb24gYSBiYWQgcmVmLgoJcmVzb2x2ZWQsIGVyciA6PSBnaXRPbmUocmVwbywgInJldi1wYXJzZSIsICItLXZlcmlmeSIsIHNoYSsiXntjb21taXR9IikKCWlmIGVyciAhPSBuaWwgewoJCXJldHVybiBmbXQuRXJyb3JmKCJjYW5ub3QgcmVzb2x2ZSAlcSB0byBhIGNvbW1pdDogJXciLCBzaGEsIGVycikKCX0KCgl0bXBEaXIsIGVyciA6PSBvcy5Na2RpclRlbXAoIiIsICJib3RmYW0tdmVyaWZ5LSIpCglpZiBlcnIgIT0gbmlsIHsKCQlyZXR1cm4gZm10LkVycm9yZigiZmFpbGVkIHRvIGNyZWF0ZSB0ZW1wIGRpcjogJXciLCBlcnIpCgl9Cgl3dFBhdGggOj0gZmlsZXBhdGguSm9pbih0bXBEaXIsICJ3dCIpCgoJLy8gQ3JlYXRlIGEgZGV0YWNoZWQgd29ya3RyZWUgYXQgdGhlIHJlc29sdmVkIGNvbW1pdC4KCWlmIF8sIGVyciA6PSBnaXRPdXRwdXQocmVwbywgIndvcmt0cmVlIiwgImFkZCIsICItLWRldGFjaCIsIHd0UGF0aCwgcmVzb2x2ZWQpOyBlcnIgIT0gbmlsIHsKCQlfID0gb3MuUmVtb3ZlQWxsKHRtcERpcikKCQlyZXR1cm4gZm10LkVycm9yZigiZmFpbGVkIHRvIGFkZCBlcGhlbWVyYWwgd29ya3RyZWU6ICV3IiwgZXJyKQoJfQoKCS8vIEFsd2F5cyBjbGVhbiB1cCB0aGUgd29ya3RyZWUgYW5kIHRlbXAgZGlyLCBldmVuIG9uIGJ1aWxkL3Rlc3QgZmFpbHVyZS4KCWRlZmVyIGZ1bmMoKSB7CgkJLy8gYHdvcmt0cmVlIHJlbW92ZSAtLWZvcmNlYCBkZXRhY2hlcyB0aGUgbGlua2VkIHdvcmt0cmVlIGZyb20gZ2l0J3MKCQkvLyBtZXRhZGF0YTsgUmVtb3ZlQWxsIHRoZW4gY2xlYXJzIHRoZSB0ZW1wIGRpciBpdHNlbGYuCgkJXywgXyA9IGdpdE91dHB1dChyZXBvLCAid29ya3RyZWUiLCAicmVtb3ZlIiwgIi0tZm9yY2UiLCB3dFBhdGgpCgkJXyA9IG9zLlJlbW92ZUFsbCh0bXBEaXIpCgl9KCkKCglmbXQuRnByaW50ZihvdXQsICJWZXJpZnlpbmcgJXMgaW4gZXBoZW1lcmFsIHdvcmt0cmVlICVzXG4iLCBzaG9ydChyZXNvbHZlZCksIHd0UGF0aCkKCgkvLyBnbyBidWlsZCAuLy4uLgoJZm10LkZwcmludGxuKG91dCwgIj09PiBnbyBidWlsZCAuLy4uLiIpCglidWlsZE91dCwgYnVpbGRFcnIgOj0gcnVuR28od3RQYXRoLCAiYnVpbGQiLCAiLi8uLi4iKQoJd3JpdGVHb091dHB1dChvdXQsIGJ1aWxkT3V0KQoJaWYgYnVpbGRFcnIgIT0gbmlsIHsKCQlmbXQuRnByaW50ZihvdXQsICJSRVNVTFQ6IEZBSUwg4oCUIGJ1aWxkIGZhaWxlZCBmb3IgJXNcbiIsIHNob3J0KHJlc29sdmVkKSkKCQlyZXR1cm4gZm10LkVycm9yZigiZ28gYnVpbGQgZmFpbGVkOiAldyIsIGJ1aWxkRXJyKQoJfQoKCS8vIGdvIHRlc3QgPHBrZ3MuLi4+Cgl0ZXN0QXJncyA6PSBhcHBlbmQoW11zdHJpbmd7InRlc3QifSwgcGtncy4uLikKCWZtdC5GcHJpbnRmKG91dCwgIj09PiBnbyAlc1xuIiwgc3RyaW5ncy5Kb2luKHRlc3RBcmdzLCAiICIpKQoJdGVzdE91dCwgdGVzdEVyciA6PSBydW5Hbyh3dFBhdGgsIHRlc3RBcmdzLi4uKQoJd3JpdGVHb091dHB1dChvdXQsIHRlc3RPdXQpCglpZiB0ZXN0RXJyICE9IG5pbCB7CgkJZm10LkZwcmludGYob3V0LCAiUkVTVUxUOiBGQUlMIOKAlCB0ZXN0cyBmYWlsZWQgZm9yICVzXG4iLCBzaG9ydChyZXNvbHZlZCkpCgkJcmV0dXJuIGZtdC5FcnJvcmYoImdvIHRlc3QgZmFpbGVkOiAldyIsIHRlc3RFcnIpCgl9CgoJZm10LkZwcmludGYob3V0LCAiUkVTVUxUOiBQQVNTIOKAlCBidWlsZCArIHRlc3QgKCVzKSBjbGVhbiBhdCAlc1xuIiwgc3RyaW5ncy5Kb2luKHBrZ3MsICIgIiksIHNob3J0KHJlc29sdmVkKSkKCXJldHVybiBuaWwKfQoKLy8gcnVuR28gcnVucyBgZ28gPGFyZ3MuLi4+YCBpbiBkaXIsIHJldHVybmluZyBjb21iaW5lZCBzdGRvdXQrc3RkZXJyIGFuZCBhbnkKLy8gZXJyb3IuIE91dHB1dCBpcyBjYXB0dXJlZCAobm90IHN0cmVhbWVkKSBzbyB0aGUgY2FsbGVyIGNvbnRyb2xzIHJlcG9ydGluZy4KZnVuYyBydW5HbyhkaXIgc3RyaW5nLCBhcmdzIC4uLnN0cmluZykgKHN0cmluZywgZXJyb3IpIHsKCWNtZCA6PSBleGVjLkNvbW1hbmQoImdvIiwgYXJncy4uLikKCWNtZC5EaXIgPSBkaXIKCXZhciBidWYgYnl0ZXMuQnVmZmVyCgljbWQuU3Rkb3V0ID0gJmJ1ZgoJY21kLlN0ZGVyciA9ICZidWYKCWVyciA6PSBjbWQuUnVuKCkKCXJldHVybiBidWYuU3RyaW5nKCksIGVycgp9CgpmdW5jIHdyaXRlR29PdXRwdXQob3V0IGlvLldyaXRlciwgcyBzdHJpbmcpIHsKCWlmIHMgPT0gIiIgewoJCXJldHVybgoJfQoJZm10LkZwcmludChvdXQsIHMpCglpZiAhc3RyaW5ncy5IYXNTdWZmaXgocywgIlxuIikgewoJCWZtdC5GcHJpbnRsbihvdXQpCgl9Cn0KCmZ1bmMgc2hvcnQoc2hhIHN0cmluZykgc3RyaW5nIHsKCWlmIGxlbihzaGEpID4gMTIgewoJCXJldHVybiBzaGFbOjEyXQoJfQoJcmV0dXJuIHNoYQp9CgpmdW5jIHByaW50VmVyaWZ5SGVscChvdXQgaW8uV3JpdGVyKSBlcnJvciB7CglmbXQuRnByaW50KG91dCwgIlVzYWdlOlxuICBib3RmYW0gdmVyaWZ5IDxzaGE+IFtwa2dzLi4uXVxuXG4iKwoJCSJDcmVhdGUgYSBkZXRhY2hlZCBlcGhlbWVyYWwgZ2l0IHdvcmt0cmVlIGF0IDxzaGE+LCBydW4gYGdvIGJ1aWxkIC4vLi4uYFxuIisKCQkiYW5kIGBnbyB0ZXN0IDxwa2dzIG9yIC4vLi4uPmAgaW5zaWRlIGl0LCB0aGVuIHJlbW92ZSB0aGUgd29ya3RyZWUgYW5kXG4iKwoJCSJyZXBvcnQgcGFzcy9mYWlsLiBBbHdheXMgY2xlYW5zIHVwIHRoZSB3b3JrdHJlZSwgZXZlbiBvbiBmYWlsdXJlLlxuIikKCXJldHVybiBuaWwKfQo=
+package fam
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// VerifyCmd handles "botfam verify <sha> [pkgs...]".
+//
+// It creates a DETACHED ephemeral git worktree at <sha> under a temp dir,
+// runs `go build ./...` and `go test <pkgs or ./...>` inside it, then always
+// removes the worktree (even on failure), and reports pass/fail plus a short
+// summary. This automates the manual
+//
+//	git worktree add --detach /tmp/x <sha>; (cd /tmp/x && go build/test); git worktree remove
+//
+// dance used before ccrep approvals.
+func VerifyCmd(args []string, out io.Writer) error {
+	var sha string
+	var pkgs []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-h" || arg == "--help" || arg == "help":
+			return printVerifyHelp(out)
+		case strings.HasPrefix(arg, "-"):
+			return fmt.Errorf("unknown argument %q", arg)
+		case sha == "":
+			sha = arg
+		default:
+			pkgs = append(pkgs, arg)
+		}
+	}
+
+	if sha == "" {
+		return fmt.Errorf("usage: botfam verify <sha> [pkgs...]")
+	}
+	if len(pkgs) == 0 {
+		pkgs = []string{"./..."}
+	}
+
+	repo := RepoPath(".")
+
+	// Resolve the sha to a concrete commit so the report and the worktree
+	// reference the same revision, and so we fail early on a bad ref.
+	resolved, err := gitOne(repo, "rev-parse", "--verify", sha+"^{commit}")
+	if err != nil {
+		return fmt.Errorf("cannot resolve %q to a commit: %w", sha, err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "botfam-verify-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	wtPath := filepath.Join(tmpDir, "wt")
+
+	// Create a detached worktree at the resolved commit.
+	if _, err := gitOutput(repo, "worktree", "add", "--detach", wtPath, resolved); err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return fmt.Errorf("failed to add ephemeral worktree: %w", err)
+	}
+
+	// Always clean up the worktree and temp dir, even on build/test failure.
+	defer func() {
+		// `worktree remove --force` detaches the linked worktree from git's
+		// metadata; RemoveAll then clears the temp dir itself.
+		_, _ = gitOutput(repo, "worktree", "remove", "--force", wtPath)
+		_ = os.RemoveAll(tmpDir)
+	}()
+
+	fmt.Fprintf(out, "Verifying %s in ephemeral worktree %s\n", short(resolved), wtPath)
+
+	// go build ./...
+	fmt.Fprintln(out, "==> go build ./...")
+	buildOut, buildErr := runGo(wtPath, "build", "./...")
+	writeGoOutput(out, buildOut)
+	if buildErr != nil {
+		fmt.Fprintf(out, "RESULT: FAIL — build failed for %s\n", short(resolved))
+		return fmt.Errorf("go build failed: %w", buildErr)
+	}
+
+	// go test <pkgs...>
+	testArgs := append([]string{"test"}, pkgs...)
+	fmt.Fprintf(out, "==> go %s\n", strings.Join(testArgs, " "))
+	testOut, testErr := runGo(wtPath, testArgs...)
+	writeGoOutput(out, testOut)
+	if testErr != nil {
+		fmt.Fprintf(out, "RESULT: FAIL — tests failed for %s\n", short(resolved))
+		return fmt.Errorf("go test failed: %w", testErr)
+	}
+
+	fmt.Fprintf(out, "RESULT: PASS — build + test (%s) clean at %s\n", strings.Join(pkgs, " "), short(resolved))
+	return nil
+}
+
+// runGo runs `go <args...>` in dir, returning combined stdout+stderr and any
+// error. Output is captured (not streamed) so the caller controls reporting.
+func runGo(dir string, args ...string) (string, error) {
+	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
+func writeGoOutput(out io.Writer, s string) {
+	if s == "" {
+		return
+	}
+	fmt.Fprint(out, s)
+	if !strings.HasSuffix(s, "\n") {
+		fmt.Fprintln(out)
+	}
+}
+
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
+func printVerifyHelp(out io.Writer) error {
+	fmt.Fprint(out, "Usage:\n  botfam verify <sha> [pkgs...]\n\n"+
+		"Create a detached ephemeral git worktree at <sha>, run `go build ./...`\n"+
+		"and `go test <pkgs or ./...>` inside it, then remove the worktree and\n"+
+		"report pass/fail. Always cleans up the worktree, even on failure.\n")
+	return nil
+}
