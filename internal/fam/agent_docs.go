@@ -25,7 +25,7 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"   `basename \"$PWD\"`.\n" +
 	"2. **Read [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md) before your first\n" +
 	"   collab call.** It is the single source of truth for identity rules,\n" +
-	"   coordination tools, the ccrep change protocol, worktree ownership, and\n" +
+	"   coordination tools, the Gitea pull-request consensus layer, worktree ownership, and\n" +
 	"   platform gotchas.\n" +
 	"3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands\n" +
 	"   like `botfam worktree`, `botfam session`, `botfam verify`, etc. directly.\n" +
