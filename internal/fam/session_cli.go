@@ -34,6 +34,8 @@ func SessionCmd(args []string, out io.Writer) error {
 		return sessionRender(args[1:], out)
 	case "close":
 		return sessionClose(args[1:], out)
+	case "extract":
+		return sessionExtract(args[1:], out)
 	case "-h", "--help", "help":
 		return printSessionHelp(out)
 	default:
@@ -47,6 +49,7 @@ func printSessionHelp(out io.Writer) error {
   botfam session list
   botfam session render <slug>
   botfam session close <slug>
+  botfam session extract --milestone <milestone-title-or-id> [options]
 `)
 	return nil
 }

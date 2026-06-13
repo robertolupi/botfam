@@ -1,6 +1,7 @@
 package fam
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 const externalReviewHelp = `Usage:
   botfam external-review [opts] MATERIAL [MATERIAL...]
   botfam external-review --pr <index> [opts]
+  botfam external-review --session-file <path> [opts]
+  botfam external-review --milestone <name> [opts]
 
 Fan a canonical review prompt + material across one or more LLMs, saving each
 raw review out-of-repo under ${BOTFAM_REVIEW_DIR:-~/.botfam/reviews}/<ts>-<slug>;
@@ -30,11 +33,13 @@ all). Pick models via repeatable flags (no baked-in defaults):
   --openai MODEL    OpenAI         (needs OPENAI_API_KEY)
   --gemini MODEL    Gemini         (needs GEMINI_API_KEY)
 
-  --pr <index>   synthesize the material from a Gitea PR (metadata, description,
-                 discussion, reviews, unified diff) via the forge; slug pr-<index>.
-  --prompt FILE  canonical prompt (default doc/review/EXTERNAL-REVIEW-PROMPT.md);
-                 only text below the "PROMPT BEGINS BELOW THIS LINE" marker is used.
-  --out DIR      output dir.
+  --pr <index>         synthesize the material from a Gitea PR (metadata, description,
+                       discussion, reviews, unified diff) via the forge; slug pr-<index>.
+  --session-file <pat> ingest an extracted milestone session markdown file directly.
+  --milestone <name>   automatically extract milestone session and run reviews on it.
+  --prompt FILE        canonical prompt (default doc/review/EXTERNAL-REVIEW-PROMPT.md);
+                       only text below the "PROMPT BEGINS BELOW THIS LINE" marker is used.
+  --out DIR            output dir.
 
 Keys are read from the environment only and never printed. Unreachable ollama or
 an unset API key is skipped with a warning, not a hard failure.
@@ -53,6 +58,8 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 	promptFile := "doc/review/EXTERNAL-REVIEW-PROMPT.md"
 	outDir := ""
 	pr := ""
+	sessionFile := ""
+	milestoneName := ""
 	ollamaHost := os.Getenv("OLLAMA_HOST")
 	if ollamaHost == "" {
 		ollamaHost = "http://localhost:11434"
@@ -79,6 +86,18 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 				return err
 			}
 			pr = v
+		case a == "--session-file":
+			v, err := need()
+			if err != nil {
+				return err
+			}
+			sessionFile = v
+		case a == "--milestone":
+			v, err := need()
+			if err != nil {
+				return err
+			}
+			milestoneName = v
 		case a == "--ollama":
 			v, err := need()
 			if err != nil {
@@ -116,14 +135,21 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 			}
 			ollamaHost = v
 		case strings.HasPrefix(a, "-"):
+			// Ignore other flags that might be passed down to sessionExtract (like --with-diffs / --interaction-only)
+			if a == "--with-diffs" || a == "--interaction-only" || a == "--snapshot-timestamp" {
+				if a == "--snapshot-timestamp" {
+					_, _ = need() // consume the value
+				}
+				continue
+			}
 			return fmt.Errorf("unknown option %q", a)
 		default:
 			materials = append(materials, a)
 		}
 	}
 
-	if len(materials) == 0 && pr == "" {
-		return fmt.Errorf("no material file(s) and no --pr <index> (see --help)")
+	if len(materials) == 0 && pr == "" && sessionFile == "" && milestoneName == "" {
+		return fmt.Errorf("no material file(s) and no --pr <index>, --session-file <path>, or --milestone <name> (see --help)")
 	}
 	if len(ollama)+len(openaiM)+len(gemini) == 0 {
 		return fmt.Errorf("no models selected — pass at least one --ollama/--openai/--gemini (see --help)")
@@ -137,9 +163,16 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 	slug := ""
 	if pr != "" {
 		slug = "pr-" + pr
-	} else {
+	} else if milestoneName != "" {
+		slug = "milestone-" + slugify(milestoneName)
+	} else if sessionFile != "" {
+		slug = "session-" + slugify(strings.TrimSuffix(filepath.Base(sessionFile), filepath.Ext(sessionFile)))
+	} else if len(materials) > 0 {
 		slug = slugify(strings.TrimSuffix(filepath.Base(materials[0]), filepath.Ext(materials[0])))
+	} else {
+		slug = "session-review"
 	}
+
 	if outDir == "" {
 		base := os.Getenv("BOTFAM_REVIEW_DIR")
 		if base == "" {
@@ -154,7 +187,47 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 
 	// Assemble the material.
 	var material strings.Builder
-	if pr != "" {
+	if milestoneName != "" {
+		// Direct milestone sugar: extract first to a temporary file
+		tmpDir, err := os.MkdirTemp("", "botfam-milestone-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmpDir)
+		tmpFile := filepath.Join(tmpDir, "session.md")
+
+		extractArgs := []string{"--milestone", milestoneName, "--out", tmpFile}
+		for _, arg := range args {
+			if arg == "--with-diffs" {
+				extractArgs = append(extractArgs, "--with-diffs")
+			}
+			if arg == "--interaction-only" {
+				extractArgs = append(extractArgs, "--interaction-only")
+			}
+		}
+		// Also scan manually for --snapshot-timestamp
+		for j := 0; j < len(args); j++ {
+			if args[j] == "--snapshot-timestamp" && j+1 < len(args) {
+				extractArgs = append(extractArgs, "--snapshot-timestamp", args[j+1])
+			}
+		}
+
+		var extractOut bytes.Buffer
+		if err := sessionExtract(extractArgs, &extractOut); err != nil {
+			return fmt.Errorf("milestone extraction failed: %w", err)
+		}
+		sessionFile = tmpFile
+	}
+
+	if sessionFile != "" {
+		b, err := os.ReadFile(sessionFile)
+		if err != nil {
+			return fmt.Errorf("session file not found: %s", sessionFile)
+		}
+		material.Write(b)
+		_ = os.WriteFile(filepath.Join(outDir, "session.md"), b, 0o644)
+		fmt.Fprintf(out, "read session file material: %d bytes\n", len(b))
+	} else if pr != "" {
 		m, err := assemblePRMaterial(pr)
 		if err != nil {
 			return err

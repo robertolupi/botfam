@@ -241,7 +241,7 @@ func writeClaudeSettings(checkout string) error {
 			newServers = append(newServers, srv)
 		}
 	}
-	
+
 	serversData, err := json.Marshal(newServers)
 	if err != nil {
 		return err
@@ -312,5 +312,3 @@ func writeClaudeSettings(checkout string) error {
 	}
 	return os.WriteFile(path, data, 0644)
 }
-
-
