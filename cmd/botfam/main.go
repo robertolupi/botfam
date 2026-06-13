@@ -46,6 +46,9 @@ func run() error {
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "version":
+			fmt.Fprintln(os.Stdout, fam.GetVersion())
+			return nil
 		case "worktree":
 			return fam.WorktreeCmd(os.Args[2:], os.Stdout)
 		case "setup":
@@ -190,6 +193,7 @@ func printHelp() {
 	fmt.Print(`botfam
 
 Usage:
+  botfam version          print build version/SHA
   botfam serve            run stdio MCP server
   botfam worktree <init|sync> [args]
   botfam setup <project> --agents alice,bob [--force]

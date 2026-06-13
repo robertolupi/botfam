@@ -25,5 +25,23 @@ services:
         condition: service_healthy
     volumes:
       - scribe-data:/data
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:9
+    ports:
+      - "127.0.0.1:13000:3000"
+      - "127.0.0.1:12222:22"
+    environment:
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__database__PATH=/data/gitea/gitea.db
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "3000"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - forgejo-data:/data
+
 volumes:
   scribe-data:
+  forgejo-data:
