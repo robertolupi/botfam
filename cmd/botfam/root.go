@@ -65,8 +65,8 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		newVersionCmd(),
 		newServeCmd(),
 		newWorktreeCmd(),
-		newSetupCmd(),
-		newNewfamCmd(),
+		fam.NewSetupCmd(),
+		fam.NewNewfamCmd(),
 		newSessionCmd(),
 		fam.NewVerifyCmd(),
 		fam.NewAgentDocsCmd(),
@@ -122,16 +122,6 @@ func newServeCmd() *cobra.Command {
 func newWorktreeCmd() *cobra.Command {
 	return passthrough("worktree <init|sync|register> [args]",
 		"Manage agent git worktrees", fam.WorktreeCmd)
-}
-
-func newSetupCmd() *cobra.Command {
-	return passthrough("setup <project> --agents alice,bob [--force]",
-		"Configure an existing botfam project", fam.Setup)
-}
-
-func newNewfamCmd() *cobra.Command {
-	return passthrough("newfam <project> --agents alice,bob",
-		"Initialize a new botfam project (worktrees, registry, docs)", fam.NewfamCmd)
 }
 
 func newSessionCmd() *cobra.Command {

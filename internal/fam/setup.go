@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 type Registry struct {
@@ -22,30 +24,32 @@ type Registry struct {
 	CreatedAt    string
 }
 
+// Setup is the thin args/io entry point retained for tests; it builds the
+// Cobra command and runs it against args.
 func Setup(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: botfam setup <project> --agents alice,bob [--force]")
+	return runCobra(NewSetupCmd(), args, out)
+}
+
+// NewSetupCmd builds the `botfam setup` Cobra command.
+func NewSetupCmd() *cobra.Command {
+	var agentsCSV string
+	var force bool
+	c := &cobra.Command{
+		Use:           "setup <project> --agents alice,bob [--force]",
+		Short:         "Configure an existing botfam project (registry, worktrees, docs)",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runSetup(args[0], splitCSV(agentsCSV), force, cmd.OutOrStdout())
+		},
 	}
-	project := args[0]
-	agents := []string{}
-	force := false
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--force":
-			force = true
-		case strings.HasPrefix(arg, "--agents="):
-			agents = splitCSV(strings.TrimPrefix(arg, "--agents="))
-		case arg == "--agents":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--agents requires a comma-separated value")
-			}
-			agents = splitCSV(args[i])
-		default:
-			return fmt.Errorf("unknown setup argument %q", arg)
-		}
-	}
+	c.Flags().StringVar(&agentsCSV, "agents", "", "comma-separated agent names")
+	c.Flags().BoolVar(&force, "force", false, "proceed even if the registry already exists with other object stores")
+	return c
+}
+
+func runSetup(project string, agents []string, force bool, out io.Writer) error {
 	if project == "" {
 		return fmt.Errorf("project name is required")
 	}
