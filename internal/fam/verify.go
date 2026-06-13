@@ -59,7 +59,11 @@ func runVerify(sha string, pkgs []string, out io.Writer) error {
 		return fmt.Errorf("cannot resolve %q to a commit: %w", sha, err)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "botfam-verify-")
+	scratchTmp := filepath.Join(repo, "scratch", "tmp")
+	if err := os.MkdirAll(scratchTmp, 0o755); err != nil {
+		return fmt.Errorf("failed to create scratch tmp dir: %w", err)
+	}
+	tmpDir, err := os.MkdirTemp(scratchTmp, "botfam-verify-")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
