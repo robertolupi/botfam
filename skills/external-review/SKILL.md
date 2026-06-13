@@ -55,13 +55,12 @@ Options:
 - `--gemini-api-version V` — default `v1beta`.
 - `-h` | `--help` — print usage.
 
-Example — review a session against two local models and one API model:
+Example — review a session against two local models:
 
 ```sh
 tools/external-review.sh \
   --ollama qwen3.5:35b \
   --ollama gemma4:31b \
-  --gemini gemini-2.5-pro \
   doc/collab/sessions/2026-06-12-doc-update/session.md
 ```
 
