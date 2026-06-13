@@ -158,11 +158,38 @@ func worktreeSync(args []string, out io.Writer) error {
 	fmt.Fprintln(out, "Fetching latest changes from origin...")
 	_, _ = gitOutput(absPath, "fetch")
 
-	mergeTarget := "origin/main"
-	_, errVerify := gitOne(absPath, "rev-parse", "--verify", "origin/main")
+	// Find the main checkout directory to fast-forward local main to origin/main
+	commonDir, errCommon := gitOne(absPath, "rev-parse", "--git-common-dir")
+	if errCommon == nil {
+		if !filepath.IsAbs(commonDir) {
+			commonDir = filepath.Clean(filepath.Join(absPath, commonDir))
+		}
+		mainCheckout := commonDir
+		if filepath.Base(mainCheckout) == ".git" {
+			mainCheckout = filepath.Dir(mainCheckout)
+		}
+
+		// Only attempt fast-forward if origin/main exists
+		_, errVerify := gitOne(absPath, "rev-parse", "--verify", "origin/main")
+		if errVerify == nil {
+			fmt.Fprintln(out, "Fast-forwarding local main to origin/main...")
+			ffOut, errFF := gitOutput(mainCheckout, "merge", "--ff-only", "origin/main")
+			if errFF != nil {
+				return fmt.Errorf("local main and origin/main have diverged; cannot fast-forward: %s", strings.TrimSpace(string(ffOut)))
+			}
+		}
+	}
+
+	mergeTarget := "main"
+	_, errVerify := gitOne(absPath, "rev-parse", "--verify", "main")
 	if errVerify != nil {
-		fmt.Fprintln(out, "Warning: 'origin/main' not found. Merging local 'main' instead.")
-		mergeTarget = "main"
+		// Fallback to origin/main if local main somehow doesn't exist
+		_, errVerifyOrigin := gitOne(absPath, "rev-parse", "--verify", "origin/main")
+		if errVerifyOrigin == nil {
+			mergeTarget = "origin/main"
+		} else {
+			return fmt.Errorf("neither local 'main' nor 'origin/main' found to merge")
+		}
 	}
 
 	fmt.Fprintf(out, "Merging %s into branch %q...\n", mergeTarget, branch)
