@@ -53,12 +53,14 @@ daemon is perf-only"; this proposal acts on that.
 
 ## 2. The layering principle
 
-The agent-facing architecture has three roles, kept strictly separate:
+The agent-facing architecture has four roles, kept strictly separate:
 
-- **MCP tools = immediate commands** (write, propose, vote, claim, heartbeat) —
-  fire and return. Preferred over CLI for bots: CLI argv payloads defeat
-  harness auto-approval, and typed tool params remove shell-quoting /
+- **MCP tools = immediate write/commands** (write, propose, vote, claim,
+  heartbeat) — fire and return. Preferred over CLI for bots: CLI argv payloads
+  defeat harness auto-approval, and typed tool params remove shell-quoting /
   stringly-typed errors.
+- **MCP resources = reads** under a `botfam://fam/...` namespace — the
+  symmetric read side of the tool write side. See §5.
 - **I/O (log tail, FIFO, wake watcher) = polling/waiting** — the async
   notification channel; holds no tool slot open.
 - **IRC = the log** — durable, human-readable, multi-bot audit stream and the
@@ -80,7 +82,7 @@ surface.
   `inbox` — and their MCP tools. IRC channels + DMs (`irc_*` MCP tools)
   replaced all of it.
 - **D — Evolve (no IRC equivalent yet):** `claim`, `complete`, `heartbeat`,
-  `abandon`, `sweep` — task/lease coordination. See §5.
+  `abandon`, `sweep` — task/lease coordination. See §6.
 - **E — Evolve (orthogonal to consensus):** `session`, `session-append`,
   `session-read` — durable handoff log. Decouple from consensus events, re-back
   on the ledger.
@@ -104,7 +106,28 @@ through the same ledger. Decisions:
   from the server or raw client logs — durability does not depend on the scribe
   being up.
 
-## 5. Async task protocol (bucket D)
+## 5. Read-side resource API (`botfam://fam/...`)
+
+Reads are MCP **resources**, the mirror of the write-side tools (§2): writes =
+tools, reads = resources, waiting = I/O, durability = the ledger. Today agents
+peek at peer files with raw `cat` across worktrees — no boundary, no shared
+projection layer. The resource namespace fixes both.
+
+- **Projections, not files.** `botfam://fam/tasks` and `botfam://fam/issues`
+  are not files — they are the in-process fold of the ledger (the §4 "API =
+  projection functions" pattern) surfaced as resources, so every reader stops
+  reimplementing the fold.
+- **Mediated file access.** `botfam://fam/files/...` is the one sanctioned way
+  to read across worktrees. It **MUST** sandbox paths — scoped to fam roots
+  plus permitted read-only cross-fam roots, rejecting `../` traversal (reuse
+  the `ValidateHistoryPath` pattern). Without this it is an arbitrary-file-read
+  hole, not a feature.
+- **Namespace coherence.** Every resource folds into the one `botfam://fam/...`
+  tree; no flat sibling URIs. agy's `botfam://protocol` + `botfam://ops` were
+  the first resources and have already been folded to `botfam://fam/docs/*`
+  (merged in `botfam-cli-worktree-commands-v1`), setting the precedent.
+
+## 6. Async task protocol (bucket D)
 
 Tasks become structured events on a `#tasks` log; the scribe records them.
 **Ownership is computed from the log by a deterministic resolver, never
@@ -143,7 +166,7 @@ Resolver: `holder(id)` = earliest valid `claim` whose guard is satisfied
 agent) declared in `fam.toml`, validated against NickServ ("is logged in as").
 Without it an agent could self-authorize a risky action.
 
-## 6. Roadmap (one surface per step, dependency-ordered)
+## 7. Roadmap (one surface per step, dependency-ordered)
 
 The daemon backs everything legacy, so it dies **last**:
 
@@ -152,15 +175,31 @@ The daemon backs everything legacy, so it dies **last**:
    stays.
 2. **Retire the message bus** (bucket C, minus `server`): delete
    `send/recv/try-recv/peek/ack/seen/post` + their MCP tools.
-3. **Port tasks (D)** → `#tasks` ledger + resolver + guard ladder + `fam.toml`
+3. **Read-side resources (§5).** Add the `botfam://fam/files/...` sandboxed
+   reader + the `botfam://fam/...` namespace; surface existing folds as
+   resources (`botfam://fam/docs/*` already done). The `tasks` / `issues`
+   projections attach in steps 4–5 as those buckets land on the ledger.
+4. **Port tasks (D)** → `#tasks` ledger + resolver + guard ladder + `fam.toml`
    roles. Remove daemon task code.
-4. **Port sessions (E)** → ledger + janitor compaction. Remove daemon session
+5. **Port sessions (E)** → ledger + janitor compaction. Remove daemon session
    code.
-5. **Retire the daemon (`server`)** — nothing depends on it.
+6. **Retire the daemon (`server`)** — nothing depends on it.
 
 Each step is its own ccrep proposal with its own review + tests.
 
-## 7. Non-goals
+## 8. Spawned follow-ups (out of the daemon spine, tracked here)
+
+Cleanup items thrown off by `botfam-cli-worktree-commands-v1` (merged), parked
+here so they are not lost:
+
+- **Reconcile `tools/setup-worktree-identity.sh`.** `worktree init` now derives
+  per-worktree git identity dynamically; the shell script duplicates that
+  logic. Reconcile or explicitly supersede/delete it.
+- **CLI-vs-MCP surface for `worktree init` / `worktree sync`.** These are
+  agent- run operations, so per the layering principle (§2) they likely want
+  MCP-tool surfaces, not just CLI. Decide before they calcify as CLI-only.
+
+## 9. Non-goals
 
 - `git push origin main` stays a **manual Operator step** — not automated, not
   a `guard: human` agent task. Agents stop at the local `merge --no-ff` +
