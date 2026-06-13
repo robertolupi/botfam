@@ -24,7 +24,6 @@ Unified proposal responding to Issue #50.
 | Proposal id | `session-review-forge-v1`                                                                                                    |
 | Executor    | `agy` / `claude`                                                                                                             |
 | Governance  | Merge gated by native branch protection (≥2 approvals, dismiss-stale, block-on-rejected); verified via `tools/forge-gate.sh` |
-| Deadline    | none                                                                                                                         |
 
 ## Problem
 
@@ -78,6 +77,11 @@ botfam session extract --milestone <milestone-title-or-id> [options]
   deterministic freeze timestamp, ensuring reproducible outputs even if the
   live milestone membership drifts.
 
+**Milestone Title vs. ID Resolution:** If the milestone parameter is a title
+and matches multiple closed/open milestones, the tool will prioritize open
+milestones. If ambiguity remains, the tool will exit with a list of matching
+unique integer IDs and prompt the user/agent to specify the exact ID.
+
 ### 2. `botfam external-review`
 
 We extend the existing review utility to natively ingest the extracted session
@@ -123,10 +127,12 @@ The generated markdown structure must follow these invariants:
    "cross-talk" narrative confusion for smaller models.
 2. **Stable Sorting:** Events must be ordered deterministically. The stable
    sorting tie-breaker rule is: `timestamp` (ISO-8601 with explicit timezone
-   offsets) $\\rightarrow$ `event_id` / `source_object` $\\rightarrow$ `actor`.
+   offsets) -> `event_id` / `source_object` -> `actor`.
 3. **Capture All Review Transition States:** The timeline must explicitly
    record `APPROVED`, `REQUEST_CHANGES`, and automated `DISMISSED` (stale
    review resets) events to preserve the branch-protection governance path.
+4. **De-duplication:** Suppress identical concurrent events triggered by
+   bot-to-bot loops or duplicate webhooks.
 
 ### Example Markdown Output
 
@@ -190,14 +196,19 @@ To eliminate confabulation loops and recursive LLM hallucinations:
    advising the operator to use temporal bounds (`--since`/`--until`) or enable
    `--interaction-only`.
 
+## Non-goals
+
+- Multi-repository milestones (v1 focuses exclusively on single-repository
+  milestones).
+
 ## Rollout Phasing
 
 ### Phase 1: Go Implementation
 
 - Implement the Gitea timeline, PR comment, and commit extraction engine under
-  \[internal/fam/session_extract.go\](file:///Users/rlupi/src/fams/botfam/wt-agy/internal/fam/session_extract.go).
+  [internal/fam/session_extract.go](../../internal/fam/session_extract.go).
 - Wire the `botfam session extract` CLI command under
-  \[cmd/botfam/main.go\](file:///Users/rlupi/src/fams/botfam/wt-agy/cmd/botfam/main.go).
+  [cmd/botfam/main.go](../../cmd/botfam/main.go).
 - Implement regex-based `--redact` filters and stable sorting routines.
 
 ### Phase 2: Ingestion and Tool Integration
