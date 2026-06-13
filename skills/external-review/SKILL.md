@@ -34,6 +34,19 @@ operator knows the current best model names and the script does not.
 
 ```sh
 tools/external-review.sh [options] MATERIAL [MATERIAL...]
+tools/external-review.sh --pr <index> [options]   # review a Gitea PR directly
+```
+
+**Reviewing a Gitea PR (`--pr <index>`).** Instead of local files, the script
+pulls the PR's metadata, description, discussion comments, reviews, and unified
+diff via the Gitea API — host/owner/repo are resolved from the active git
+remote and the token comes from `lib-botfam.sh`
+(`~/.botfam/token-<fam>-<actor>`). It assembles them into one material doc and
+slugs the out dir `pr-<index>`. Use this to fan an external review across a
+code change under review rather than a session or doc:
+
+```sh
+tools/external-review.sh --pr 34 --gemini gemini-2.5-pro --openai gpt-5
 ```
 
 Provider/model selection (repeatable — pass as many as you like):
@@ -48,9 +61,12 @@ Options:
   `doc/review/EXTERNAL-REVIEW-PROMPT.md`. Only the text **below** the
   `PROMPT BEGINS BELOW THIS LINE` marker is used; the operator instructions
   above it are skipped.
+- `--pr <index>` — review a Gitea PR directly (see above); used instead of
+  MATERIAL files.
 - `--out DIR` — output dir; default
   `${BOTFAM_REVIEW_DIR:-$HOME/.botfam/reviews}/<ts>-<slug>`, where `<slug>` is
-  derived from the first material file's basename.
+  derived from the first material file's basename (or `pr-<index>` with
+  `--pr`).
 - `--ollama-host URL` — default `http://localhost:11434`.
 - `--gemini-api-version V` — default `v1beta`.
 - `-h` | `--help` — print usage.
@@ -102,6 +118,11 @@ material path(s). Instruct it to:
   cleanly, pain points, blind spots, proposals, action items, open questions —
   so the unified review is comparable to past ones.
 - **Recommend concrete edits**, each actionable by a single owner.
+- **For a PR review (`--pr`)**, judge the change against its own stated intent:
+  does the diff actually deliver what the **PR description** claims, and does
+  it address the **discussion/review comments**? Call out anything the change
+  misses, regresses, or leaves unaddressed from the thread — not just abstract
+  code quality.
 
 The subagent returns the unified review text. It should NOT echo the raw
 reviews back. Keep its output as the only review artifact that enters the main
