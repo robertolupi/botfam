@@ -66,11 +66,11 @@ $COLLAB_ROOT/sessions/<YYYY-MM-DD-slug>/
     ARCHIVED           tombstone (operator-created; any contents)
 ```
 
-Promoted state in the repo (written at close, committed under normal repo
+Promoted state in the wiki (written at close, committed under normal repo
 rules):
 
 ```
-doc/collab/sessions/<YYYY-MM-DD-slug>/session.md     rendered; never hand-edit
+wiki/session-<slug>.md     rendered; never hand-edit
 ```
 
 Living under `$COLLAB_ROOT` (not the repo) means the live log is visible to
@@ -111,12 +111,12 @@ project settings eliminated):
 
 CLI subcommands (operator / session-closer actions, not hot-path):
 
-| Command                                          | Behavior                                                                                                                                                                                          |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `botfam session new <slug> [--participants a,b]` | scaffold the session dir + `meta.json`                                                                                                                                                            |
-| `botfam session list`                            | active sessions (no `ARCHIVED`), most recent first                                                                                                                                                |
-| `botfam session render <slug>`                   | project `session.jsonl` → markdown on stdout                                                                                                                                                      |
-| `botfam session close <slug>`                    | render and write `doc/collab/sessions/<slug>/session.md` into the **caller's worktree**, creating intermediate directories as needed (`MkdirAll`); **refuses to run without a TTY on stdin** (§6) |
+| Command                                          | Behavior                                                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `botfam session new <slug> [--participants a,b]` | scaffold the session dir + `meta.json`                                                                                   |
+| `botfam session list`                            | active sessions (no `ARCHIVED`), most recent first                                                                       |
+| `botfam session render <slug>`                   | project `session.jsonl` → markdown on stdout                                                                             |
+| `botfam session close <slug>`                    | render and write `wiki/session-<slug>.md` into the **caller's worktree**; **refuses to run without a TTY on stdin** (§6) |
 
 `close` writes into the worktree but never commits — committing the promoted
 log follows the repo's normal rules (the operator asks). The fam discovers the

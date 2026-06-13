@@ -136,7 +136,7 @@ func TestSessionLifecycle(t *testing.T) {
 	if err := s.SessionClose(slug, repoRoot); err != nil {
 		t.Fatal(err)
 	}
-	sessionMdPath := filepath.Join(repoRoot, "doc", "collab", "sessions", slug, "session.md")
+	sessionMdPath := filepath.Join(repoRoot, "wiki", "session-"+slug+".md")
 	b, err := os.ReadFile(sessionMdPath)
 	if err != nil {
 		t.Fatal(err)

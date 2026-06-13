@@ -8,11 +8,11 @@ comparable and prevents each reviewer from inventing its own framing.
 
 1. Update the **Ground truth** section below — it is date-stamped and goes
    stale. An external reviewer working from old facts produces confidently
-   wrong advice (see `doc/review/2026-06-11-meta.md` for an example).
+   wrong advice (see the wiki's `review-2026-06-11-meta` page for an example).
 
 2. Paste everything below the marker line, then attach:
 
-   - the session transcript(s) from `doc/collab/sessions/`;
+   - the session transcript(s) from the Gitea wiki (`session-*.md` files);
    - optionally `doc/collab/PROTOCOL.md` and any doc the session touched.
 
    **Paste the material directly — never rely on the reviewer fetching a URL.**

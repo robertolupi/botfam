@@ -75,7 +75,7 @@ Example — review a session against two local models:
 botfam external-review \
   --ollama qwen3.5:35b \
   --ollama gemma4:31b \
-  doc/collab/sessions/2026-06-12-doc-update/session.md
+  wiki/session-2026-06-12-doc-update.md
 ```
 
 `botfam external-review` is a Go subcommand: all providers are reached over the
