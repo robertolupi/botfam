@@ -76,6 +76,7 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		fam.NewExternalReviewCmd(),
 		fam.NewScribeCmd(),
 		fam.NewIrclog2SessionsCmd(),
+		fam.NewWhoamiCmd(),
 	)
 	return root
 }

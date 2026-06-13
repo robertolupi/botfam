@@ -33,7 +33,25 @@ func (r Resolver) Resolve() (RootInfo, error) {
 	repoName := ResolveRepoName(r.WorkDir)
 	var parsedActor string
 	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
-		parsedActor = ParseActor(filepath.Base(absDir), repoName)
+		if evalDir, err := filepath.EvalSymlinks(absDir); err == nil {
+			absDir = evalDir
+		}
+		gitRoot, _ := gitOne(absDir, "rev-parse", "--show-toplevel")
+		if evalRoot, err := filepath.EvalSymlinks(gitRoot); err == nil {
+			gitRoot = evalRoot
+		}
+		curr := absDir
+		for {
+			actor := ParseActor(filepath.Base(curr), repoName)
+			if actor != "" {
+				parsedActor = actor
+				break
+			}
+			if curr == gitRoot || curr == filepath.Dir(curr) {
+				break
+			}
+			curr = filepath.Dir(curr)
+		}
 	}
 
 	if envActor := getenv(r.Env, "COLLAB_ACTOR"); parsedActor != "" && envActor != "" && envActor != parsedActor {
