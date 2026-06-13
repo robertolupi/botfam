@@ -68,11 +68,11 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		newSetupCmd(),
 		newNewfamCmd(),
 		newSessionCmd(),
-		newVerifyCmd(),
+		fam.NewVerifyCmd(),
 		newAgentDocsCmd(),
 		newIrcClientCmd(),
-		newIrcWaitCmd(),
-		newForgeWaitCmd(),
+		fam.NewIrcWaitCmd(),
+		fam.NewForgeWaitCmd(),
 		newExternalReviewCmd(),
 		newScribeCmd(),
 		newIrclog2SessionsCmd(),
@@ -139,11 +139,6 @@ func newSessionCmd() *cobra.Command {
 		"Manage coordination sessions (open/list/render/close/extract)", fam.SessionCmd)
 }
 
-func newVerifyCmd() *cobra.Command {
-	return passthrough("verify <sha> [pkgs...]",
-		"Build and test a commit in an ephemeral worktree", fam.VerifyCmd)
-}
-
 func newAgentDocsCmd() *cobra.Command {
 	return passthrough("agent-docs <generate|check>",
 		"Generate or verify the harness entry docs (AGENTS/CLAUDE/GEMINI)", fam.AgentDocsCmd)
@@ -152,16 +147,6 @@ func newAgentDocsCmd() *cobra.Command {
 func newIrcClientCmd() *cobra.Command {
 	return passthrough("irc-client <nick> [flags]",
 		"Run the FIFO-driven IRC client", fam.IrcClientCmd)
-}
-
-func newIrcWaitCmd() *cobra.Command {
-	return passthrough("irc-wait --nick <nick> [--file <path>]",
-		"Block until new IRC traffic arrives (wake watcher)", fam.IrcWaitCmd)
-}
-
-func newForgeWaitCmd() *cobra.Command {
-	return passthrough("forge-wait [flags]",
-		"Wait for new Gitea notifications (review requests, comments)", fam.ForgeWaitCmd)
 }
 
 func newExternalReviewCmd() *cobra.Command {

@@ -8,9 +8,17 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
-// VerifyCmd handles "botfam verify <sha> [pkgs...]".
+// VerifyCmd is the thin args/io entry point retained for tests and the MCP
+// layer; it builds the Cobra command and runs it against args.
+func VerifyCmd(args []string, out io.Writer) error {
+	return runCobra(NewVerifyCmd(), args, out)
+}
+
+// NewVerifyCmd builds the `botfam verify` Cobra command.
 //
 // It creates a DETACHED ephemeral git worktree at <sha> under a temp dir,
 // runs `go build ./...` and `go test <pkgs or ./...>` inside it, then always
@@ -20,26 +28,24 @@ import (
 //	git worktree add --detach /tmp/x <sha>; (cd /tmp/x && go build/test); git worktree remove
 //
 // dance used before ccrep approvals.
-func VerifyCmd(args []string, out io.Writer) error {
-	var sha string
-	var pkgs []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "-h" || arg == "--help" || arg == "help":
-			return printVerifyHelp(out)
-		case strings.HasPrefix(arg, "-"):
-			return fmt.Errorf("unknown argument %q", arg)
-		case sha == "":
-			sha = arg
-		default:
-			pkgs = append(pkgs, arg)
-		}
+func NewVerifyCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "verify <sha> [pkgs...]",
+		Short: "Build and test a commit in an ephemeral worktree",
+		Long: `Create a detached ephemeral git worktree at <sha>, run "go build ./..."
+and "go test <pkgs or ./...>" inside it, then remove the worktree and report
+pass/fail. The worktree is always cleaned up, even on failure.`,
+		Args:          cobra.MinimumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runVerify(args[0], args[1:], cmd.OutOrStdout())
+		},
 	}
+	return c
+}
 
-	if sha == "" {
-		return fmt.Errorf("usage: botfam verify <sha> [pkgs...]")
-	}
+func runVerify(sha string, pkgs []string, out io.Writer) error {
 	if len(pkgs) == 0 {
 		pkgs = []string{"./..."}
 	}
@@ -125,12 +131,4 @@ func short(sha string) string {
 		return sha[:12]
 	}
 	return sha
-}
-
-func printVerifyHelp(out io.Writer) error {
-	fmt.Fprint(out, "Usage:\n  botfam verify <sha> [pkgs...]\n\n"+
-		"Create a detached ephemeral git worktree at <sha>, run `go build ./...`\n"+
-		"and `go test <pkgs or ./...>` inside it, then remove the worktree and\n"+
-		"report pass/fail. Always cleans up the worktree, even on failure.\n")
-	return nil
 }
