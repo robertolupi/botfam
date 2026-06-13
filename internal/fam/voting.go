@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/robertolupi/botfam/internal/forge"
 )
 
 func getSocketPath() (string, error) {
@@ -191,6 +193,51 @@ func VoteCmd(args []string, out io.Writer) error {
 		return errors.New("missing required --verdict <approve|reject|request_changes>")
 	}
 
+	if UseForge() {
+		prNum, err := strconv.Atoi(proposalID)
+		if err != nil {
+			return fmt.Errorf("invalid Gitea proposal (PR) ID: %w", err)
+		}
+
+		info, err := (Resolver{WorkDir: "."}).Resolve()
+		if err != nil {
+			return err
+		}
+
+		actor := os.Getenv("COLLAB_ACTOR")
+		if actor == "" {
+			actor = info.Actor
+		}
+		if actor == "" {
+			actor = "operator"
+		}
+
+		client, err := forge.NewClient(".", actor)
+		if err != nil {
+			return err
+		}
+
+		pr, err := client.GetPR(prNum)
+		if err != nil {
+			return fmt.Errorf("failed to fetch PR %d: %w", prNum, err)
+		}
+
+		state := "APPROVED"
+		if strings.ToLower(verdict) == "reject" || strings.ToLower(verdict) == "request_changes" {
+			state = "REQUEST_CHANGES"
+		}
+
+		body := fmt.Sprintf("Vote: %s (via botfam-next)", verdict)
+		fmt.Fprintf(out, "Submitting PR review to Gitea for PR %d (commit %s) as %s (%s)...\n", prNum, pr.Head.SHA, actor, state)
+		err = client.PostPRReview(prNum, pr.Head.SHA, state, body)
+		if err != nil {
+			return fmt.Errorf("failed to submit Gitea review: %w", err)
+		}
+
+		fmt.Fprintln(out, "Vote successfully submitted to Gitea!")
+		return nil
+	}
+
 	info, err := (Resolver{WorkDir: "."}).Resolve()
 	if err != nil {
 		return err
@@ -249,6 +296,68 @@ func TallyCmd(args []string, out io.Writer) error {
 
 	if proposalID == "" {
 		return errors.New("missing required --proposal <id>")
+	}
+
+	if UseForge() {
+		prNum, err := strconv.Atoi(proposalID)
+		if err != nil {
+			return fmt.Errorf("invalid Gitea proposal (PR) ID: %w", err)
+		}
+
+		info, err := (Resolver{WorkDir: "."}).Resolve()
+		if err != nil {
+			return err
+		}
+
+		actor := os.Getenv("COLLAB_ACTOR")
+		if actor == "" {
+			actor = info.Actor
+		}
+		if actor == "" {
+			actor = "operator"
+		}
+
+		client, err := forge.NewClient(".", actor)
+		if err != nil {
+			return err
+		}
+
+		pr, err := client.GetPR(prNum)
+		if err != nil {
+			return fmt.Errorf("failed to fetch PR %d: %w", prNum, err)
+		}
+
+		reviews, err := client.GetPRReviews(prNum)
+		if err != nil {
+			return fmt.Errorf("failed to fetch reviews for PR %d: %w", prNum, err)
+		}
+
+		// Resolve roster to normalize names
+		resolverInfo, err := (Resolver{WorkDir: "."}).Resolve()
+		var roster []string
+		if err == nil && resolverInfo.Root != "" {
+			reg, err := ReadRegistry(filepath.Join(resolverInfo.Root, "fam.toml"))
+			if err == nil {
+				roster = reg.Roster
+			}
+		}
+
+		fmt.Fprintf(out, "Proposal:      %s\n", proposalID)
+		fmt.Fprintf(out, "Author:        %s\n", normalizeReviewer(pr.User.Login, roster))
+		fmt.Fprintf(out, "Latest SHA:    %s\n", pr.Head.SHA)
+		fmt.Fprintf(out, "Mergeable:     %t\n", pr.Mergeable)
+		fmt.Fprintf(out, "Status:        %s\n", pr.State)
+		fmt.Fprintln(out, "Votes:")
+		if len(reviews) == 0 {
+			fmt.Fprintln(out, "  (none)")
+		} else {
+			for _, r := range reviews {
+				reviewer := normalizeReviewer(r.User.Login, roster)
+				fmt.Fprintf(out, "  - %s: %s (stale: %t, submitted: %s)\n",
+					reviewer, r.State, r.Stale, r.SubmittedAt)
+			}
+		}
+		return nil
 	}
 
 	info, err := (Resolver{WorkDir: "."}).Resolve()
@@ -404,7 +513,7 @@ func ProposeCmd(args []string, out io.Writer) error {
 	return nil
 }
 
-// ApproveCmd generates and appends a ccrep:evaluation event
+// ApproveCmd approves a proposal (shortcut for vote --verdict approve)
 func ApproveCmd(args []string, out io.Writer) error {
 	var proposalID string
 	var verdict string
@@ -434,6 +543,11 @@ func ApproveCmd(args []string, out io.Writer) error {
 	}
 	if verdict == "" {
 		verdict = "approve"
+	}
+
+	if UseForge() {
+		voteArgs := []string{"--proposal", proposalID, "--verdict", verdict}
+		return VoteCmd(voteArgs, out)
 	}
 
 	info, err := (Resolver{WorkDir: "."}).Resolve()
@@ -517,6 +631,58 @@ func MergeCmd(args []string, out io.Writer) error {
 
 	if proposalID == "" {
 		return errors.New("missing required --proposal <id>")
+	}
+
+	if UseForge() {
+		prNum, err := strconv.Atoi(proposalID)
+		if err != nil {
+			return fmt.Errorf("invalid Gitea proposal (PR) ID: %w", err)
+		}
+
+		info, err := (Resolver{WorkDir: "."}).Resolve()
+		if err != nil {
+			return err
+		}
+
+		actor := os.Getenv("COLLAB_ACTOR")
+		if actor == "" {
+			actor = info.Actor
+		}
+		if actor == "" {
+			actor = "operator"
+		}
+
+		client, err := forge.NewClient(".", actor)
+		if err != nil {
+			return err
+		}
+
+		pr, err := client.GetPR(prNum)
+		if err != nil {
+			return fmt.Errorf("failed to fetch PR %d: %w", prNum, err)
+		}
+
+		var buf bytes.Buffer
+		gateArgs := []string{"--proposal", proposalID, "--commit", pr.Head.SHA}
+		if err := MergeGateCmd(gateArgs, &buf); err != nil {
+			return fmt.Errorf("consensus gate failed for PR %d: %w\nOutput:\n%s", prNum, err, buf.String())
+		}
+		fmt.Fprint(out, buf.String())
+
+		fmt.Fprintf(out, "Consensus MET. Merging PR %d (commit %s) on Gitea...\n", prNum, pr.Head.SHA)
+
+		err = client.PostCommitStatus(pr.Head.SHA, "success", "ccrep-merge-gate", "Consensus met (approved via botfam-next)")
+		if err != nil {
+			fmt.Fprintf(out, "Warning: failed to post ccrep-merge-gate status check: %v\n", err)
+		}
+
+		err = client.MergePR(prNum, "merge", fmt.Sprintf("Merge pull request #%d from %s", prNum, pr.Head.Ref))
+		if err != nil {
+			return fmt.Errorf("Gitea PR merge failed: %w", err)
+		}
+
+		fmt.Fprintln(out, "Merged successfully on Gitea!")
+		return nil
 	}
 
 	info, err := (Resolver{WorkDir: "."}).Resolve()

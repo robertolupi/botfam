@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/store"
 )
 
@@ -63,9 +65,42 @@ func requiredIndependentApprovals(quorumType string, roster []string, author str
 	}
 }
 
-func MergeGateCmd(args []string, out io.Writer) error {
+func MergeGateCmd(args []string, out io.Writer) (err error) {
 	var commitSHA string
 	var proposalID string
+	var client *forge.Client
+	var independentApprovals []CcrepEvent
+
+	defer func() {
+		if UseForge() && client != nil && commitSHA != "" && proposalID != "" {
+			// Skip posting status check for CLI/usage errors
+			if err != nil && (strings.HasPrefix(err.Error(), "unknown argument") || strings.HasPrefix(err.Error(), "missing required")) {
+				return
+			}
+
+			state := "success"
+			desc := "Consensus MET (approved via botfam-next)"
+			if err != nil {
+				if strings.Contains(err.Error(), "blocked by request_changes") || strings.Contains(err.Error(), "reject") {
+					state = "failure"
+				} else {
+					state = "pending"
+				}
+				desc = err.Error()
+				if len(desc) > 140 {
+					desc = desc[:137] + "..."
+				}
+			} else if len(independentApprovals) > 0 {
+				desc = fmt.Sprintf("Consensus MET with %d independent approval(s)", len(independentApprovals))
+			}
+
+			postErr := client.PostCommitStatus(commitSHA, state, "ccrep-merge-gate", desc)
+			if postErr != nil {
+				fmt.Fprintf(out, "Warning: failed to post commit status check: %v\n", postErr)
+			}
+		}
+	}()
+
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if strings.HasPrefix(arg, "--commit=") {
@@ -98,29 +133,137 @@ func MergeGateCmd(args []string, out io.Writer) error {
 		return errors.New("missing required --proposal <id>")
 	}
 
-	historyPath := os.Getenv("COLLAB_HISTORY")
-	if historyPath == "" {
-		var err error
-		historyPath, err = DefaultHistoryPath(".")
+	var events []CcrepEvent
+	var present map[string]bool
+	var skipped int
+
+	if UseForge() {
+		// 1. Load roster from fam.toml to normalize reviewer names
+		resolverInfo, err := (Resolver{WorkDir: "."}).Resolve()
+		var roster []string
+		if err == nil && resolverInfo.Root != "" {
+			reg, err := ReadRegistry(filepath.Join(resolverInfo.Root, "fam.toml"))
+			if err == nil {
+				roster = reg.Roster
+			}
+		}
+
+		// 2. Parse proposal ID as int (PR number)
+		prNum, err := strconv.Atoi(proposalID)
 		if err != nil {
-			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
+			return fmt.Errorf("invalid Gitea proposal (PR) ID %q: %w", proposalID, err)
+		}
+
+		// 3. Resolve actor
+		actor := os.Getenv("COLLAB_ACTOR")
+		if actor == "" && err == nil {
+			actor = resolverInfo.Actor
+		}
+		if actor == "" {
+			actor = "operator"
+		}
+
+		// 4. Create Gitea client
+		client, err = forge.NewClient(".", actor)
+		if err != nil {
+			return err
+		}
+
+		// 5. Fetch PR details
+		pr, err := client.GetPR(prNum)
+		if err != nil {
+			return fmt.Errorf("failed to fetch PR %d from Gitea: %w", prNum, err)
+		}
+
+		// 6. Fetch PR reviews
+		reviews, err := client.GetPRReviews(prNum)
+		if err != nil {
+			return fmt.Errorf("failed to fetch reviews for PR %d from Gitea: %w", prNum, err)
+		}
+
+		// 7. Synthesize CcrepEvents
+		events = append(events, CcrepEvent{
+			Type:       "ccrep:proposal",
+			ProposalID: proposalID,
+			CommitSHA:  pr.Head.SHA,
+			Reviewer:   normalizeReviewer(pr.User.Login, roster),
+			Quorum:     "majority",
+			TS:         0,
+		})
+
+		for _, r := range reviews {
+			if r.Stale {
+				continue
+			}
+			var verdict string
+			if r.State == "APPROVED" {
+				verdict = "approve"
+			} else if r.State == "REQUEST_CHANGES" {
+				verdict = "reject"
+			} else {
+				continue
+			}
+
+			var ts float64 = 1.0
+			if t, tErr := time.Parse(time.RFC3339, r.SubmittedAt); tErr == nil {
+				ts = float64(t.UnixNano()) / 1e9
+			}
+
+			events = append(events, CcrepEvent{
+				Type:       "ccrep:evaluation",
+				ProposalID: proposalID,
+				CommitSHA:  pr.Head.SHA,
+				Reviewer:   normalizeReviewer(r.User.Login, roster),
+				Verdict:    verdict,
+				TS:         ts,
+			})
+		}
+
+		// 8. Load presence from IRC history file (if available), fallback to all roster members present
+		present = make(map[string]bool)
+		historyPath := os.Getenv("COLLAB_HISTORY")
+		if historyPath == "" {
+			historyPath, _ = DefaultHistoryPath(".")
+		}
+		if historyPath != "" && ValidateHistoryPath(historyPath) == nil {
+			if _, p, _, err := CollectIrcCcrepEvents(historyPath, proposalID); err == nil {
+				present = p
+			}
+		}
+		if len(present) == 0 {
+			present = make(map[string]bool)
+			// Fallback: everyone on the roster is considered present
+			for _, name := range roster {
+				present[name] = true
+			}
+		}
+	} else {
+		// Legacy IRC/scribe path
+		historyPath := os.Getenv("COLLAB_HISTORY")
+		if historyPath == "" {
+			var err error
+			historyPath, err = DefaultHistoryPath(".")
+			if err != nil {
+				return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
+			}
+		}
+
+		if err := ValidateHistoryPath(historyPath); err != nil {
+			return err
+		}
+
+		var collectErr error
+		events, present, skipped, collectErr = CollectIrcCcrepEvents(historyPath, proposalID)
+		if collectErr != nil {
+			return collectErr
+		}
+		if skipped > 0 {
+			fmt.Fprintf(out, "warning: skipped %d unparseable line(s) in history log\n", skipped)
 		}
 	}
 
-	if err := ValidateHistoryPath(historyPath); err != nil {
-		return err
-	}
-
-	events, present, skipped, err := CollectIrcCcrepEvents(historyPath, proposalID)
-	if err != nil {
-		return err
-	}
-	if skipped > 0 {
-		fmt.Fprintf(out, "warning: skipped %d unparseable line(s) in history log\n", skipped)
-	}
-
 	if len(events) == 0 {
-		return fmt.Errorf("no CCREP events found for proposal %q in history log", proposalID)
+		return fmt.Errorf("no CCREP events found for proposal %q", proposalID)
 	}
 
 	// Sort events by timestamp
@@ -219,7 +362,7 @@ func MergeGateCmd(args []string, out io.Writer) error {
 	}
 
 	// Independent approvals (not by author)
-	var independentApprovals []CcrepEvent
+	independentApprovals = nil
 	for _, app := range approvals {
 		if app.Reviewer != author && app.Reviewer != "" {
 			independentApprovals = append(independentApprovals, app)
