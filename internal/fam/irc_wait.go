@@ -9,49 +9,49 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
-// IrcWaitCmd implements the native wake-watcher command.
+// IrcWaitCmd is the thin args/io entry point retained for tests and the MCP
+// layer; it builds the Cobra command and runs it against args.
 func IrcWaitCmd(args []string, out io.Writer) error {
+	return runCobra(NewIrcWaitCmd(), args, out)
+}
+
+// NewIrcWaitCmd builds the `botfam irc-wait` Cobra command (native wake watcher).
+func NewIrcWaitCmd() *cobra.Command {
 	var nick, logPath string
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case strings.HasPrefix(arg, "--file="):
-			logPath = strings.TrimPrefix(arg, "--file=")
-		case arg == "--file":
-			i++
-			if i < len(args) {
-				logPath = args[i]
+	c := &cobra.Command{
+		Use:   "irc-wait --nick <nick> [--file <path>]",
+		Short: "Block until new IRC traffic arrives (wake watcher)",
+		Long: `Watch the IRC client log and block until a new line relevant to <nick>
+appears (skipping history replays and the agent's own messages), then print
+the new lines and exit.`,
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if logPath == "" {
+				if nick == "" {
+					return errors.New("missing required argument: --nick <name> or --file <path>")
+				}
+				logPath = filepath.Join("scratch", "irc", nick, "log")
 			}
-		case strings.HasPrefix(arg, "--nick="):
-			nick = strings.TrimPrefix(arg, "--nick=")
-		case arg == "--nick":
-			i++
-			if i < len(args) {
-				nick = args[i]
+			lines, _, _, err := WaitIrcLines(logPath, nick, -1, 0)
+			if err != nil {
+				return err
 			}
-		default:
-			return fmt.Errorf("unknown argument %q", arg)
-		}
+			out := cmd.OutOrStdout()
+			for _, line := range lines {
+				fmt.Fprintln(out, line)
+			}
+			return nil
+		},
 	}
-
-	if logPath == "" {
-		if nick == "" {
-			return errors.New("missing required argument: --nick <name> or --file <path>")
-		}
-		logPath = filepath.Join("scratch", "irc", nick, "log")
-	}
-
-	lines, _, _, err := WaitIrcLines(logPath, nick, -1, 0)
-	if err != nil {
-		return err
-	}
-	for _, line := range lines {
-		fmt.Fprintln(out, line)
-	}
-	return nil
+	c.Flags().StringVar(&nick, "nick", "", "actor nick whose client log to watch")
+	c.Flags().StringVar(&logPath, "file", "", "path to the IRC client log (overrides --nick derivation)")
+	return c
 }
 
 // WaitIrcLines watches the IRC client log at logPath for new lines relevant

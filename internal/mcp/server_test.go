@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +16,6 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/robertolupi/botfam/internal/fam"
-	serverlib "github.com/robertolupi/botfam/internal/server"
 )
 
 func newTestServer(t *testing.T) (*server, string) {
@@ -28,44 +26,10 @@ func newTestServer(t *testing.T) (*server, string) {
 	t.Setenv("BOTFAM_LOCK_ACTOR", "")
 	t.Setenv("BOTFAM_TESTING", "1")
 
-	// Use the system temp dir to keep the socket path short (Darwin 104 char
-	// limit); the repo checkout itself may live under a deep worktree path.
-	udsDir, err := os.MkdirTemp("", "bf-mcp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	udsPath := filepath.Join(udsDir, "s.sock")
-	t.Setenv("BOTFAM_SOCKET", udsPath)
-	t.Cleanup(func() {
-		_ = os.RemoveAll(udsDir)
-	})
-
-	// Start in-process UDS server
-	srv := serverlib.NewServer(udsPath, 0)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	go func() {
-		_ = srv.Start(ctx)
-	}()
-
-	// Wait for the UDS socket to become active
-	var dialErr error
-	for i := 0; i < 50; i++ {
-		time.Sleep(50 * time.Millisecond)
-		conn, err := net.Dial("unix", udsPath)
-		if err == nil {
-			conn.Close()
-			dialErr = nil
-			break
-		}
-		dialErr = err
-	}
-	if dialErr != nil {
-		t.Fatalf("failed to start test UDS daemon: %v", dialErr)
-	}
-
-	return &server{}, root
+	return &server{
+		envActor: "",
+		lockMode: false,
+	}, root
 }
 
 func mkdir(t *testing.T, path string) string {
@@ -82,8 +46,22 @@ func TestBoundActorConflictsWithWorkDirActor(t *testing.T) {
 	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
 	bobDir := mkdir(t, filepath.Join(base, "wt-bob"))
 
+	// Create log files so irc_read doesn't fail
+	if err := os.MkdirAll(filepath.Join(aliceDir, "scratch", "irc", "alice"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(aliceDir, "scratch", "irc", "alice", "log"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(bobDir, "scratch", "irc", "bob"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bobDir, "scratch", "irc", "bob", "log"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	// First call binds the session to alice via the directory-derived actor.
-	if _, err := s.callTool(context.Background(), "inbox", map[string]any{"work_dir": aliceDir}); err != nil {
+	if _, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": aliceDir}); err != nil {
 		t.Fatalf("first call from wt-alice failed: %v", err)
 	}
 	if s.actor != "alice" {
@@ -91,7 +69,7 @@ func TestBoundActorConflictsWithWorkDirActor(t *testing.T) {
 	}
 
 	// A later call whose work_dir resolves to a different actor must conflict.
-	_, err := s.callTool(context.Background(), "inbox", map[string]any{"work_dir": bobDir})
+	_, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": bobDir})
 	if err == nil {
 		t.Fatal("expected bound-actor vs work_dir conflict, got nil error")
 	}
@@ -104,32 +82,60 @@ func TestBoundActorConflictsWithWorkDirActor(t *testing.T) {
 	}
 }
 
-func TestIdentityOptionalToolsWithoutIdentity(t *testing.T) {
-	s, root := newTestServer(t)
-	// A directory with no wt-/botfam- prefix yields no directory actor.
-	plainDir := mkdir(t, filepath.Join(t.TempDir(), "myrepo"))
-
-	// sweep does not use the calling actor (store.Sweep takes none).
-	if _, err := s.callTool(context.Background(), "sweep", map[string]any{"work_dir": plainDir}); err != nil {
-		t.Fatalf("sweep without identity failed: %v", err)
-	}
-
-	// session_read filters only by the explicit "from" argument.
-	mkdir(t, filepath.Join(root, "sessions", "s1"))
-	if err := os.WriteFile(filepath.Join(root, "sessions", "s1", "session.jsonl"), nil, 0o644); err != nil {
+func setupTestWorktree(t *testing.T, baseDir, name, actor string) string {
+	t.Helper()
+	mainDir := filepath.Join(baseDir, "main")
+	if err := os.MkdirAll(mainDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.callTool(context.Background(), "session_read", map[string]any{"work_dir": plainDir, "session": "s1"}); err != nil {
-		t.Fatalf("session_read without identity failed: %v", err)
+	runCmd := func(dir string, cmdName string, args ...string) {
+		cmd := exec.Command(cmdName, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("failed to run %s %v in %s: %v\nOutput: %s", cmdName, args, dir, err, string(out))
+		}
+	}
+	runCmd(mainDir, "git", "init")
+	runCmd(mainDir, "git", "config", "user.name", "test")
+	runCmd(mainDir, "git", "config", "user.email", "test@example.com")
+	runCmd(mainDir, "git", "commit", "--allow-empty", "-m", "initial commit")
+
+	wtDir := filepath.Join(baseDir, name)
+	runCmd(mainDir, "git", "worktree", "add", wtDir)
+
+	runCmd(wtDir, "git", "config", "extensions.worktreeConfig", "true")
+	runCmd(wtDir, "git", "config", "--worktree", "user.name", actor)
+	runCmd(wtDir, "git", "config", "--worktree", "user.email", actor+"@example.com")
+	return wtDir
+}
+
+func TestIdentityOptionalToolsWithoutIdentity(t *testing.T) {
+	s, _ := newTestServer(t)
+	// A directory with no wt-/botfam- prefix yields no directory actor.
+	base := t.TempDir()
+	plainDir := setupTestWorktree(t, base, "myrepo", "someactor")
+
+	// Create a mock fam.toml so worktree commands can resolve it
+	tomlContent := `name = "mockfam"
+roster = ["alice", "bob"]
+repo_paths = []
+`
+	if err := os.WriteFile(filepath.Join(plainDir, "fam.toml"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// worktree_sync does not use the calling actor.
+	if _, err := s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": plainDir}); err != nil {
+		t.Fatalf("worktree_sync without identity failed: %v", err)
 	}
 	if s.actor != "" {
 		t.Errorf("identity-optional call must not bind an actor, got %q", s.actor)
 	}
 
 	// Identity-requiring tools must still fail without an identity.
-	_, err := s.callTool(context.Background(), "inbox", map[string]any{"work_dir": plainDir})
+	_, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": plainDir})
 	if err == nil {
-		t.Fatal("expected identity error for inbox without identity")
+		t.Fatal("expected identity error for irc_read without identity")
 	}
 	if !strings.Contains(err.Error(), "identity required") {
 		t.Errorf("expected identity-required error, got %q", err.Error())
@@ -137,19 +143,23 @@ func TestIdentityOptionalToolsWithoutIdentity(t *testing.T) {
 }
 
 func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
-	s, root := newTestServer(t)
+	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
-	mkdir(t, filepath.Join(root, "sessions", "s1"))
-	if err := os.WriteFile(filepath.Join(root, "sessions", "s1", "session.jsonl"), nil, 0o644); err != nil {
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+
+	// Create mock fam.toml in aliceDir
+	tomlContent := `name = "mockfam"
+roster = ["alice", "bob"]
+repo_paths = []
+`
+	if err := os.WriteFile(filepath.Join(aliceDir, "fam.toml"), []byte(tomlContent), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	// Conflicting explicit actor vs directory actor must still be rejected,
 	// even for an identity-optional tool.
-	_, err := s.callTool(context.Background(), "session_read", map[string]any{
+	_, err := s.callTool(context.Background(), "worktree_sync", map[string]any{
 		"work_dir": aliceDir,
-		"session":  "s1",
 		"actor":    "bob",
 	})
 	if err == nil {
@@ -161,8 +171,8 @@ func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
 
 	// When an identity IS resolvable, an identity-optional tool binds it
 	// normally so later conflict checks stay active.
-	if _, err := s.callTool(context.Background(), "session_read", map[string]any{"work_dir": aliceDir, "session": "s1"}); err != nil {
-		t.Fatalf("session_read from wt-alice failed: %v", err)
+	if _, err := s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": aliceDir}); err != nil {
+		t.Fatalf("worktree_sync from wt-alice failed: %v", err)
 	}
 	if s.actor != "alice" {
 		t.Errorf("expected session bound to %q, got %q", "alice", s.actor)
@@ -189,17 +199,20 @@ func TestIrcWriteTool(t *testing.T) {
 	// Open FIFO for reading in a separate goroutine so it doesn't block
 	readCh := make(chan string, 1)
 	errCh := make(chan error, 1)
+	ready := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	go func() {
-		// Open the FIFO in RDONLY mode
-		f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+		// Open the FIFO in RDWR mode so it returns immediately and guarantees a reader
+		f, err := os.OpenFile(fifoPath, os.O_RDWR, 0)
 		if err != nil {
 			errCh <- err
 			return
 		}
 		defer f.Close()
+
+		close(ready)
 
 		// Set a read timeout using select/context
 		lineCh := make(chan string, 1)
@@ -222,6 +235,15 @@ func TestIrcWriteTool(t *testing.T) {
 		}
 	}()
 
+	// Wait for reader to be ready before calling irc_write (O_WRONLY|O_NONBLOCK)
+	select {
+	case <-ready:
+	case err := <-errCh:
+		t.Fatalf("failed to start FIFO reader: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for FIFO reader to start")
+	}
+
 	// Call the irc_write tool using the server
 	_, err := s.callTool(context.Background(), "irc_write", map[string]any{
 		"work_dir": aliceDir,
@@ -243,16 +265,19 @@ func TestIrcWriteTool(t *testing.T) {
 	// Test writing with target parameter
 	readCh2 := make(chan string, 1)
 	errCh2 := make(chan error, 1)
+	ready2 := make(chan struct{})
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
 
 	go func() {
-		f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+		f, err := os.OpenFile(fifoPath, os.O_RDWR, 0)
 		if err != nil {
 			errCh2 <- err
 			return
 		}
 		defer f.Close()
+
+		close(ready2)
 
 		lineCh := make(chan string, 1)
 		go func() {
@@ -273,6 +298,15 @@ func TestIrcWriteTool(t *testing.T) {
 			errCh2 <- fmt.Errorf("timeout waiting for FIFO read (target test)")
 		}
 	}()
+
+	// Wait for reader to be ready before calling irc_write (O_WRONLY|O_NONBLOCK)
+	select {
+	case <-ready2:
+	case err := <-errCh2:
+		t.Fatalf("failed to start FIFO reader 2: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for FIFO reader 2 to start")
+	}
 
 	_, err = s.callTool(context.Background(), "irc_write", map[string]any{
 		"work_dir": aliceDir,

@@ -13,10 +13,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/spf13/cobra"
 )
 
 const chatLogSep = " : "
@@ -282,64 +283,38 @@ func isSessionEmpty(session []ircEvent) bool {
 // topic text titles the new session. Names are deterministic from the log, so
 // reruns are idempotent. The trailing, possibly still-running session of each
 // channel is skipped unless --include-open is given.
+// IrcLog2SessionsCmd is the thin args/io entry point retained for tests; it
+// builds the Cobra command and runs it against args.
 func IrcLog2SessionsCmd(args []string, out io.Writer) error {
-	outDir := "doc/collab/sessions"
+	return runCobra(NewIrclog2SessionsCmd(), args, out)
+}
+
+// NewIrclog2SessionsCmd builds the `botfam irclog2sessions` Cobra command.
+func NewIrclog2SessionsCmd() *cobra.Command {
+	outDir := "wiki"
 	gapMinutes := 30.0
 	includeOpen := false
 	timezoneStr := "Europe/Zurich"
-	var logs, channelArgs []string
-
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case strings.HasPrefix(arg, "--out="):
-			outDir = strings.TrimPrefix(arg, "--out=")
-		case arg == "--out":
-			i++
-			if i < len(args) {
-				outDir = args[i]
-			}
-		case strings.HasPrefix(arg, "--gap-minutes="):
-			v, err := strconv.ParseFloat(strings.TrimPrefix(arg, "--gap-minutes="), 64)
-			if err != nil {
-				return fmt.Errorf("invalid --gap-minutes: %w", err)
-			}
-			gapMinutes = v
-		case arg == "--gap-minutes":
-			i++
-			if i < len(args) {
-				v, err := strconv.ParseFloat(args[i], 64)
-				if err != nil {
-					return fmt.Errorf("invalid --gap-minutes: %w", err)
-				}
-				gapMinutes = v
-			}
-		case strings.HasPrefix(arg, "--channel="):
-			channelArgs = append(channelArgs, strings.TrimPrefix(arg, "--channel="))
-		case arg == "--channel":
-			i++
-			if i < len(args) {
-				channelArgs = append(channelArgs, args[i])
-			}
-		case strings.HasPrefix(arg, "--timezone="):
-			timezoneStr = strings.TrimPrefix(arg, "--timezone=")
-		case arg == "--timezone":
-			i++
-			if i < len(args) {
-				timezoneStr = args[i]
-			}
-		case arg == "--include-open":
-			includeOpen = true
-		case strings.HasPrefix(arg, "-"):
-			return fmt.Errorf("unknown irclog2sessions argument %q", arg)
-		default:
-			logs = append(logs, arg)
-		}
+	var channelArgs []string
+	c := &cobra.Command{
+		Use:           "irclog2sessions <chat.log>...",
+		Short:         "Compile IRC channel logs into session transcripts",
+		Args:          cobra.MinimumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runIrclog2Sessions(args, outDir, gapMinutes, includeOpen, timezoneStr, channelArgs, cmd.OutOrStdout())
+		},
 	}
-	if len(logs) == 0 {
-		return errors.New("usage: botfam irclog2sessions CHATLOG [CHATLOG...] [--out <dir>] [--gap-minutes <n>] [--channel <chan>]... [--include-open] [--timezone <zone>]")
-	}
+	c.Flags().StringVar(&outDir, "out", outDir, "output dir for session transcripts")
+	c.Flags().Float64Var(&gapMinutes, "gap-minutes", gapMinutes, "minutes of silence that split sessions")
+	c.Flags().StringArrayVar(&channelArgs, "channel", nil, "restrict to these channels (repeatable)")
+	c.Flags().StringVar(&timezoneStr, "timezone", timezoneStr, "timezone for rendered timestamps")
+	c.Flags().BoolVar(&includeOpen, "include-open", false, "include each channel's trailing (still-open) session")
+	return c
+}
 
+func runIrclog2Sessions(logs []string, outDir string, gapMinutes float64, includeOpen bool, timezoneStr string, channelArgs []string, out io.Writer) error {
 	var loc *time.Location
 	switch strings.ToLower(timezoneStr) {
 	case "local":
@@ -402,11 +377,10 @@ func IrcLog2SessionsCmd(args []string, out io.Writer) error {
 				skippedOpen++
 				continue
 			}
-			dir := filepath.Join(outDir, sessionDirname(channel, mainChannel, session, loc, taken))
-			if err := os.MkdirAll(dir, 0o755); err != nil {
+			if err := os.MkdirAll(outDir, 0o755); err != nil {
 				return err
 			}
-			path := filepath.Join(dir, "session.md")
+			path := filepath.Join(outDir, "session-"+sessionDirname(channel, mainChannel, session, loc, taken)+".md")
 			if err := os.WriteFile(path, []byte(renderSession(channel, session, loc)), 0o644); err != nil {
 				return err
 			}

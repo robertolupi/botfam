@@ -36,7 +36,7 @@ func TestIrcLog2SessionsGolden(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := os.ReadFile(filepath.Join(outDir, name, "session.md"))
+		got, err := os.ReadFile(filepath.Join(outDir, "session-"+name+".md"))
 		if err != nil {
 			t.Errorf("session %s: %v", name, err)
 			continue
@@ -46,12 +46,12 @@ func TestIrcLog2SessionsGolden(t *testing.T) {
 		}
 	}
 
-	gotDirs, err := filepath.Glob(filepath.Join(outDir, "*"))
+	gotFiles, err := filepath.Glob(filepath.Join(outDir, "session-*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gotDirs) != len(goldenDirs) {
-		t.Errorf("wrote %d session dirs, want %d", len(gotDirs), len(goldenDirs))
+	if len(gotFiles) != len(goldenDirs) {
+		t.Errorf("wrote %d session files, want %d", len(gotFiles), len(goldenDirs))
 	}
 	if got := strings.Count(buf.String(), "wrote "); got != len(goldenDirs) {
 		t.Errorf("printed %d 'wrote' lines, want %d", got, len(goldenDirs))
@@ -59,16 +59,16 @@ func TestIrcLog2SessionsGolden(t *testing.T) {
 
 	// Leak test: the NickServ IDENTIFY line in the fixture must never reach a
 	// rendered transcript.
-	for _, dir := range gotDirs {
-		data, err := os.ReadFile(filepath.Join(dir, "session.md"))
+	for _, file := range gotFiles {
+		data, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if bytes.Contains(data, []byte("supersecret")) {
-			t.Errorf("credential leaked into %s", dir)
+			t.Errorf("credential leaked into %s", file)
 		}
 		if bytes.Contains(data, []byte("replayed dupe")) {
-			t.Errorf("useroutput replay leaked into %s", dir)
+			t.Errorf("useroutput replay leaked into %s", file)
 		}
 	}
 }
@@ -83,7 +83,7 @@ func TestIrcLog2SessionsSkipsOpenSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(outDir, "2026-06-11-ccrep-ccrep-titled-session")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(outDir, "session-2026-06-11-ccrep-ccrep-titled-session.md")); !os.IsNotExist(err) {
 		t.Errorf("open trailing session was rendered, want skipped (stat err: %v)", err)
 	}
 	if !strings.Contains(buf.String(), "skipped 1 possibly-open session(s); use --include-open to render anyway") {
@@ -100,16 +100,16 @@ func TestIrcLog2SessionsChannelFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dirs, err := filepath.Glob(filepath.Join(outDir, "*"))
+	files, err := filepath.Glob(filepath.Join(outDir, "session-*.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dirs) != 2 {
-		t.Fatalf("got %d session dirs %v, want 2 #ccrep sessions", len(dirs), dirs)
+	if len(files) != 2 {
+		t.Fatalf("got %d session files %v, want 2 #ccrep sessions", len(files), files)
 	}
-	for _, dir := range dirs {
-		if !strings.Contains(filepath.Base(dir), "ccrep") {
-			t.Errorf("unexpected non-#ccrep session %s", dir)
+	for _, file := range files {
+		if !strings.Contains(filepath.Base(file), "ccrep") {
+			t.Errorf("unexpected non-#ccrep session %s", file)
 		}
 	}
 }

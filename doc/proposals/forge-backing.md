@@ -81,6 +81,19 @@ while the consensus logic stays ours. *(All four red-team models converged on
 this distinction — it is the load-bearing correction to an earlier "forge
 subsumes ccrep" framing.)*
 
+> [!IMPORTANT]
+> **Update (2026-06-13) — go-native supersedes this for a fixed-count quorum.**
+> In practice most of the "decision rule" maps onto branch protection after
+> all: *approvals-die-on-new-commit* = "dismiss stale approvals"; *executor /
+> no UI-merge bypass* = "restrict pushes" + required approvals (only a
+> consensus-satisfying PR can merge, so no merge-bot is needed); *roster
+> restriction* = "restrict approvals to a team"; author-exclusion is automatic.
+> So for a **fixed-count quorum, native branch protection _is_ ccrep**, and the
+> custom Engine / Ledger / bang-line gate was duplication — deleted in #34 (per
+> #33). **Role tiers are native too** — different per-branch protection rules
+> (e.g. `main` stricter than `botfam-next`) give tiered approval without a line
+> of code. See [the roadmap](../dev/roadmap.md) Phase 2 and issue #33.
+
 ## 3. Forgejo vs Gitea
 
 **Recommendation: Forgejo**, behind a fork-neutral `Forge` abstraction.

@@ -18,7 +18,7 @@ esac
 # Identity must come from this worktree's config, not the shared .git/config
 # or a global includeIf that a repo-local entry could override.
 git config --worktree user.name >/dev/null 2>&1 ||
-  die "no per-worktree identity. Fix: tools/setup-worktree-identity.sh <actor>"
+  die "no per-worktree identity. Fix: botfam worktree init <actor>"
 
 [ -z "$(git status --porcelain)" ] ||
   die "working tree is dirty — commit or stash first."

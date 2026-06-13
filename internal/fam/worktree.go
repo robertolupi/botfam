@@ -5,21 +5,135 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
-// WorktreeCmd handles "botfam worktree <init|sync> [args]"
+// WorktreeCmd is the thin args/io entry point retained for tests; it builds the
+// Cobra command and runs it against args.
 func WorktreeCmd(args []string, out io.Writer) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: botfam worktree <init|sync> [args]")
+	return runCobra(NewWorktreeCmd(), args, out)
+}
+
+// NewWorktreeCmd builds the `botfam worktree` Cobra command and its
+// init/sync/register subcommands.
+func NewWorktreeCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:           "worktree",
+		Short:         "Manage agent git worktrees (init/sync/register)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
-	switch args[0] {
-	case "init":
-		return worktreeInit(args[1:], out)
-	case "sync":
-		return worktreeSync(args[1:], out)
-	default:
-		return fmt.Errorf("unknown worktree subcommand %q", args[0])
+	sub := func(use, short string, fn func([]string, io.Writer) error) *cobra.Command {
+		return &cobra.Command{
+			Use:           use,
+			Short:         short,
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return fn(args, cmd.OutOrStdout())
+			},
+		}
 	}
+	c.AddCommand(
+		sub("init <actor> [path]", "Initialize a worktree's git identity", worktreeInit),
+		sub("sync [path]", "Sync a worktree with the fam object stores", worktreeSync),
+		sub("register [path]", "Register all worktrees of this repo into the fam registry", worktreeRegister),
+	)
+	return c
+}
+
+// worktreeRegister enumerates this repo's git worktrees and unions their paths
+// into the fam registry's repo_paths, so the fam's member-repo listing reflects
+// every worktree on disk. It fixes the drift where repo_paths only ever grew by
+// one entry per `botfam setup` run, leaving later-added worktrees invisible
+// (issues #20/#26). It is add-only and idempotent: it never prunes a registered
+// member (which may be a separate clone joined via object alternates). Unlike
+// init/sync it may be run from the main checkout as well as a linked worktree.
+func worktreeRegister(args []string, out io.Writer) error {
+	targetPath := "."
+	if len(args) >= 1 {
+		targetPath = args[0]
+	}
+	absPath, err := filepath.Abs(targetPath)
+	if err != nil {
+		return err
+	}
+
+	// Resolve the fam root and load its registry.
+	info, err := (Resolver{WorkDir: absPath}).Resolve()
+	if err != nil {
+		return err
+	}
+	regPath := filepath.Join(info.Root, "fam.toml")
+	reg, err := ReadRegistry(regPath)
+	if err != nil {
+		return fmt.Errorf("read registry %s: %w", regPath, err)
+	}
+
+	// Enumerate every worktree of this repo and normalize like RepoPath.
+	lines, err := gitLines(absPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("git worktree list: %w", err)
+	}
+	var found []string
+	for _, line := range lines {
+		p, ok := strings.CutPrefix(line, "worktree ")
+		if !ok {
+			continue
+		}
+		if rp, err := filepath.EvalSymlinks(p); err == nil {
+			p = rp
+		}
+		found = append(found, p)
+	}
+	if len(found) == 0 {
+		return fmt.Errorf("no git worktrees found from %s", absPath)
+	}
+
+	// Exclude worktrees nested inside another worktree — e.g. a harness's
+	// ephemeral agent worktrees under .../main/.claude/worktrees/... Only
+	// top-level member checkouts (main + its siblings) belong in repo_paths.
+	var members []string
+	for _, p := range found {
+		nested := false
+		for _, q := range found {
+			if p != q && strings.HasPrefix(p, q+string(filepath.Separator)) {
+				nested = true
+				break
+			}
+		}
+		if !nested {
+			members = append(members, p)
+		}
+	}
+	found = members
+
+	// Union into repo_paths (add-only).
+	existing := map[string]bool{}
+	for _, p := range reg.RepoPaths {
+		existing[p] = true
+	}
+	var added []string
+	for _, p := range found {
+		if !existing[p] {
+			added = append(added, p)
+			existing[p] = true
+		}
+	}
+	if len(added) == 0 {
+		fmt.Fprintf(out, "repo_paths already current (%d worktree(s), none added)\n", len(found))
+		return nil
+	}
+	reg.RepoPaths = unique(append(reg.RepoPaths, added...))
+	if err := WriteRegistry(regPath, reg); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "registered %d worktree(s) into %s:\n", len(added), regPath)
+	for _, p := range added {
+		fmt.Fprintf(out, "  + %s\n", p)
+	}
+	return nil
 }
 
 func worktreeInit(args []string, out io.Writer) error {

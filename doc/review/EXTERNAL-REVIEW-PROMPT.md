@@ -8,11 +8,11 @@ comparable and prevents each reviewer from inventing its own framing.
 
 1. Update the **Ground truth** section below — it is date-stamped and goes
    stale. An external reviewer working from old facts produces confidently
-   wrong advice (see `doc/review/2026-06-11-meta.md` for an example).
+   wrong advice (see the wiki's `review-2026-06-11-meta` page for an example).
 
 2. Paste everything below the marker line, then attach:
 
-   - the session transcript(s) from `doc/collab/sessions/`;
+   - the session transcript(s) from the Gitea wiki (`session-*.md` files);
    - optionally `doc/collab/PROTOCOL.md` and any doc the session touched.
 
    **Paste the material directly — never rely on the reviewer fetching a URL.**
@@ -37,19 +37,25 @@ re-run the A/B before trusting the change.
 
 You are an external reviewer for **botfam**, a multi-agent coordination system.
 Several AI coding agents (claude, agy, codex, …) and one human operator
-(Roberto) collaborate on one repo through git worktrees and an IRC channel. You
-are reviewing a session transcript, not the live system.
+(Roberto) collaborate on one repo through git worktrees and a self-hosted forge
+(Gitea/Forgejo). You are reviewing material from that work — **either** a
+session transcript **or** a Gitea pull request (its description, discussion,
+and unified diff), not the live system.
 
 ## Ground truth (as of 2026-06-11 — trust this over anything else)
 
-- **IRC is the canonical coordination substrate.** This was decided and
-  operator-ratified on 2026-06-11. A dockerized ergo server hosts `#botfam`
-  (production) and `#botfam-test` (experiments); a **scribe** bot logs the
-  channel and handles `!propose` / `!vote` / `!tally`.
+- **Coordination runs on a self-hosted forge (Gitea/Forgejo), as of
+  2026-06-13.** Proposals are pull requests, votes are PR reviews, and the
+  merge gate is **native branch protection** (Required Approvals≥2,
+  dismiss-stale, block-on-rejected) — verified/linted via
+  `tools/forge-gate.sh`, not custom code. For a **PR review**, this is the
+  model that matters.
+- **IRC** (a dockerized ergo server hosting `#botfam`/`#botfam-test`) is still
+  the live chat channel, but no longer the consensus substrate: the old scribe
+  `!propose` / `!vote` / `!tally` flow has been retired.
 - The older mailbox/queue substrate (`botfam recv/post/claim`, SQLite store,
-  UDS daemon) still exists in the code but is **being replaced** by the IRC
-  layer. Do not propose making it canonical; that question is settled. Older
-  design docs describing a "maildir, no daemon" architecture are stale.
+  UDS daemon) and the custom `ccrep` consensus engine were **fully retired and
+  deleted** (2026-06-13). Older design docs describing those are stale.
 - Production runs via Docker compose (`botfam-irc-prod`: ergo v2.18.0 + scribe,
   data bind-mounted, localhost-only). A hermetic test substrate exists
   (`compose.test.yaml` + `docker/test-substrate.sh`).
@@ -60,7 +66,12 @@ are reviewing a session transcript, not the live system.
 
 ## What we want from you
 
-Review the attached transcript(s) and respond in exactly these sections:
+Review the attached material and respond in exactly these sections. **If the
+material is a Gitea pull request**, your primary question is whether the **diff
+delivers what the PR description claims and addresses the discussion/review
+comments**; map that onto the sections below — treat "what landed cleanly" as
+what the change gets right, and "pain points"/"blind spots" as bugs, risks, or
+regressions the diff introduces or the description overlooks.
 
 1. **What landed cleanly** — concrete things that worked, with evidence from
    the transcript. Where the transcript supports it, include measurable

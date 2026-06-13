@@ -32,8 +32,8 @@ deadline: none
   session logs compacted by `tools/merge_sessions.py`, 21 tool skills with a
   generated `skills/INDEX.md`, and hand-written harness pointer files. It lacks
   the IRC layer (coordination is the legacy Python collab MCP mailboxes),
-  agent-authored commits (all 565 commits are the operator's), and
-  `doc/review/` retrospectives.
+  agent-authored commits (all 565 commits are the operator's), and wiki-hosted
+  session retrospectives.
 - Ratified end goal: botfam replaces the deep-cuts Python harness once it
   reaches feature parity. Consequence: **bring the IRC fam to deep-cuts and
   retire collab MCP there — no permanent bridges between the two merge
@@ -110,9 +110,8 @@ Proposed canonical layout (operator offered to move worktrees):
   `scribe`). History ledgers stay per-fam
   (`~/src/botfam-collab/<fam>/history.jsonl` or equivalent).
 - **Sessions pipeline**: `botfam irclog2sessions` already takes `--channel` and
-  `--out`; each fam renders its channels into its own repo's
-  `doc/collab/sessions/`. Timezone default stays `Europe/Zurich`
-  (irclog-tz-and-boot-v1).
+  `--out`; each fam renders its channels flat into its own repo's `wiki/`.
+  Timezone default stays `Europe/Zurich` (irclog-tz-and-boot-v1).
 - **chat.log** remains a single server-side stream; per-fam rendering is a
   filter, not a separate log.
 
@@ -163,11 +162,10 @@ Proposed canonical layout (operator offered to move worktrees):
    differ); keep deep-cuts' 21 tool skills untouched. Unify discovery later
    (deep-cuts generates `skills/INDEX.md`; botfam generates harness files —
    pick one generator as part of parity work, not now).
-5. Sessions: render `#deep-cuts` channels into deep-cuts
-   `doc/collab/sessions/`. `tools/merge_sessions.py` and the per-actor
-   `session.<actor>.md` convention are retired for new sessions once the IRC
-   pipeline runs; existing logs stay as history (prior art, already informs the
-   botfam session layer).
+5. Sessions: render `#deep-cuts` channels into deep-cuts `wiki/`.
+   `tools/merge_sessions.py` and the per-actor `session.<actor>.md` convention
+   are retired for new sessions once the IRC running; existing logs stay as
+   history (prior art, already informs the botfam session layer).
 6. Retire the collab MCP mailboxes and `scratch/ccrep.db` after one successful
    ccrep-gated merge runs end-to-end on IRC for deep-cuts. Until then they
    remain untouched as fallback.

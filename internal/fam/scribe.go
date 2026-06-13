@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 // HistoryEntry represents a single parsed event recorded by the scribe bot.
@@ -23,53 +25,38 @@ type HistoryEntry struct {
 	Body      string `json:"body"`
 }
 
-// ScribeCmd executes the Go-based Scribe IRC bot.
+// ScribeCmd is the thin args/io entry point retained for tests; it builds the
+// Cobra command and runs it against args.
 func ScribeCmd(args []string, out io.Writer) error {
-	var server, channel, historyFile string
+	return runCobra(NewScribeCmd(), args, out)
+}
+
+// NewScribeCmd builds the `botfam scribe` Cobra command (Go IRC scribe bot).
+func NewScribeCmd() *cobra.Command {
 	mainChannel, ccrepChannel := FamChannels(LoadFamRegistry("."))
-	server = "localhost:6667"
-	channel = mainChannel + "," + ccrepChannel
+	server := "localhost:6667"
+	channel := mainChannel + "," + ccrepChannel
 	nick := "scribe"
+	historyFile := os.Getenv("COLLAB_HISTORY")
 
-	historyFile = os.Getenv("COLLAB_HISTORY")
-
-	// Parse arguments
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case strings.HasPrefix(arg, "--server="):
-			server = strings.TrimPrefix(arg, "--server=")
-		case arg == "--server":
-			i++
-			if i < len(args) {
-				server = args[i]
-			}
-		case strings.HasPrefix(arg, "--channel="):
-			channel = strings.TrimPrefix(arg, "--channel=")
-		case arg == "--channel":
-			i++
-			if i < len(args) {
-				channel = args[i]
-			}
-		case strings.HasPrefix(arg, "--file="):
-			historyFile = strings.TrimPrefix(arg, "--file=")
-		case arg == "--file":
-			i++
-			if i < len(args) {
-				historyFile = args[i]
-			}
-		case strings.HasPrefix(arg, "--nick="):
-			nick = strings.TrimPrefix(arg, "--nick=")
-		case arg == "--nick":
-			i++
-			if i < len(args) {
-				nick = args[i]
-			}
-		default:
-			return fmt.Errorf("unknown scribe argument %q", arg)
-		}
+	c := &cobra.Command{
+		Use:           "scribe",
+		Short:         "Run the channel scribe bot (logs IRC events to the ledger)",
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runScribe(server, channel, nick, historyFile, cmd.OutOrStdout())
+		},
 	}
+	c.Flags().StringVar(&server, "server", server, "IRC server host:port")
+	c.Flags().StringVar(&channel, "channel", channel, "comma-separated channels to log")
+	c.Flags().StringVar(&nick, "nick", nick, "scribe nick")
+	c.Flags().StringVar(&historyFile, "file", historyFile, "history ledger path (default $COLLAB_HISTORY)")
+	return c
+}
 
+func runScribe(server, channel, nick, historyFile string, out io.Writer) error {
 	if nick == "" {
 		return errors.New("--nick requires a non-empty value")
 	}
@@ -116,7 +103,6 @@ func ScribeCmd(args []string, out io.Writer) error {
 
 	privRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+PRIVMSG\s+(\S+)\s+:(.*)$`)
 	eventRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+(JOIN|PART|QUIT|NICK)\b\s*:?(\S*)`)
-	tallyRe := regexp.MustCompile(`^!tally\s+(?:id=)?(\S+)`)
 	inviteRe := regexp.MustCompile(`^(?i):\S+\s+INVITE\s+\S+\s+:?(\S+)$`)
 
 	// Read from socket
@@ -190,21 +176,9 @@ func ScribeCmd(args []string, out io.Writer) error {
 			_ = logFile.Sync()
 		}
 
-		// Handle !tally and !version requests on the channel
+		// Handle !version requests on the channel
 		if entry.Type == "PRIVMSG" {
-			if m := tallyRe.FindStringSubmatch(entry.Body); m != nil {
-				proposalID := m[1]
-				summary, err := TallyProposal(historyFile, proposalID)
-				if err != nil {
-					summary = fmt.Sprintf("Error calculating tally for %q: %v", proposalID, err)
-				}
-				replyTarget := entry.Target
-				if !strings.HasPrefix(replyTarget, "#") {
-					replyTarget = entry.Sender
-				}
-				cmd := fmt.Sprintf("PRIVMSG %s :%s\r\n", replyTarget, summary)
-				_, _ = conn.Write([]byte(cmd))
-			} else if strings.HasPrefix(strings.TrimSpace(entry.Body), "!version") {
+			if strings.HasPrefix(strings.TrimSpace(entry.Body), "!version") {
 				replyTarget := entry.Target
 				if !strings.HasPrefix(replyTarget, "#") {
 					replyTarget = entry.Sender
