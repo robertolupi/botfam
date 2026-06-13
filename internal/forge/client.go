@@ -36,11 +36,11 @@ type PullRequest struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"head"`
-	Base      struct {
+	Base struct {
 		Ref string `json:"ref"`
 		SHA string `json:"sha"`
 	} `json:"base"`
-	User      struct {
+	User struct {
 		Login string `json:"login"`
 	} `json:"user"`
 }
@@ -255,6 +255,10 @@ func NewClient(workDir string, actor string) (*Client, error) {
 	}, nil
 }
 
+func (c *Client) Request(method, path string, body []byte) ([]byte, error) {
+	return c.request(method, path, body)
+}
+
 func (c *Client) request(method, path string, body []byte) ([]byte, error) {
 	url := fmt.Sprintf("%s/api/v1/%s", strings.TrimSuffix(c.BaseURL, "/"), strings.TrimPrefix(path, "/"))
 	var reqBody io.Reader
@@ -431,4 +435,116 @@ func readConfigValueFromFamTOML(path string, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+type Milestone struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	State string `json:"state"`
+}
+
+type Issue struct {
+	ID     int64  `json:"id"`
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	State  string `json:"state"`
+	User   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	PullRequest *struct {
+		URL string `json:"url"`
+	} `json:"pull_request"`
+	CreatedAt string `json:"created_at"`
+	ClosedAt  string `json:"closed_at"`
+}
+
+type TimelineEvent struct {
+	ID        int64  `json:"id"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at"`
+	User      *struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Body         string `json:"body"`
+	RefCommitSHA string `json:"ref_commit_sha"`
+	ReviewID     int64  `json:"review_id"`
+}
+
+func (c *Client) ListMilestones() ([]*Milestone, error) {
+	var all []*Milestone
+	page := 1
+	limit := 50
+	for {
+		path := fmt.Sprintf("repos/%s/%s/milestones?state=all&page=%d&limit=%d", c.Owner, c.Repo, page, limit)
+		b, err := c.request("GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var list []*Milestone
+		if err := json.Unmarshal(b, &list); err != nil {
+			return nil, err
+		}
+		if len(list) == 0 {
+			break
+		}
+		all = append(all, list...)
+		if len(list) < limit {
+			break
+		}
+		page++
+	}
+	return all, nil
+}
+
+func (c *Client) ListIssuesByMilestone(milestoneID int64) ([]*Issue, error) {
+	var all []*Issue
+	page := 1
+	limit := 50
+	for {
+		path := fmt.Sprintf("repos/%s/%s/issues?milestones=%d&state=all&type=all&page=%d&limit=%d", c.Owner, c.Repo, milestoneID, page, limit)
+		b, err := c.request("GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var list []*Issue
+		if err := json.Unmarshal(b, &list); err != nil {
+			return nil, err
+		}
+		if len(list) == 0 {
+			break
+		}
+		all = append(all, list...)
+		if len(list) < limit {
+			break
+		}
+		page++
+	}
+	return all, nil
+}
+
+func (c *Client) GetIssueTimeline(issueNum int) ([]*TimelineEvent, error) {
+	var all []*TimelineEvent
+	page := 1
+	limit := 50
+	for {
+		path := fmt.Sprintf("repos/%s/%s/issues/%d/timeline?page=%d&limit=%d", c.Owner, c.Repo, issueNum, page, limit)
+		b, err := c.request("GET", path, nil)
+		if err != nil {
+			return nil, err
+		}
+		var list []*TimelineEvent
+		if err := json.Unmarshal(b, &list); err != nil {
+			return nil, err
+		}
+		if len(list) == 0 {
+			break
+		}
+		all = append(all, list...)
+		if len(list) < limit {
+			break
+		}
+		page++
+	}
+	return all, nil
 }
