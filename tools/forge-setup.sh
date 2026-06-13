@@ -51,12 +51,9 @@ done
 [ -n "$HOST" ] || { echo "error: --host <url> is required" >&2; exit 2; }
 command -v curl >/dev/null || { echo "error: curl required" >&2; exit 2; }
 
-# Identity — same derivation as forge-login.sh / git-credential-botfam.
-if [ -z "$ACTOR" ]; then
-  ACTOR="$(basename "$PWD")"; ACTOR="${ACTOR#wt-}"; ACTOR="${ACTOR#botfam-}"
-fi
-[ -n "$FAM" ] || FAM="${BOTFAM_FAM:-$(basename "$(dirname "$PWD")")}"
-TOKEN_FILE="$HOME/.botfam/token-${FAM}-${ACTOR}"
+# Identity (sourced from lib-botfam.sh)
+source "$(dirname "$0")/lib-botfam.sh"
+derive_identity
 
 # Forge host (host[:port]) for git-config scoping, derived from --host.
 FORGE_HOSTPORT="${HOST#*://}"; FORGE_HOSTPORT="${FORGE_HOSTPORT%%/*}"
