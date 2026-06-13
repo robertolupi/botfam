@@ -60,13 +60,38 @@ func worktreeInit(args []string, out io.Writer) error {
 		return fmt.Errorf("failed to set user.name: %w", err)
 	}
 
-	// Set user.email config for the worktree
-	var email string
-	if actor == "rlupi" {
-		email = "roberto.lupi@gmail.com"
-	} else {
-		email = fmt.Sprintf("roberto.lupi+%s@gmail.com", actor)
+	// Determine operator name and default email dynamically from git config
+	parentName, _ := gitOne(absPath, "config", "user.name")
+	parentName = strings.TrimSpace(parentName)
+
+	defaultEmail, _ := gitOne(absPath, "config", "user.email")
+	if defaultEmail == "" {
+		defaultEmail, _ = gitOne(absPath, "config", "--global", "user.email")
 	}
+	defaultEmail = strings.TrimSpace(defaultEmail)
+
+	var email string
+	if defaultEmail != "" {
+		if idx := strings.Index(defaultEmail, "@"); idx != -1 {
+			local := defaultEmail[:idx]
+			domain := defaultEmail[idx:]
+			if actor == parentName || parentName == "" {
+				email = defaultEmail
+			} else {
+				suffix := "+" + actor
+				if strings.HasSuffix(local, suffix) {
+					email = defaultEmail
+				} else {
+					email = local + suffix + domain
+				}
+			}
+		} else {
+			email = defaultEmail
+		}
+	} else {
+		email = fmt.Sprintf("%s@localhost", actor)
+	}
+
 	if _, err := gitOutput(absPath, "config", "--worktree", "user.email", email); err != nil {
 		return fmt.Errorf("failed to set user.email: %w", err)
 	}
@@ -130,12 +155,22 @@ func worktreeSync(args []string, out io.Writer) error {
 		didStash = true
 	}
 
-	fmt.Fprintf(out, "Merging main into branch %q...\n", branch)
-	mergeOut, err := gitOutput(absPath, "merge", "main")
+	fmt.Fprintln(out, "Fetching latest changes from origin...")
+	_, _ = gitOutput(absPath, "fetch")
+
+	mergeTarget := "origin/main"
+	_, errVerify := gitOne(absPath, "rev-parse", "--verify", "origin/main")
+	if errVerify != nil {
+		fmt.Fprintln(out, "Warning: 'origin/main' not found. Merging local 'main' instead.")
+		mergeTarget = "main"
+	}
+
+	fmt.Fprintf(out, "Merging %s into branch %q...\n", mergeTarget, branch)
+	mergeOut, err := gitOutput(absPath, "merge", mergeTarget)
 	if err != nil {
 		// If merge fails, print merge output and return error.
 		// Note that we don't pop the stash if there are conflicts.
-		fmt.Fprintln(out, string(mergeOut))
+		fmt.Fprint(out, string(mergeOut))
 		return fmt.Errorf("merge failed: resolve conflicts manually, then pop stash if applicable: %w", err)
 	}
 	fmt.Fprint(out, string(mergeOut))
