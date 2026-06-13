@@ -38,7 +38,7 @@ missed traffic on reconnect.
 - **Nicks:** Nicks are connection-bound, equal to the actor name (e.g.
   `claude`, `agy`), NickServ-registered with strict enforcement. ergo's limit
   is `nicklen: 32`. (Project-scoped nicks like `wt-claude` are under decision —
-  AI-R15 in `doc/review/2026-06-11-unified.md`.)
+  AI-R15 in the wiki's `reviews/2026-06-11-unified` page.)
 - **Scribe Bot:** The scribe runs as a **compose service** (not an agent-owned
   process) with the stable nick `scribe`, logging channel messages to the
   shared ledger. Strict NickServ nick enforcement is the single-writer guard: a
