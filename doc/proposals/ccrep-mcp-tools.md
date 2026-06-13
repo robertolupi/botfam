@@ -47,7 +47,7 @@ The fix already half-exists: `irc-propose` computes the SHA from
 to the proposal's `tally.LatestSHA` (voting.go:484) rather than local HEAD. We
 generalise those two behaviours to every verb, on both surfaces.
 
-## 2. The abstract ccrep contract (one core, two adapters)
+## 2. The abstract ccrep contract (one core, thin adapters)
 
 | op        | inputs                                                                       | **SHA source**                         | emits                                                |
 | --------- | ---------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------- |
@@ -59,7 +59,9 @@ generalise those two behaviours to every verb, on both surfaces.
 | `gate`    | `id`, `commit`                                                               | ledger + commit verify                 | local only — pass/fail (wraps `merge-gate`)          |
 
 `merge` and `gate` are local executor helpers; the rest write one bang line to
-the fam channel via the active transport.
+the fam channel via the active transport. This contract is a Go API, not a wire
+format — every surface (CLI, MCP, and a future TUI or web UI) is a thin adapter
+over it (§6).
 
 ## 3. The three rules that close the pains
 
@@ -113,15 +115,51 @@ checkout** via `git-common-dir` (as `worktree sync` already does),
 manual gate→merge→`!executed` sequence (run by hand three times this session)
 into one command; the manual two-step remains valid.
 
-## 6. Transport adapters
+## 6. Architecture: ports & adapters
 
-Both adapters share the SHA resolver and bang-line builder; only the wire
-differs.
+A presentation-agnostic **core engine** with thin adapters per surface.
+Dependency direction is strict — **adapters → core → ports** — and the core
+imports neither cobra, the MCP library, nor IRC wire specifics. This is the
+boundary the whole CLI↔MCP alignment rests on, and the one that makes a future
+[bubbletea](https://github.com/charmbracelet/bubbletea) TUI or web UI "write
+another adapter" rather than "refactor the core".
 
-- **MCP** (`ccrep_*`): writes via `irc_write` to the live client. Typed params.
-- **CLI** (`botfam ccrep <op>`): writes to `scratch/irc/<name>/in` if a client
-  is running, else one-shot dials the server (reusing `irc-propose`'s
-  connect→send→quit), so the operator gets the same op with no client running.
+- **Core** (`internal/ccrep`): the §2 verbs as a Go API — `Engine` with
+  `Propose/Revise/Vote/Tally/Merge/Gate`, taking typed args and returning
+  presentation-neutral, **JSON-tagged** result/view types (`TallyResult`,
+  `ProposalView`, `ActionResult`). No printing, no prompts, no `os.Exit`.
+- **Ports** (interfaces the core depends on, wired at each adapter's
+  composition root):
+  - `Transport.Send(line)` — one bang line out. Impls: FIFO writer (live
+    client), one-shot dialer (`irc-propose`'s connect→send→quit), `fake`
+    (tests).
+  - `Ledger` (read model): `Tally(id)`, `ListProposals(filter)`,
+    `GetProposal(id)`, and `Subscribe(ctx) <-chan Event` — the live feed
+    reactive UIs need.
+  - `Git`: `RevParse(ref)`, `VerifyPushed(sha)`, `MainCheckout()`,
+    `MergeNoFF(...)`.
+- **Adapters** (import the core, never the reverse):
+  - **CLI** (cobra): calls `Engine`, formats text, owns the `$VISUAL` prompt
+    and all interactivity. Picks the FIFO transport if a client is running,
+    else the one-shot dialer.
+  - **MCP** (`ccrep_*`): calls `Engine`, marshals JSON, FIFO transport via
+    `irc_write`. No interactivity.
+  - **Future TUI / web**: call the same `Engine` for actions and
+    `Ledger.Subscribe` for live state; nothing in the core changes.
+
+Two seams future-proof the reactive UIs specifically:
+
+1. **Interaction lives in adapters, not the core.** `Vote` takes an
+   already-resolved verdict + body; the editor prompt (§4) is a CLI concern. A
+   TUI/web collect the body their own way and call the same `Vote`.
+2. **The read model exposes `Subscribe`.** The CLI ignores it (one-shot calls),
+   but a TUI/web bind a proposal list to the event stream for live updates —
+   bubbletea turns the `<-chan Event` into `tea.Msg`s directly. Designing it in
+   now is free; bolting it on later means reworking the read path.
+
+The same boundary makes the engine **testable headless** (fake `Transport` +
+`Ledger`) and leaves room to run it behind RPC for a remote web backend without
+touching callers.
 
 ## 7. CLI structure (cobra)
 
@@ -176,16 +214,19 @@ they are deleted in a later proposal (§10).
 
 ## 10. Scope & phasing
 
-**In this proposal:** cobra tree + flag/env runtime config + typed `fam.toml`;
-the `ccrep` verb set on CLI + MCP; deletion of the daemon ccrep verbs
+**In this proposal:** the core/ports boundary (§6) plus the **CLI and MCP
+adapters only**; cobra tree + flag/env runtime config + typed `fam.toml`; the
+`ccrep` verb set; deletion of the daemon ccrep verbs
 (`propose/vote/tally/approve/merge`) and `CollectCcrepEvents(store)` — they are
-wholesale-replaced.
+wholesale-replaced. The `Ledger.Subscribe` port is defined now (the CLI leaves
+it unused) so the read path is reactive-ready.
 
 **Deferred** (independent subtraction, would bloat this review): deleting the
 message bus (`send/…`), `topic`, and the `server` daemon
 ([post-pivot-cleanup.md](post-pivot-cleanup.md) §3 buckets C, roadmap steps 2
 and 6); re-backing `task`/`session` on the ledger (steps 3–4); the structured
-review-body envelope (§3).
+review-body envelope (§3); the **bubbletea TUI and web UI adapters** (§6 keeps
+them cheap to add — they are not built here).
 
 ## 11. Testing
 
