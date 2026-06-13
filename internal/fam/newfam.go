@@ -222,31 +222,44 @@ func writeClaudeSettings(checkout string) error {
 	}
 	path := filepath.Join(dir, "settings.json")
 
-	type Permissions struct {
-		Allow []string `json:"allow"`
-	}
-	type Settings struct {
-		EnabledMcpjsonServers []string     `json:"enabledMcpjsonServers,omitempty"`
-		Permissions           *Permissions `json:"permissions,omitempty"`
-	}
-
-	var s Settings
+	// Read existing settings, if any
+	settingsMap := make(map[string]json.RawMessage)
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &s)
+		_ = json.Unmarshal(data, &settingsMap)
 	}
 
+	// 1. Mutate enabledMcpjsonServers
+	var enabledServers []string
+	if serversRaw, exists := settingsMap["enabledMcpjsonServers"]; exists {
+		_ = json.Unmarshal(serversRaw, &enabledServers)
+	}
+
+	// Filter out "collab" if it's there (historical cleanup)
 	var newServers []string
-	for _, srv := range s.EnabledMcpjsonServers {
+	for _, srv := range enabledServers {
 		if srv != "collab" {
 			newServers = append(newServers, srv)
 		}
 	}
-	s.EnabledMcpjsonServers = newServers
+	
+	serversData, err := json.Marshal(newServers)
+	if err != nil {
+		return err
+	}
+	settingsMap["enabledMcpjsonServers"] = serversData
 
-	if s.Permissions == nil {
-		s.Permissions = &Permissions{}
+	// 2. Mutate permissions object
+	permissionsMap := make(map[string]json.RawMessage)
+	if permRaw, exists := settingsMap["permissions"]; exists {
+		_ = json.Unmarshal(permRaw, &permissionsMap)
 	}
 
+	var allowList []string
+	if allowRaw, exists := permissionsMap["allow"]; exists {
+		_ = json.Unmarshal(allowRaw, &allowList)
+	}
+
+	// Define allowed commands
 	allowed := []string{
 		"Bash(botfam:*)",
 		"Bash(basename:*)",
@@ -265,7 +278,7 @@ func writeClaudeSettings(checkout string) error {
 	}
 
 	existing := map[string]bool{}
-	for _, cmd := range s.Permissions.Allow {
+	for _, cmd := range allowList {
 		if cmd != "mcp__collab__*" {
 			existing[cmd] = true
 		}
@@ -279,9 +292,21 @@ func writeClaudeSettings(checkout string) error {
 		uniqueAllow = append(uniqueAllow, cmd)
 	}
 	sort.Strings(uniqueAllow)
-	s.Permissions.Allow = uniqueAllow
 
-	data, err := json.MarshalIndent(s, "", "  ")
+	allowData, err := json.Marshal(uniqueAllow)
+	if err != nil {
+		return err
+	}
+	permissionsMap["allow"] = allowData
+
+	permData, err := json.Marshal(permissionsMap)
+	if err != nil {
+		return err
+	}
+	settingsMap["permissions"] = permData
+
+	// Marshal settingsMap back to JSON
+	data, err := json.MarshalIndent(settingsMap, "", "  ")
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package fam
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -86,5 +87,124 @@ func TestNewfam(t *testing.T) {
 				t.Errorf("agent doc %s does not exist", docPath)
 			}
 		}
+	}
+}
+
+func TestWriteClaudeSettingsPreservesFields(t *testing.T) {
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	settingsFile := filepath.Join(claudeDir, "settings.json")
+	initialContent := `{
+  "attribution": "test-model",
+  "env": {
+    "FOO": "bar"
+  },
+  "enabledMcpjsonServers": [
+    "other-server",
+    "collab"
+  ],
+  "permissions": {
+    "allow": [
+      "mcp__collab__*",
+      "Bash(git status:*)"
+    ],
+    "deny": [
+      "Bash(rm:*)"
+    ]
+  }
+}`
+	if err := os.WriteFile(settingsFile, []byte(initialContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run writeClaudeSettings
+	if err := writeClaudeSettings(tempDir); err != nil {
+		t.Fatalf("writeClaudeSettings failed: %v", err)
+	}
+
+	// Read and verify the result
+	data, err := os.ReadFile(settingsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal settings.json: %v", err)
+	}
+
+	// Verify preserved top-level fields
+	if parsed["attribution"] != "test-model" {
+		t.Errorf("expected attribution to be 'test-model', got %v", parsed["attribution"])
+	}
+
+	env, ok := parsed["env"].(map[string]interface{})
+	if !ok || env["FOO"] != "bar" {
+		t.Errorf("expected env.FOO to be 'bar', got %v", parsed["env"])
+	}
+
+	// Verify mutated enabledMcpjsonServers (should filter out "collab", keep "other-server")
+	servers, ok := parsed["enabledMcpjsonServers"].([]interface{})
+	if !ok {
+		t.Fatalf("expected enabledMcpjsonServers to be slice, got %v", parsed["enabledMcpjsonServers"])
+	}
+	var foundOther, foundCollab bool
+	for _, s := range servers {
+		if s == "other-server" {
+			foundOther = true
+		}
+		if s == "collab" {
+			foundCollab = true
+		}
+	}
+	if !foundOther {
+		t.Errorf("expected other-server to remain in enabledMcpjsonServers")
+	}
+	if foundCollab {
+		t.Errorf("expected collab to be removed from enabledMcpjsonServers")
+	}
+
+	// Verify permissions
+	permissions, ok := parsed["permissions"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected permissions to be object, got %v", parsed["permissions"])
+	}
+
+	// Verify permissions.deny is preserved
+	deny, ok := permissions["deny"].([]interface{})
+	if !ok || len(deny) != 1 || deny[0] != "Bash(rm:*)" {
+		t.Errorf("expected permissions.deny to be preserved as ['Bash(rm:*)'], got %v", permissions["deny"])
+	}
+
+	// Verify permissions.allow contains all allowed commands, is sorted, and does not contain mcp__collab__*
+	allow, ok := permissions["allow"].([]interface{})
+	if !ok {
+		t.Fatalf("expected permissions.allow to be slice, got %v", permissions["allow"])
+	}
+
+	var foundCollabAllow bool
+	var foundGitStatus bool
+	for _, a := range allow {
+		if a == "mcp__collab__*" {
+			foundCollabAllow = true
+		}
+		if a == "Bash(git status:*)" {
+			foundGitStatus = true
+		}
+	}
+	if foundCollabAllow {
+		t.Errorf("expected mcp__collab__* to be removed from permissions.allow")
+	}
+	if !foundGitStatus {
+		t.Errorf("expected Bash(git status:*) to be in permissions.allow")
+	}
+
+	// Total length should be our 14 allowed commands
+	if len(allow) != 14 {
+		t.Errorf("expected permissions.allow length to be 14, got %d", len(allow))
 	}
 }
