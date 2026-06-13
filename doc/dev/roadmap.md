@@ -15,10 +15,8 @@ mirrors the milestones; issue numbers are the source of truth.
 > protection (Required Approvals + restrict-to-roster + dismiss-stale +
 > restrict-push) *is* ccrep — no custom Engine, ledger, bang-lines, status
 > check, or webhook. The duplicative gate machinery from the early forge work
-> is being deleted (#33). Role tiers are native too (per-branch rules — e.g.
-> `main` stricter than `botfam-next`). A webhook/custom code is only justified
-> for the one rule branch protection can't express — presence-aware quorum
-> (dynamic by who's online) — deferred as YAGNI. See
+> was deleted in #34 (per #33). Role tiers are native too (per-branch rules —
+> e.g. `main` stricter than `botfam-next`). See
 > [forge-backing.md](../proposals/forge-backing.md) §2.
 
 Already shipped (no milestone): `botfam verify` (#7), the `internal/ccrep` core
