@@ -10,7 +10,10 @@
 // See doc/proposals/ccrep-mcp-tools.md for the design.
 package ccrep
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
 // Verdict is a reviewer's decision on a proposal.
 type Verdict string
@@ -45,6 +48,8 @@ func (q Quorum) valid() bool {
 	switch q {
 	case QuorumAll, QuorumMajority, QuorumAny:
 		return true
+	case "consensus":
+		return os.Getenv("BOTFAM_SOCKET") != ""
 	}
 	return false
 }

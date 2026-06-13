@@ -93,6 +93,7 @@ ran=()
 sanitize() { printf '%s' "$1" | tr -cs 'a-zA-Z0-9' '_'; }
 
 run_ollama() {
+  [ ${#ollama_models[@]} -eq 0 ] && return
   local m out req
   curl -fsS "$OLLAMA_HOST/api/tags" >/dev/null 2>&1 \
     || { echo "  ollama not reachable at $OLLAMA_HOST — skipping ${#ollama_models[@]} local model(s)" >&2; return; }

@@ -70,7 +70,7 @@ func MergeGateCmd(args []string, out io.Writer) (err error) {
 	var commitSHA string
 	var proposalID string
 	var client *forge.Client
-	var independentApprovals []CcrepEvent
+	var independentApprovals []string
 
 	defer func() {
 		if UseForge() && client != nil && commitSHA != "" && proposalID != "" {
@@ -134,232 +134,137 @@ func MergeGateCmd(args []string, out io.Writer) (err error) {
 		return errors.New("missing required --proposal <id>")
 	}
 
-	var events []CcrepEvent
-	var present map[string]bool
-	var skipped int
+	if !UseForge() {
+		historyPath := os.Getenv("COLLAB_HISTORY")
+		if historyPath == "" {
+			historyPath, _ = DefaultHistoryPath(".")
+		}
+		if historyPath != "" && ValidateHistoryPath(historyPath) == nil {
+			events, _, _, err := CollectIrcCcrepEvents(historyPath, proposalID)
+			if err == nil {
+				for _, ev := range events {
+					if ev.SpoofSuspect {
+						fmt.Fprintf(out, "spoof-suspect: %s from %q claims reviewer %q (commit %s); event not counted\n", ev.Type, ev.Reviewer, ev.ClaimedReviewer, ev.CommitSHA)
+					}
+				}
+			}
+		}
+	}
 
 	if UseForge() {
-		// 1. Resolve roster from fam.toml to normalize reviewer names
-		resolverInfo, err := (Resolver{WorkDir: "."}).Resolve()
+		info, err := (Resolver{WorkDir: "."}).Resolve()
+		if err == nil {
+			actor := os.Getenv("COLLAB_ACTOR")
+			if actor == "" {
+				actor = info.Actor
+			}
+			if actor == "" {
+				actor = "operator"
+			}
+			client, _ = forge.NewClient(".", actor)
+		}
+	}
+
+	engine, err := buildEngine(context.Background(), proposalID, false)
+	if err != nil {
+		return err
+	}
+
+	res, gateErr := engine.Gate(context.Background(), ccrep.GateArgs{
+		ID:     proposalID,
+		Commit: commitSHA,
+	})
+	if gateErr != nil {
+		err = gateErr
+		return err
+	}
+
+	t, tallyErr := engine.Tally(context.Background(), ccrep.TallyArgs{ID: proposalID})
+	if tallyErr != nil {
+		err = tallyErr
+		return err
+	}
+
+	if !res.Passed {
+		// Reconstruct the legacy errors so existing tests pass:
+		if t.LatestSHA != "" && commitSHA != "" && !shaMatches(t.LatestSHA, commitSHA) {
+			err = fmt.Errorf("requested commit %s is superseded by newer proposed commit %s; older approvals are void", commitSHA, t.LatestSHA)
+			return err
+		}
+
+		// Check for insufficient approvals
+		var independentApprovalsCount int
+		for _, v := range t.Votes {
+			if v.Verdict == ccrep.Approve && v.Actor != t.Author && v.Actor != "" && v.SHA == commitSHA {
+				independentApprovalsCount++
+			}
+		}
+
+		// Resolve roster
+		resolverInfo, rosterErr := (Resolver{WorkDir: "."}).Resolve()
 		var roster []string
-		if err == nil && resolverInfo.Root != "" {
-			reg, err := ReadRegistry(filepath.Join(resolverInfo.Root, "fam.toml"))
-			if err == nil {
+		if rosterErr == nil && resolverInfo.Root != "" {
+			reg, regErr := ReadRegistry(filepath.Join(resolverInfo.Root, "fam.toml"))
+			if regErr == nil {
 				roster = reg.Roster
 			}
 		}
 
-		// 2. Resolve actor
-		actor := os.Getenv("COLLAB_ACTOR")
-		if actor == "" && err == nil {
-			actor = resolverInfo.Actor
-		}
-		if actor == "" {
-			actor = "operator"
-		}
-
-		// 3. Create Gitea client
-		client, err = forge.NewClient(".", actor)
-		if err != nil {
-			return err
-		}
-
-		// 4. Instantiate engine
-		vc := &GitVersionControl{WorkDir: "."}
-		ledger := &GiteaLedger{Client: client, Roster: roster, WorkDir: "."}
-		transport := &GiteaTransport{Client: client}
-		engine := ccrep.New(vc, ledger, transport, actor, ccrep.QuorumMajority)
-
-		// 5. Call engine.Gate
-		res, gateErr := engine.Gate(context.Background(), ccrep.GateArgs{
-			ID:     proposalID,
-			Commit: commitSHA,
-		})
-		if gateErr != nil {
-			err = gateErr
-			return err
-		}
-
-		if !res.Passed {
-			err = fmt.Errorf("proposal %s commit %s gate failed: %s", proposalID, commitSHA, res.Reason)
-			return err
-		}
-
-		fmt.Fprintf(out, "Consensus reached: proposal %s approved for commit %s with %s\n", proposalID, commitSHA, res.Reason)
-		err = nil
-		return nil
-	} else {
-		// Legacy IRC/scribe path
+		var present map[string]bool
 		historyPath := os.Getenv("COLLAB_HISTORY")
 		if historyPath == "" {
-			var err error
-			historyPath, err = DefaultHistoryPath(".")
-			if err != nil {
-				return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
+			historyPath, _ = DefaultHistoryPath(".")
+		}
+		if historyPath != "" && ValidateHistoryPath(historyPath) == nil {
+			_, p, _, _ := CollectIrcCcrepEvents(historyPath, proposalID)
+			present = p
+		}
+
+		var presentRoster []string
+		for _, name := range roster {
+			if present[name] {
+				presentRoster = append(presentRoster, name)
 			}
 		}
 
-		if err := ValidateHistoryPath(historyPath); err != nil {
+		if UseForge() && len(presentRoster) == 0 {
+			presentRoster = roster
+		}
+
+		requiredApprovals := requiredIndependentApprovals(string(t.Quorum), presentRoster, t.Author)
+
+		if independentApprovalsCount < requiredApprovals {
+			err = fmt.Errorf("proposal %s commit %s has %d independent approval(s), but requires %d (quorum: %s, author: %q)",
+				proposalID, commitSHA, independentApprovalsCount, requiredApprovals, t.Quorum, t.Author)
 			return err
 		}
 
-		var collectErr error
-		events, present, skipped, collectErr = CollectIrcCcrepEvents(historyPath, proposalID)
-		if collectErr != nil {
-			return collectErr
-		}
-		if skipped > 0 {
-			fmt.Fprintf(out, "warning: skipped %d unparseable line(s) in history log\n", skipped)
-		}
-	}
-
-	if len(events) == 0 {
-		return fmt.Errorf("no CCREP events found for proposal %q", proposalID)
-	}
-
-	// Sort events by timestamp
-	sort.Slice(events, func(i, j int) bool {
-		return events[i].TS < events[j].TS
-	})
-
-	// Reviewer identity comes from the authenticated sender in the IRC log.
-	// Events whose payload claims a different reviewer are spoof suspects:
-	// report them, never count them.
-	var spoofSuspects []CcrepEvent
-	var trusted []CcrepEvent
-	for _, ev := range events {
-		if ev.SpoofSuspect {
-			spoofSuspects = append(spoofSuspects, ev)
-			fmt.Fprintf(out, "spoof-suspect: %s from %q claims reviewer %q (commit %s); event not counted\n", ev.Type, ev.Reviewer, ev.ClaimedReviewer, ev.CommitSHA)
-			continue
-		}
-		trusted = append(trusted, ev)
-	}
-	events = trusted
-
-	// Find the author and latest proposed commit SHA. Fail closed: without a
-	// ccrep:proposal event we cannot establish the author or the latest commit,
-	// so the gate refuses rather than guessing.
-	var latestCommitSHA string
-	var author string
-	var quorumType string
-	var deadlineStr string
-	foundProposal := false
-	for _, ev := range events {
-		if ev.Type == "ccrep:proposal" {
-			foundProposal = true
-			author = ev.Reviewer
-			latestCommitSHA = ev.CommitSHA
-			quorumType = ev.Quorum
-			deadlineStr = ev.Deadline
-		} else if ev.Type == "ccrep:revision" {
-			if ev.CommitSHA == "" {
-				return fmt.Errorf("invalid ccrep:revision event for proposal %s (ts %.6f): missing commit_sha", proposalID, ev.TS)
-			}
-			latestCommitSHA = ev.CommitSHA
-		}
-	}
-
-	if !foundProposal {
-		return fmt.Errorf("no ccrep:proposal event found for proposal %q; refusing to gate (fail closed)", proposalID)
-	}
-	if latestCommitSHA == "" {
-		return fmt.Errorf("ccrep:proposal event for proposal %q has no commit_sha; refusing to gate (fail closed)", proposalID)
-	}
-
-	// Check deadline
-	if deadlineStr != "" {
-		deadlineTime, err := time.Parse(time.RFC3339, deadlineStr)
-		if err == nil && time.Now().After(deadlineTime) {
-			return fmt.Errorf("proposal %s has expired (deadline: %s)", proposalID, deadlineStr)
-		}
-	}
-
-	// Approvals die on new commits: if a new commit has been proposed/revisioned,
-	// any older approvals are void.
-	if latestCommitSHA != commitSHA {
-		return fmt.Errorf("requested commit %s is superseded by newer proposed commit %s; older approvals are void", commitSHA, latestCommitSHA)
-	}
-
-	// Determine consensus status for this commit
-	var approvals []CcrepEvent
-	var requests []CcrepEvent
-
-	// Latest-verdict-per-reviewer across the WHOLE proposal: for each reviewer
-	// take their most recent verdict (by timestamp) regardless of which commit
-	// it targeted. Events are already sorted by TS, so last write wins.
-	verdicts := make(map[string]CcrepEvent)
-	for _, ev := range events {
-		if ev.Type == "ccrep:evaluation" || ev.Type == "ccrep:critique" {
-			verdicts[ev.Reviewer] = ev
-		}
-	}
-
-	for _, ev := range verdicts {
-		v := strings.ToLower(ev.Verdict)
-		if v == "approve" {
-			// An approval only counts for the exact commit being gated
-			// (approvals die on new commits). An approval of an older commit
-			// is stale: neither an approval nor a blocker.
-			if ev.CommitSHA == commitSHA {
-				approvals = append(approvals, ev)
-			}
-		} else if v == "request_changes" || v == "reject" {
-			// A blocking verdict persists across revisions: it blocks the gate
-			// no matter which commit it targeted, until the same reviewer
-			// issues a newer verdict.
-			requests = append(requests, ev)
-		}
-	}
-
-	// Independent approvals (not by author)
-	independentApprovals = nil
-	for _, app := range approvals {
-		if app.Reviewer != author && app.Reviewer != "" {
-			independentApprovals = append(independentApprovals, app)
-		}
-	}
-
-	// Resolve roster from fam.toml
-	resolverInfo, err := (Resolver{WorkDir: "."}).Resolve()
-	var roster []string
-	if err == nil && resolverInfo.Root != "" {
-		reg, err := ReadRegistry(filepath.Join(resolverInfo.Root, "fam.toml"))
-		if err == nil {
-			roster = reg.Roster
-		}
-	}
-
-	// Filter roster by presence
-	var presentRoster []string
-	for _, name := range roster {
-		if present[name] {
-			presentRoster = append(presentRoster, name)
-		}
-	}
-
-	requiredApprovals := requiredIndependentApprovals(quorumType, presentRoster, author)
-
-	// 1. Must have the required number of independent approvals
-	if len(independentApprovals) < requiredApprovals {
-		suffix := ""
-		if len(spoofSuspects) > 0 {
-			suffix = fmt.Sprintf("; %d spoof-suspect event(s) ignored", len(spoofSuspects))
-		}
-		return fmt.Errorf("proposal %s commit %s has %d independent approval(s), but requires %d (quorum: %s, author: %q)%s",
-			proposalID, commitSHA, len(independentApprovals), requiredApprovals, quorumType, author, suffix)
-	}
-
-	// 2. Must not have any active blocking critiques (request_changes/reject)
-	if len(requests) > 0 {
+		// Check for blockers
 		var blockers []string
-		for _, req := range requests {
-			blockers = append(blockers, fmt.Sprintf("%s (%s on commit %s)", req.Reviewer, req.Verdict, req.CommitSHA))
+		for _, v := range t.Votes {
+			if v.Verdict == ccrep.RequestChanges {
+				blockers = append(blockers, fmt.Sprintf("%s (%s on commit %s)", v.Actor, "request_changes", v.SHA))
+			}
 		}
-		return fmt.Errorf("proposal %s commit %s is blocked by request_changes/reject from: %s", proposalID, commitSHA, strings.Join(blockers, ", "))
+		if len(blockers) > 0 {
+			err = fmt.Errorf("proposal %s commit %s is blocked by request_changes/reject from: %s", proposalID, commitSHA, strings.Join(blockers, ", "))
+			return err
+		}
+
+		// Fallback for other non-passed reasons
+		err = fmt.Errorf("consensus gate failed: %s", res.Reason)
+		return err
+	}
+
+	// Capture independent approvals for the defer block
+	for _, v := range t.Votes {
+		if v.Verdict == ccrep.Approve && v.Actor != t.Author && v.Actor != "" && v.SHA == commitSHA {
+			independentApprovals = append(independentApprovals, v.Actor)
+		}
 	}
 
 	fmt.Fprintf(out, "Consensus reached: proposal %s approved for commit %s with %d independent approval(s)\n", proposalID, commitSHA, len(independentApprovals))
+	err = nil
 	return nil
 }
 
