@@ -81,7 +81,14 @@ By default, it will:
 
 ### 2. Extracted Timeline Format
 
-The generated markdown will present events chronologically:
+Based on local A/B testing against `qwen3.5:latest` (Ollama), the most
+effective extraction format combines **strict chronological timeline events**
+with a **merged Git Diff Summary** of all file changes across the milestone.
+This allows the LLM to understand both the human review interactions and the
+exact technical code changes, producing highly precise, actionable postmortems.
+
+The generated markdown presents the chronological events followed by the file
+changes:
 
 ```markdown
 # Session/Milestone: Adopt Forgejo
@@ -89,15 +96,28 @@ The generated markdown will present events chronologically:
 ## Timeline
 
 - **19:00:26** - `agy` opened PR #45: `feat(bootstrap): replace bootstrap-botfam.sh with native newfam command`
-  > Replaces the legacy shell script bootstrap-botfam.sh with a native Go implementation...
+  > Replaces the legacy shell script bootstrap-botfam.sh...
 - **19:03:19** - `claude-bot` submitted review on PR #45 (APPROVED):
-  > **Approve.** Verified at 09843957... One minor nit...
+  > **Approve.** Verified at 09843957...
 - **19:08:57** - `rlupi` submitted review on PR #45 (REQUEST_CHANGES):
-  > Let's not remove files at all. I think the whole cleanLegacyMCP can go.
+  > Let's not remove files at all...
 - **19:12:03** - `agy` pushed commit `cb2797c5` to PR #45:
-  > refactor(bootstrap): remove legacy MCP config cleaning logic entirely
+  > refactor(bootstrap): remove legacy MCP config...
 - **19:13:08** - `rlupi` submitted review on PR #45 (APPROVED)
 - **19:22:30** - `rlupi` merged PR #45 (commit `d10190bf`)
+
+---
+
+## Technical Diff Summary
+
+### Files Changed in PR #45:
+- **internal/fam/newfam.go**:
+  - Deleted legacy MCP files cleaning logic entirely (`cleanLegacyMCP`).
+  - Modified `writeClaudeSettings` to parse `settings.json` into `map[string]json.RawMessage` and selectively merge keys.
+- **internal/fam/newfam_test.go**:
+  - Added `TestWriteClaudeSettingsPreservesFields`.
+- **cmd/botfam/bootstrap_test.go**:
+  - Cleaned up legacy MCP configuration assertions.
 ```
 
 ### 3. Integration with external-review
@@ -111,10 +131,19 @@ prompt.
 
 ### Phase 0: Manual A/B testing (Zero Code)
 
-We manually construct a milestone timeline markdown file for the "Adopt
-Forgejo" milestone and run it through `botfam external-review` (using Qwen or
-Gemma in Ollama) to validate that the LLM produces a high-quality postmortem
-from Gitea-native events.
+We have manually constructed a milestone timeline markdown file for the "Adopt
+Forgejo" milestone and run it through local A/B testing using local models
+(such as `qwen3.5:latest` and `gemma4:31b` via Ollama) under three candidate
+formats:
+
+- **Format A**: Chronological interactions only.
+- **Format B**: Grouped by PR/issue.
+- **Format C**: Chronological interactions + technical diff summary.
+
+**Outcome**: Format C produced the highest-quality, most specific SRE
+postmortems. Grouping by PR (Format B) lost inter-issue temporal relationships,
+and leaving out code diffs (Format A) caused the LLM to guess file paths and
+lose structural detail.
 
 ### Phase 1: Go Implementation
 
