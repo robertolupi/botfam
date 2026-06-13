@@ -38,6 +38,28 @@ func TestListUnreadNotifications(t *testing.T) {
 	}
 }
 
+func TestGetSubject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/botfam/botfam/issues/11" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"title":"T","body":"hello body","state":"open","html_url":"http://h/x"}`))
+	}))
+	defer server.Close()
+
+	c := &Client{BaseURL: server.URL, Token: "t"}
+	// Subject URL carries a DIFFERENT host (mimics a ROOT_URL mismatch); GetSubject
+	// must re-base the path onto c.BaseURL.
+	sc, err := c.GetSubject("http://wrong-host:9999/api/v1/repos/botfam/botfam/issues/11")
+	if err != nil {
+		t.Fatalf("GetSubject: %v", err)
+	}
+	if sc.Body != "hello body" || sc.State != "open" {
+		t.Errorf("unexpected subject content: %+v", sc)
+	}
+}
+
 func TestMarkNotificationRead(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "PATCH" || r.URL.Path != "/api/v1/notifications/threads/5" {

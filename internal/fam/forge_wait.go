@@ -5,10 +5,24 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/robertolupi/botfam/internal/forge"
 )
+
+// indentTruncate prefixes every line of s and caps the total length so a long
+// issue/PR body doesn't flood the wake output (the URL is printed for the rest).
+func indentTruncate(s, prefix string, max int) string {
+	if len(s) > max {
+		s = s[:max] + "\n… (truncated — see URL)"
+	}
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = prefix + lines[i]
+	}
+	return strings.Join(lines, "\n")
+}
 
 const forgeWaitHelp = `Usage:
   botfam forge-wait [--once] [--interval S] [--timeout S] [--mark-read]
@@ -91,8 +105,17 @@ func ForgeWaitCmd(args []string, out io.Writer) error {
 				if url == "" {
 					url = n.Subject.URL
 				}
-				fmt.Fprintf(out, "  • [%s] %s: %s  (%s)\n",
+				fmt.Fprintf(out, "\n• [%s] %s: %s\n  %s\n",
 					n.Subject.Type, n.Repository.FullName, n.Subject.Title, url)
+				// Fetch the content inline so the agent doesn't have to round-trip.
+				if sc, err := client.GetSubject(n.Subject.URL); err == nil {
+					if sc.State != "" {
+						fmt.Fprintf(out, "  state: %s\n", sc.State)
+					}
+					if body := strings.TrimSpace(sc.Body); body != "" {
+						fmt.Fprintln(out, indentTruncate(body, "  | ", 2000))
+					}
+				}
 			}
 			if markRead {
 				for _, n := range ns {
