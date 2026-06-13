@@ -565,7 +565,7 @@ func MergeCmd(args []string, out io.Writer) error {
 
 	// 2. Perform git merge
 	fmt.Fprintf(out, "Consensus MET. Merging commit %s for proposal %q...\n", tallyResult.LatestSHA, proposalID)
-	
+
 	repoRoot := RepoPath(".")
 	mergeOutput, err := gitOutput(repoRoot, "merge", "--no-ff", "-m", fmt.Sprintf("archive: merge proposal %s", proposalID), tallyResult.LatestSHA)
 	if err != nil {

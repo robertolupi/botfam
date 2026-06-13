@@ -16,7 +16,7 @@ func setupMergeGateHistory(t *testing.T) string {
 	t.Helper()
 	tempDir := t.TempDir()
 	historyPath := filepath.Join(tempDir, "history.jsonl")
-	
+
 	// Create empty file
 	f, err := os.Create(historyPath)
 	if err != nil {
@@ -609,7 +609,7 @@ func TestMergeGateBangVerbs(t *testing.T) {
 
 func TestRequiredIndependentApprovals(t *testing.T) {
 	roster := []string{"alice", "bob", "charlie"}
-	
+
 	// quorumType: all, author in roster
 	if got := requiredIndependentApprovals("all", roster, "alice"); got != 2 {
 		t.Errorf("expected 2, got %d", got)
@@ -724,5 +724,3 @@ func TestNormalizeReviewer(t *testing.T) {
 		}
 	}
 }
-
-

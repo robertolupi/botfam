@@ -1026,4 +1026,3 @@ func TestTopicsAndCursors(t *testing.T) {
 		t.Fatalf("expected cursor 2, got %d", cur)
 	}
 }
-

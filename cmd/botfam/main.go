@@ -46,6 +46,8 @@ func run() error {
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "worktree":
+			return fam.WorktreeCmd(os.Args[2:], os.Stdout)
 		case "setup":
 			return fam.Setup(os.Args[2:], os.Stdout)
 		case "session":
@@ -187,6 +189,7 @@ func printHelp() {
 
 Usage:
   botfam serve            run stdio MCP server
+  botfam worktree <init|sync> [args]
   botfam setup <project> --agents alice,bob [--force]
   botfam session <subcommand>
   botfam topic <subcommand>

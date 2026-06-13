@@ -56,6 +56,7 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	}
 	mcpSrv := mcpserver.NewMCPServer("botfam", "0.1.0", mcpserver.WithToolCapabilities(false))
 	s.registerTools(mcpSrv)
+	s.registerResources(mcpSrv)
 	return serveStdio(context.Background(), mcpSrv, in, out)
 }
 
@@ -665,4 +666,54 @@ func argFloatPtr(args map[string]any, key string) *float64 {
 	}
 	v := argFloatDefault(args, key, 0)
 	return &v
+}
+
+func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
+	mcpSrv.AddResource(
+		mcplib.NewResource(
+			"botfam://protocol",
+			"botfam Coordination Protocol",
+			mcplib.WithMIMEType("text/markdown"),
+		),
+		s.handleReadResource,
+	)
+	mcpSrv.AddResource(
+		mcplib.NewResource(
+			"botfam://ops",
+			"botfam Operations Guide",
+			mcplib.WithMIMEType("text/markdown"),
+		),
+		s.handleReadResource,
+	)
+}
+
+func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	repoRoot := fam.RepoPath(cwd)
+
+	var filename string
+	switch req.Params.URI {
+	case "botfam://protocol":
+		filename = filepath.Join(repoRoot, "doc", "collab", "PROTOCOL.md")
+	case "botfam://ops":
+		filename = filepath.Join(repoRoot, "doc", "collab", "IRC-OPS.md")
+	default:
+		return nil, fmt.Errorf("unknown resource URI %q", req.Params.URI)
+	}
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read resource file: %w", err)
+	}
+
+	return []mcplib.ResourceContents{
+		mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "text/markdown",
+			Text:     string(content),
+		},
+	}, nil
 }

@@ -346,4 +346,3 @@ func ValidateHistoryPath(path string) error {
 	}
 	return nil
 }
-

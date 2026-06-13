@@ -333,10 +333,10 @@ func parseBangLine(body string) (map[string]string, string) {
 	}
 	verb := parts[0]
 	m := make(map[string]string)
-	
+
 	var currentKey string
 	var currentVal []string
-	
+
 	for _, part := range parts[1:] {
 		if strings.Contains(part, "=") {
 			if currentKey != "" {
@@ -773,4 +773,3 @@ func CollectCcrepEvents(st store.Store, proposalID string) ([]CcrepEvent, int, e
 
 	return events, skipped, nil
 }
-

@@ -290,4 +290,3 @@ func TestSessionAppendValidation(t *testing.T) {
 		})
 	}
 }
-
