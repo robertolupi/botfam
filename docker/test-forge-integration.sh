@@ -58,7 +58,7 @@ CLAUDE_TOKEN="$(tr -d '\r\n' < "$HOME/.botfam/token-botfam-claude-test")"
 
 note "3. initialize repo via git-credential-botfam (exercises the push helper, #4)"
 WORK="$(mktemp -d)"; REPO_DIR="$WORK/botfam"
-git clone -q "$FORGE/botfam/botfam.git" "$REPO_DIR" 2>/dev/null || git init -q "$REPO_DIR"
+git clone -q "$FORGE/botfam/botfam.git" "$REPO_DIR" 2>/dev/null || { git init -q "$REPO_DIR"; git -C "$REPO_DIR" remote add origin "$FORGE/botfam/botfam.git"; }
 push_as() { # push_as <user> <token-literal> <args...>
   local user="$1" tok="$2"; shift 2
   local tf; tf="$(mktemp)"; printf '%s' "$tok" > "$tf"
