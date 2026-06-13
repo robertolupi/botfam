@@ -19,7 +19,11 @@ set -euo pipefail
 set +x  # never trace — keep credentials out of any log
 
 HOST=""; USER_IN=""; ACTOR=""; FAM=""; TOKEN_FILE=""; ASSUME_YES=""
-SCOPES="read:repository,read:issue,read:organization,read:user,read:misc"
+# Agent default: write to repos/issues (open PRs, post reviews + commit status,
+# merge, create issues/comments) + read org/user/misc + notifications (so
+# `botfam forge-wait` can read and clear them). A read-only token can't propose,
+# vote, or merge — override with --scopes for a reduced token.
+SCOPES="write:repository,write:issue,read:organization,read:user,read:misc,read:notification,write:notification"
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) HOST="$2"; shift 2;;
