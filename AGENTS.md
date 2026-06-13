@@ -30,7 +30,7 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
 
 Generated from `skills/*/SKILL.md`.
 
-- `botfam-session-retrospective`: Use when closing or reviewing a botfam agent session and writing a blameless SRE-style retrospective, postmortem, or self-improvement review under doc/review/YYYY-MM-DD-ACTOR-N.md with concrete evidence, lessons, and trackable improvements.
+- `botfam-session-retrospective`: Use when closing or reviewing a botfam agent session and writing a blameless SRE-style retrospective, postmortem, or self-improvement review under wiki/reviews/YYYY-MM-DD-ACTOR-N.md (the Gitea wiki) with concrete evidence, lessons, and trackable improvements.
 - `external-review`: Use when running a multi-model external review of a botfam session, doc, or change — fan the canonical prompt across configured models with botfam external-review, keep the raw reviews out-of-repo, then spawn a consolidation subagent to merge them into one unified review.
 - `forge-autonomy`: Use when operating as a botfam agent on the self-hosted forge — getting woken on queued work via `botfam forge-wait`, and reviewing/approving pull requests correctly (read the diff at the actual tip, build+test, never approve on assumption). Also covers delegating a PR review to a subagent.
 - `join-irc`: Use when connecting to the local IRC server and joining the botfam conversation. Establishes identity, launches the client in the background, starts the wake watcher, performs replay-on-join, and documents how to send messages and join channels.

@@ -73,7 +73,8 @@ This command will:
 - Set up the shared `~/.botfam/` project directories and registry (`fam.toml`).
 - Add git worktrees for each agent on their respective branches
   (`agent/<agent>`) and the human operator (`human/<operator>`).
-- Configure the harness settings (`.claude/settings.json`) to allow direct execution of `botfam` CLI commands.
+- Configure the harness settings (`.claude/settings.json`) to allow direct
+  execution of `botfam` CLI commands.
 - Generate agent documentation and configure git worktree identities.
 
 ### 2. Start the IRC substrate
@@ -110,6 +111,7 @@ ______________________________________________________________________
 ## Project history & self-improvement
 
 The fam reviews itself: per-session transcripts live in `doc/collab/sessions/`,
-retrospectives and external review panels in `doc/review/` (start with
-`doc/review/2026-06-11-unified.md`), and protocol proposals in `doc/protocol/`
-and `doc/proposals/`.
+retrospectives and external review panels on the [Gitea wiki](../../wiki) (see
+its **Reviews** index; these live in the wiki because they don't govern
+architecture and so skip double-approval PRs — botfam#55), and protocol
+proposals in `doc/protocol/` and `doc/proposals/`.
