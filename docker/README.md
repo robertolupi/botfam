@@ -43,7 +43,7 @@ scribe). Operational contract:
   `~/botfam-irc/`, never in git.
 - `restart: unless-stopped` on both services; server log rotated by Docker
   (`json-file`, 20m × 8). `chat.log` rotation is an open item (AI-R6 in the
-  wiki's `reviews/2026-06-11-unified` page).
+  wiki's `review-2026-06-11-unified` page).
 - **IRC is down whenever Docker Desktop is down** — enable start-at-login
   (operator-owned; F9 waiver recorded in the unified retrospective).
 - `ircd.db` + `ergo_history.db` were migrated into the volume with zero data
