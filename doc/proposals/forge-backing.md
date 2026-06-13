@@ -94,7 +94,8 @@ subsumes ccrep" framing.)*
 > **presence-aware or role-tiered** quorum; that is deferred (YAGNI) and, if
 > ever needed, becomes a tiny webhook posting one status check — not the
 > Engine. The "Engine keeps the decision rule" stance above now holds *only*
-> for that presence-aware case. See \[[roadmap]\] Phase 2 and issue #33.
+> for that presence-aware case. See [the roadmap](../dev/roadmap.md) Phase 2
+> and issue #33.
 
 ## 3. Forgejo vs Gitea
 

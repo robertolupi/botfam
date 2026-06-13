@@ -17,7 +17,8 @@ mirrors the milestones; issue numbers are the source of truth.
 > check, or webhook. The duplicative gate machinery from the early forge work
 > is being deleted (#33). A webhook/custom code is only justified if we ever
 > need a rule branch protection can't express (presence-aware or role-tiered
-> quorum) — deferred as YAGNI. See \[[forge-backing]\] §2.
+> quorum) — deferred as YAGNI. See
+> [forge-backing.md](../proposals/forge-backing.md) §2.
 
 Already shipped (no milestone): `botfam verify` (#7), the `internal/ccrep` core
 (#8), `botfam-next` compile-sha (#19), and the fam-ledger / quorum bug fixes
