@@ -1,1 +1,233 @@
-cGFja2FnZSBtYWluCgppbXBvcnQgKAoJImNvbnRleHQiCgkiY3J5cHRvL3NoYTI1NiIKCSJlbmNvZGluZy9oZXgiCgkiZW5jb2RpbmcvanNvbiIKCSJmbXQiCgkib3MiCgkicGF0aC9maWxlcGF0aCIKCSJzdHJjb252IgoJInN0cmluZ3MiCgoJImdpdGh1Yi5jb20vcm9iZXJ0b2x1cGkvYm90ZmFtL2ludGVybmFsL2ZhbSIKCSJnaXRodWIuY29tL3JvYmVydG9sdXBpL2JvdGZhbS9pbnRlcm5hbC9tY3AiCgkiZ2l0aHViLmNvbS9yb2JlcnRvbHVwaS9ib3RmYW0vaW50ZXJuYWwvc2VydmVyIgopCgpmdW5jIG1haW4oKSB7CglpZiBlcnIgOj0gcnVuKCk7IGVyciAhPSBuaWwgewoJCWlmIGZhbS5Jc0pTT05PdXRwdXQoKSB7CgkJCV8gPSBqc29uLk5ld0VuY29kZXIob3MuU3Rkb3V0KS5FbmNvZGUobWFwW3N0cmluZ11hbnl7CgkJCQkib2siOiAgICBmYWxzZSwKCQkJCSJlcnJvciI6IGVyci5FcnJvcigpLAoJCQl9KQoJCX0gZWxzZSB7CgkJCWZtdC5GcHJpbnRsbihvcy5TdGRlcnIsICJib3RmYW06IiwgZXJyKQoJCX0KCQlvcy5FeGl0KDEpCgl9Cn0KCmZ1bmMgcnVuKCkgZXJyb3IgewoJLy8gUGFyc2UgZ2xvYmFsIC0tanNvbiBmbGFnCgl2YXIgY2xlYW5BcmdzIFtdc3RyaW5nCglpc0pTT04gOj0gZmFsc2UKCWZvciBfLCBhcmcgOj0gcmFuZ2Ugb3MuQXJncyB7CgkJaWYgYXJnID09ICItLWpzb24iIHx8IGFyZyA9PSAiLWoiIHsKCQkJaXNKU09OID0gdHJ1ZQoJCX0gZWxzZSB7CgkJCWNsZWFuQXJncyA9IGFwcGVuZChjbGVhbkFyZ3MsIGFyZykKCQl9Cgl9Cglvcy5BcmdzID0gY2xlYW5BcmdzCglmYW0uU2V0SlNPTk91dHB1dChpc0pTT04pCgoJaWYgbGVuKG9zLkFyZ3MpID4gMSB7CgkJc3dpdGNoIG9zLkFyZ3NbMV0gewoJCWNhc2UgIndvcmt0cmVlIjoKCQkJcmV0dXJuIGZhbS5Xb3JrdHJlZUNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgInNldHVwIjoKCQkJcmV0dXJuIGZhbS5TZXR1cChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgInNlc3Npb24iOgoJCQlyZXR1cm4gZmFtLlNlc3Npb25DbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJ0b3BpYyI6CgkJCXJldHVybiBmYW0uVG9waWNDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJtZXJnZS1nYXRlIjoKCQkJcmV0dXJuIGZhbS5NZXJnZUdhdGVDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJ2ZXJpZnkiOgoJCQlyZXR1cm4gZmFtLlZlcmlmeUNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgImFnZW50LWRvY3MiOgoJCQlyZXR1cm4gZmFtLkFnZW50RG9jc0NtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgInZvdGUiOgoJCQlyZXR1cm4gZmFtLlZvdGVDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJ0YWxseSI6CgkJCXJldHVybiBmYW0uVGFsbHlDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJwcm9wb3NlIjoKCQkJcmV0dXJuIGZhbS5Qcm9wb3NlQ21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAiYXBwcm92ZSI6CgkJCXJldHVybiBmYW0uQXBwcm92ZUNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgIm1lcmdlIjoKCQkJcmV0dXJuIGZhbS5NZXJnZUNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgInNlbmQiOgoJCQlyZXR1cm4gZmFtLlNlbmRDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJyZWN2IjoKCQkJcmV0dXJuIGZhbS5SZWN2Q21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAidHJ5LXJlY3YiLCAidHJ5X3JlY3YiOgoJCQlyZXR1cm4gZmFtLlRyeVJlY3ZDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJwZWVrIjoKCQkJcmV0dXJuIGZhbS5QZWVrQ21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAiYWNrIjoKCQkJcmV0dXJuIGZhbS5BY2tDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJzZWVuIjoKCQkJcmV0dXJuIGZhbS5TZWVuQ21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAiaW5ib3giOgoJCQlyZXR1cm4gZmFtLkluYm94Q21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAicG9zdCI6CgkJCXJldHVybiBmYW0uUG9zdENtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgImNsYWltIjoKCQkJcmV0dXJuIGZhbS5DbGFpbUNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgImNvbXBsZXRlIjoKCQkJcmV0dXJuIGZhbS5Db21wbGV0ZUNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgImhlYXJ0YmVhdCI6CgkJCXJldHVybiBmYW0uSGVhcnRiZWF0Q21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAiYWJhbmRvbiI6CgkJCXJldHVybiBmYW0uQWJhbmRvbkNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgInN3ZWVwIjoKCQkJcmV0dXJuIGZhbS5Td2VlcENtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgInNlc3Npb24tYXBwZW5kIiwgInNlc3Npb25fYXBwZW5kIjoKCQkJcmV0dXJuIGZhbS5TZXNzaW9uQXBwZW5kQ21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAic2Vzc2lvbi1yZWFkIiwgInNlc3Npb25fcmVhZCI6CgkJCXJldHVybiBmYW0uU2Vzc2lvblJlYWRDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJzZXJ2ZXIiOgoJCQl2YXIgdWRzUGF0aCBzdHJpbmcKCQkJdGNwUG9ydCA6PSA4MDgwCgkJCWZvciBpIDo9IDI7IGkgPCBsZW4ob3MuQXJncyk7IGkrKyB7CgkJCQlhcmcgOj0gb3MuQXJnc1tpXQoJCQkJaWYgYXJnID09ICItLXNvY2tldCIgfHwgYXJnID09ICItcyIgewoJCQkJCWkrKwoJCQkJCWlmIGkgPCBsZW4ob3MuQXJncykgewoJCQkJCQl1ZHNQYXRoID0gb3MuQXJnc1tpXQoJCQkJCX0KCQkJCX0gZWxzZSBpZiBzdHJpbmdzLkhhc1ByZWZpeChhcmcsICItLXNvY2tldD0iKSB7CgkJCQkJdWRzUGF0aCA9IHN0cmluZ3MuVHJpbVByZWZpeChhcmcsICItLXNvY2tldD0iKQoJCQkJfSBlbHNlIGlmIGFyZyA9PSAiLS1wb3J0IiB8fCBhcmcgPT0gIi1wIiB7CgkJCQkJaSsrCgkJCQkJaWYgaSA8IGxlbihvcy5BcmdzKSB7CgkJCQkJCXZhciBlcnIgZXJyb3IKCQkJCQkJdGNwUG9ydCwgZXJyID0gc3RyY29udi5BdG9pKG9zLkFyZ3NbaV0pCgkJCQkJCWlmIGVyciAhPSBuaWwgewoJCQkJCQkJcmV0dXJuIGZtdC5FcnJvcmYoImludmFsaWQgcG9ydDogJXciLCBlcnIpCgkJCQkJCX0KCQkJCQl9CgkJCQl9IGVsc2UgaWYgc3RyaW5ncy5IYXNQcmVmaXgoYXJnLCAiLS1wb3J0PSIpIHsKCQkJCQl2YXIgZXJyIGVycm9yCgkJCQkJdGNwUG9ydCwgZXJyID0gc3RyY29udi5BdG9pKHN0cmluZ3MuVHJpbVByZWZpeChhcmcsICItLXBvcnQ9IikpCgkJCQkJaWYgZXJyICE9IG5pbCB7CgkJCQkJCXJldHVybiBmbXQuRXJyb3JmKCJpbnZhbGlkIHBvcnQ6ICV3IiwgZXJyKQoJCQkJCX0KCQkJCX0gZWxzZSB7CgkJCQkJcmV0dXJuIGZtdC5FcnJvcmYoInVua25vd24gc2VydmVyIGFyZ3VtZW50ICVxIiwgYXJnKQoJCQkJfQoJCQl9CgoJCQlpZiB1ZHNQYXRoID09ICIiIHsKCQkJCWlmIGVudlBhdGggOj0gb3MuR2V0ZW52KCJCT1RGQU1fU09DS0VUIik7IGVudlBhdGggIT0gIiIgewoJCQkJCXVkc1BhdGggPSBlbnZQYXRoCgkJCQl9IGVsc2UgewoJCQkJCWhvbWUsIGVyciA6PSBvcy5Vc2VySG9tZURpcigpCgkJCQkJaWYgZXJyICE9IG5pbCB7CgkJCQkJCXJldHVybiBlcnIKCQkJCQl9CgkJCQkJdWRzUGF0aCA9IGZpbGVwYXRoLkpvaW4oaG9tZSwgIi5ib3RmYW0iLCAiZGFlbW9uLnNvY2siKQoJCQkJCWlmIGxlbih1ZHNQYXRoKSA+IDEwNCB7CgkJCQkJCWggOj0gc2hhMjU2LlN1bTI1NihbXWJ5dGUoaG9tZSkpCgkJCQkJCXVkc1BhdGggPSBmaWxlcGF0aC5Kb2luKCIvdG1wIiwgZm10LlNwcmludGYoImJmLSVzLnNvY2siLCBoZXguRW5jb2RlVG9TdHJpbmcoaFs6XSkpKQoJCQkJCX0KCQkJCX0KCQkJfQoKCQkJc3J2IDo9IHNlcnZlci5OZXdTZXJ2ZXIodWRzUGF0aCwgdGNwUG9ydCkKCQkJZm10LlByaW50ZigiU3RhcnRpbmcgYm90ZmFtIHNlcnZlciBVRFMgZGFlbW9uIG9uICVzLCBIVFRQL1NTRSBvbiBsb2NhbGhvc3Q6JWRcbiIsIHVkc1BhdGgsIHRjcFBvcnQpCgkJCXJldHVybiBzcnYuU3RhcnQoY29udGV4dC5CYWNrZ3JvdW5kKCkpCgkJY2FzZSAiaXJjLWNsaWVudCI6CgkJCXJldHVybiBmYW0uSXJjQ2xpZW50Q21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAiaXJjLXdhaXQiOgoJCQlyZXR1cm4gZmFtLklyY1dhaXRDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJpcmMtcHJvcG9zZSI6CgkJCXJldHVybiBmYW0uSXJjUHJvcG9zZUNtZChvcy5BcmdzWzI6XSwgb3MuU3Rkb3V0KQoJCWNhc2UgInNjcmliZSI6CgkJCXJldHVybiBmYW0uU2NyaWJlQ21kKG9zLkFyZ3NbMjpdLCBvcy5TdGRvdXQpCgkJY2FzZSAiaXJjbG9nMnNlc3Npb25zIjoKCQkJcmV0dXJuIGZhbS5JcmNMb2cyU2Vzc2lvbnNDbWQob3MuQXJnc1syOl0sIG9zLlN0ZG91dCkKCQljYXNlICJzZXJ2ZSI6CgkJCXJldHVybiBtY3AuU2VydmUob3MuU3RkaW4sIG9zLlN0ZG91dCwgb3MuU3RkZXJyKQoJCWNhc2UgIi1oIiwgIi0taGVscCIsICJoZWxwIjoKCQkJcHJpbnRIZWxwKCkKCQkJcmV0dXJuIG5pbAoJCWRlZmF1bHQ6CgkJCXJldHVybiBmbXQuRXJyb3JmKCJ1bmtub3duIGNvbW1hbmQgJXEiLCBvcy5BcmdzWzFdKQoJCX0KCX0gZWxzZSB7CgkJaWYgIWlzVGVybWluYWwob3MuU3RkaW4pICYmICFpc1Rlcm1pbmFsKG9zLlN0ZG91dCkgewoJCQlyZXR1cm4gbWNwLlNlcnZlKG9zLlN0ZGluLCBvcy5TdGRvdXQsIG9zLlN0ZGVycikKCQl9Cgl9CglwcmludEhlbHAoKQoJcmV0dXJuIG5pbAp9CgpmdW5jIGlzVGVybWluYWwoZiAqb3MuRmlsZSkgYm9vbCB7CglzdGF0LCBlcnIgOj0gZi5TdGF0KCkKCWlmIGVyciAhPSBuaWwgewoJCXJldHVybiBmYWxzZQoJfQoJcmV0dXJuIChzdGF0Lk1vZGUoKSAmIG9zLk1vZGVDaGFyRGV2aWNlKSAhPSAwCn0KCmZ1bmMgcHJpbnRIZWxwKCkgewoJZm10LlByaW50KGBib3RmYW0KClVzYWdlOgogIGJvdGZhbSBzZXJ2ZSAgICAgICAgICAgIHJ1biBzdGRpbyBNQ1Agc2VydmVyCiAgYm90ZmFtIHdvcmt0cmVlIDxpbml0fHN5bmM+IFthcmdzXQogIGJvdGZhbSBzZXR1cCA8cHJvamVjdD4gLS1hZ2VudHMgYWxpY2UsYm9iIFstLWZvcmNlXQogIGJvdGZhbSBzZXNzaW9uIDxzdWJjb21tYW5kPgogIGJvdGZhbSB0b3BpYyA8c3ViY29tbWFuZD4KICBib3RmYW0gbWVyZ2UtZ2F0ZSAtLWNvbW1pdCA8c2hhPiAtLXByb3Bvc2FsIDxpZD4KICBib3RmYW0gdmVyaWZ5IDxzaGE+IFtwa2dzLi4uXQogIGJvdGZhbSBhZ2VudC1kb2NzIGdlbmVyYXRlfGNoZWNrCiAgYm90ZmFtIHNlcnZlciBbLS1zb2NrZXQgPHBhdGg+XSBbLS1wb3J0IDxwb3J0Pl0KICBib3RmYW0gdm90ZSAtLXByb3Bvc2FsIDxpZD4gLS12ZXJkaWN0IDx2ZXJkaWN0PgogIGJvdGZhbSB0YWxseSAtLXByb3Bvc2FsIDxpZD4KICBib3RmYW0gcHJvcG9zZSAtLXByb3Bvc2FsIDxpZD4gWy0tcXVvcnVtIDxxdW9ydW0+XSBbLS1kZWFkbGluZSA8ZGVhZGxpbmU+XQogIGJvdGZhbSBhcHByb3ZlIC0tcHJvcG9zYWwgPGlkPiBbLS12ZXJkaWN0IDx2ZXJkaWN0Pl0KICBib3RmYW0gbWVyZ2UgLS1wcm9wb3NhbCA8aWQ+CiAgYm90ZmFtIGlyYy1jbGllbnQgPG5pY2s+IFstLXNlcnZlciA8aG9zdDpwb3J0Pl0gWy0tY2hhbm5lbCA8Y2hhbm5lbD5dIFstLWRpciA8ZGlyPl0gWy0tcGFzcy1maWxlIDxmaWxlPl0KICBib3RmYW0gaXJjLXdhaXQgLS1uaWNrIDxuaWNrPiBbLS1maWxlIDxwYXRoPl0KICBib3RmYW0gaXJjLXByb3Bvc2UgLS1pZCA8aWQ+IC0tc3VtbWFyeSA8dGV4dD4gWy0tc2hhIDxzaGE+XSBbLS1xdW9ydW0gPHE+XSBbLS1kZWFkbGluZSA8dHM+XSBbLS1leGVjdXRvciA8YWN0b3I+XSBbLS1hcyA8YWN0b3I+XQogIGJvdGZhbSBzY3JpYmUgWy0tc2VydmVyIDxob3N0OnBvcnQ+XSBbLS1jaGFubmVsIDxjaGFubmVsPl0gWy0tZmlsZSA8cGF0aD5dCiAgYm90ZmFtIGlyY2xvZzJzZXNzaW9ucyA8Y2hhdC5sb2c+Li4uIFstLW91dCA8ZGlyPl0gWy0tZ2FwLW1pbnV0ZXMgPG4+XSBbLS1jaGFubmVsIDxjaGFuPl0uLi4gWy0taW5jbHVkZS1vcGVuXQoKQ29sbGFiIFN1YmNvbW1hbmRzIChkZWJ1Z2dpbmcgLyBkaXJlY3QgQ0xJKToKICBib3RmYW0gc2VuZCAtLXRvIDxhY3Rvcj4gLS10eXBlIDx0eXBlPiBbLS1wYXlsb2FkIDxqc29uPl0gWy0taW4tcmVwbHktdG8gPGlkPl0gWy0tZXhwaXJlcy1hdCA8c2Vjcz5dCiAgYm90ZmFtIHJlY3YgWy0tbWF0Y2gtdHlwZSA8dHlwZT5dIFstLXRpbWVvdXQgPHNlY3M+XQogIGJvdGZhbSB0cnktcmVjdiBbLS1tYXRjaC10eXBlIDx0eXBlPl0KICBib3RmYW0gcGVlayBbLS1tYXRjaC10eXBlIDx0eXBlPl0KICBib3RmYW0gYWNrIC0taWQgPGlkPiBbLS1vdXRjb21lIDxqc29uPl0KICBib3RmYW0gc2VlbiAtLWlkIDxpZD4KICBib3RmYW0gaW5ib3gKICBib3RmYW0gcG9zdCAtLXR5cGUgPHR5cGU+IFstLXBheWxvYWQgPGpzb24+XQogIGJvdGZhbSBjbGFpbSBbLS1sZWFzZS10dGwgPHNlY3M+XSBbLS10YXNrLWlkIDxpZD5dIFstLXR5cGUgPHR5cGU+XSBbLS1zdWdnZXN0ZWQtb3duZXIgPG5hbWU+XQogIGJvdGZhbSBjb21wbGV0ZSAtLXRhc2staWQgPGlkPiBbLS1yZXN1bHQgPGpzb24+XQogIGJvdGZhbSBoZWFydGJlYXQgLS10YXNrLWlkIDxpZD4gWy0tbGVhc2UtdHRsIDxzZWNzPl0KICBib3RmYW0gYWJhbmRvbiAtLXRhc2staWQgPGlkPiBbLS1yZWFzb24gPHRleHQ+XQogIGJvdGZhbSBzd2VlcAogIGJvdGZhbSBzZXNzaW9uLWFwcGVuZCAtLXNlc3Npb24gPHNsdWc+IC0tYm9keSA8Ym9keT4gWy0taGFuZG9mZiA8anNvbj5dCiAgYm90ZmFtIHNlc3Npb24tcmVhZCAtLXNlc3Npb24gPHNsdWc+IFstLWZyb20gPGFjdG9yPl0gWy0tc2luY2UgPHRzPl0gWy0tbGltaXQgPG4+XQoKR2xvYmFsIEZsYWdzOgogIC0tanNvbiwgLWogICAgICAgICAgICAgIG91dHB1dCByZXN1bHRzIGFzIHN0cnVjdHVyZWQgSlNPTiBsaW5lcwpgKQp9Cg==
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/mcp"
+	"github.com/robertolupi/botfam/internal/server"
+)
+
+func main() {
+	if err := run(); err != nil {
+		if fam.IsJSONOutput() {
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+				"ok":    false,
+				"error": err.Error(),
+			})
+		} else {
+			fmt.Fprintln(os.Stderr, "botfam:", err)
+		}
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	// Parse global --json flag
+	var cleanArgs []string
+	isJSON := false
+	for _, arg := range os.Args {
+		if arg == "--json" || arg == "-j" {
+			isJSON = true
+		} else {
+			cleanArgs = append(cleanArgs, arg)
+		}
+	}
+	os.Args = cleanArgs
+	fam.SetJSONOutput(isJSON)
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "worktree":
+			return fam.WorktreeCmd(os.Args[2:], os.Stdout)
+		case "setup":
+			return fam.Setup(os.Args[2:], os.Stdout)
+		case "session":
+			return fam.SessionCmd(os.Args[2:], os.Stdout)
+		case "topic":
+			return fam.TopicCmd(os.Args[2:], os.Stdout)
+		case "merge-gate":
+			return fam.MergeGateCmd(os.Args[2:], os.Stdout)
+		case "verify":
+			return fam.VerifyCmd(os.Args[2:], os.Stdout)
+		case "agent-docs":
+			return fam.AgentDocsCmd(os.Args[2:], os.Stdout)
+		case "vote":
+			return fam.VoteCmd(os.Args[2:], os.Stdout)
+		case "tally":
+			return fam.TallyCmd(os.Args[2:], os.Stdout)
+		case "propose":
+			return fam.ProposeCmd(os.Args[2:], os.Stdout)
+		case "approve":
+			return fam.ApproveCmd(os.Args[2:], os.Stdout)
+		case "merge":
+			return fam.MergeCmd(os.Args[2:], os.Stdout)
+		case "send":
+			return fam.SendCmd(os.Args[2:], os.Stdout)
+		case "recv":
+			return fam.RecvCmd(os.Args[2:], os.Stdout)
+		case "try-recv", "try_recv":
+			return fam.TryRecvCmd(os.Args[2:], os.Stdout)
+		case "peek":
+			return fam.PeekCmd(os.Args[2:], os.Stdout)
+		case "ack":
+			return fam.AckCmd(os.Args[2:], os.Stdout)
+		case "seen":
+			return fam.SeenCmd(os.Args[2:], os.Stdout)
+		case "inbox":
+			return fam.InboxCmd(os.Args[2:], os.Stdout)
+		case "post":
+			return fam.PostCmd(os.Args[2:], os.Stdout)
+		case "claim":
+			return fam.ClaimCmd(os.Args[2:], os.Stdout)
+		case "complete":
+			return fam.CompleteCmd(os.Args[2:], os.Stdout)
+		case "heartbeat":
+			return fam.HeartbeatCmd(os.Args[2:], os.Stdout)
+		case "abandon":
+			return fam.AbandonCmd(os.Args[2:], os.Stdout)
+		case "sweep":
+			return fam.SweepCmd(os.Args[2:], os.Stdout)
+		case "session-append", "session_append":
+			return fam.SessionAppendCmd(os.Args[2:], os.Stdout)
+		case "session-read", "session_read":
+			return fam.SessionReadCmd(os.Args[2:], os.Stdout)
+		case "server":
+			var udsPath string
+			tcpPort := 8080
+			for i := 2; i < len(os.Args); i++ {
+				arg := os.Args[i]
+				if arg == "--socket" || arg == "-s" {
+					i++
+					if i < len(os.Args) {
+						udsPath = os.Args[i]
+					}
+				} else if strings.HasPrefix(arg, "--socket=") {
+					udsPath = strings.TrimPrefix(arg, "--socket=")
+				} else if arg == "--port" || arg == "-p" {
+					i++
+					if i < len(os.Args) {
+						var err error
+						tcpPort, err = strconv.Atoi(os.Args[i])
+						if err != nil {
+							return fmt.Errorf("invalid port: %w", err)
+						}
+					}
+				} else if strings.HasPrefix(arg, "--port=") {
+					var err error
+					tcpPort, err = strconv.Atoi(strings.TrimPrefix(arg, "--port="))
+					if err != nil {
+						return fmt.Errorf("invalid port: %w", err)
+					}
+				} else {
+					return fmt.Errorf("unknown server argument %q", arg)
+				}
+			}
+
+			if udsPath == "" {
+				if envPath := os.Getenv("BOTFAM_SOCKET"); envPath != "" {
+					udsPath = envPath
+				} else {
+					home, err := os.UserHomeDir()
+					if err != nil {
+						return err
+					}
+					udsPath = filepath.Join(home, ".botfam", "daemon.sock")
+					if len(udsPath) > 104 {
+						h := sha256.Sum256([]byte(home))
+						udsPath = filepath.Join("/tmp", fmt.Sprintf("bf-%s.sock", hex.EncodeToString(h[:])))
+					}
+				}
+			}
+
+			srv := server.NewServer(udsPath, tcpPort)
+			fmt.Printf("Starting botfam server UDS daemon on %s, HTTP/SSE on localhost:%d\n", udsPath, tcpPort)
+			return srv.Start(context.Background())
+		case "irc-client":
+			return fam.IrcClientCmd(os.Args[2:], os.Stdout)
+		case "irc-wait":
+			return fam.IrcWaitCmd(os.Args[2:], os.Stdout)
+		case "irc-propose":
+			return fam.IrcProposeCmd(os.Args[2:], os.Stdout)
+		case "scribe":
+			return fam.ScribeCmd(os.Args[2:], os.Stdout)
+		case "irclog2sessions":
+			return fam.IrcLog2SessionsCmd(os.Args[2:], os.Stdout)
+		case "serve":
+			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
+		case "-h", "--help", "help":
+			printHelp()
+			return nil
+		default:
+			return fmt.Errorf("unknown command %q", os.Args[1])
+		}
+	} else {
+		if !isTerminal(os.Stdin) && !isTerminal(os.Stdout) {
+			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
+		}
+	}
+	printHelp()
+	return nil
+}
+
+func isTerminal(f *os.File) bool {
+	stat, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
+}
+
+func printHelp() {
+	fmt.Print(`botfam
+
+Usage:
+  botfam serve            run stdio MCP server
+  botfam worktree <init|sync> [args]
+  botfam setup <project> --agents alice,bob [--force]
+  botfam session <subcommand>
+  botfam topic <subcommand>
+  botfam merge-gate --commit <sha> --proposal <id>
+  botfam verify <sha> [pkgs...]
+  botfam agent-docs generate|check
+  botfam server [--socket <path>] [--port <port>]
+  botfam vote --proposal <id> --verdict <verdict>
+  botfam tally --proposal <id>
+  botfam propose --proposal <id> [--quorum <quorum>] [--deadline <deadline>]
+  botfam approve --proposal <id> [--verdict <verdict>]
+  botfam merge --proposal <id>
+  botfam irc-client <nick> [--server <host:port>] [--channel <channel>] [--dir <dir>] [--pass-file <file>]
+  botfam irc-wait --nick <nick> [--file <path>]
+  botfam irc-propose --id <id> --summary <text> [--sha <sha>] [--quorum <q>] [--deadline <ts>] [--executor <actor>] [--as <actor>]
+  botfam scribe [--server <host:port>] [--channel <channel>] [--file <path>]
+  botfam irclog2sessions <chat.log>... [--out <dir>] [--gap-minutes <n>] [--channel <chan>]... [--include-open]
+
+Collab Subcommands (debugging / direct CLI):
+  botfam send --to <actor> --type <type> [--payload <json>] [--in-reply-to <id>] [--expires-at <secs>]
+  botfam recv [--match-type <type>] [--timeout <secs>]
+  botfam try-recv [--match-type <type>]
+  botfam peek [--match-type <type>]
+  botfam ack --id <id> [--outcome <json>]
+  botfam seen --id <id>
+  botfam inbox
+  botfam post --type <type> [--payload <json>]
+  botfam claim [--lease-ttl <secs>] [--task-id <id>] [--type <type>] [--suggested-owner <name>]
+  botfam complete --task-id <id> [--result <json>]
+  botfam heartbeat --task-id <id> [--lease-ttl <secs>]
+  botfam abandon --task-id <id> [--reason <text>]
+  botfam sweep
+  botfam session-append --session <slug> --body <body> [--handoff <json>]
+  botfam session-read --session <slug> [--from <actor>] [--since <ts>] [--limit <n>]
+
+Global Flags:
+  --json, -j              output results as structured JSON lines
+`)
+}
