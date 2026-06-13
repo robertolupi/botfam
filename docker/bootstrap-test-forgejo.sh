@@ -1,5 +1,4 @@
 #!/bin/sh
-# /Users/rlupi/src/fams/botfam/wt-agy/docker/bootstrap-test-forgejo.sh
 # Bootstrap admin user, org, repository, and bot user tokens in the local test Forgejo.
 set -eu
 
