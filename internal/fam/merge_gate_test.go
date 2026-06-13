@@ -72,6 +72,68 @@ func runMergeGate(t *testing.T, commit, proposal string) (string, error) {
 	return buf.String(), err
 }
 
+// TestMergeGateAutoResolvesLedger verifies that, when COLLAB_HISTORY is unset,
+// the gate locates the fam's scribe ledger automatically from the fam root
+// (<root>/<slug>-collab/history.jsonl, via DefaultHistoryPath) instead of
+// requiring the operator to point at it by hand.
+func TestMergeGateAutoResolvesLedger(t *testing.T) {
+	root := t.TempDir()
+	// COLLAB_ROOT pins the resolver to this fam root; clearing the actor/fam
+	// vars keeps Resolve() from rejecting or perturbing the derivation.
+	t.Setenv("COLLAB_ROOT", root)
+	t.Setenv("COLLAB_ACTOR", "")
+	t.Setenv("BOTFAM_FAM", "")
+	// The override must be unset so the gate falls back to DefaultHistoryPath.
+	t.Setenv("COLLAB_HISTORY", "")
+
+	// The auto-resolved ledger lives at <root>/botfam-collab/history.jsonl
+	// (legacy ledger dir, since no fam.toml is present).
+	ledgerDir := filepath.Join(root, "botfam-collab")
+	if err := os.MkdirAll(ledgerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(ledgerDir, "history.jsonl")
+	if f, err := os.Create(path); err != nil {
+		t.Fatal(err)
+	} else {
+		f.Close()
+	}
+
+	// Sanity-check that this is exactly the path the gate will derive.
+	if got, err := DefaultHistoryPath(root); err != nil {
+		t.Fatalf("DefaultHistoryPath(%q) error: %v", root, err)
+	} else if got != path {
+		t.Fatalf("DefaultHistoryPath(%q) = %q, want %q", root, got, path)
+	}
+
+	proposalID := "prop-auto"
+	commit1 := "commit-1111111111111111111111111111111111111111"
+
+	appendHistoryEntry(t, path, "alice", "ccrep:proposal", map[string]any{
+		"type":        "ccrep:proposal",
+		"proposal_id": proposalID,
+		"commit_sha":  commit1,
+		"reviewer":    "alice",
+	})
+	appendHistoryEntry(t, path, "bob", "ccrep:evaluation", map[string]any{
+		"type":        "ccrep:evaluation",
+		"proposal_id": proposalID,
+		"commit_sha":  commit1,
+		"reviewer":    "bob",
+		"verdict":     "approve",
+	})
+
+	// With COLLAB_HISTORY unset, the gate must still find the ledger and reach
+	// consensus on the independent approval from bob.
+	out, err := runMergeGate(t, commit1, proposalID)
+	if err != nil {
+		t.Fatalf("expected consensus via auto-resolved ledger, got error %v (output %q)", err, out)
+	}
+	if !strings.Contains(out, "Consensus reached") {
+		t.Errorf("expected consensus output, got %q", out)
+	}
+}
+
 func TestMergeGate(t *testing.T) {
 	path := setupMergeGateHistory(t)
 
