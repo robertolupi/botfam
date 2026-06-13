@@ -27,11 +27,9 @@ import (
 // any source (call arg, bound session, env, worktree directory).
 var errIdentityRequired = errors.New("identity required: pass actor, set COLLAB_ACTOR, or run from a named worktree")
 
-// identityOptionalTools are tools whose handlers never use the calling actor:
-// session_read filters by the explicit "from" argument only, and sweep calls
-// store.Sweep(), which takes no actor. For these, a missing identity is
-// tolerated; identity conflicts are still rejected and a resolved identity
-// still binds the session as usual.
+// identityOptionalTools are tools whose handlers never use the calling actor.
+// For these, a missing identity is tolerated; identity conflicts are still
+// rejected and a resolved identity still binds the session as usual.
 var identityOptionalTools = map[string]bool{
 	"worktree_init": true,
 	"worktree_sync": true,
