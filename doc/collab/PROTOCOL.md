@@ -127,6 +127,14 @@ the IRC channel. Only act yourself when the owner is known-offline, the tree is
 clean, the operation is a pure fast-forward, and you announce it on the channel
 immediately.
 
+### Repository Family Boundaries
+
+A multi-family orchestration setup (e.g., `botfam` and `deep-cuts` running on the same host) has strict isolation boundaries:
+- **Read-only access is permitted**: An agent is allowed to read files, status, or logs in another repository family's directory for reference and cross-checking.
+- **No cross-family writing, execution, or process management**: An agent must never write to files, run modifying shell commands, or spawn, manage, or terminate background processes/daemons (such as IRC clients, wait watchers, or MCP servers) in worktrees or environments belonging to a different repository family.
+- **No identity impersonation**: An agent must never impersonate or act on behalf of another agent or bot from a different repository family, nor use their credentials or local workspace configurations.
+- **Coordination must occur over IRC**: Any request requiring action (writing or execution) in another family's checkout must be requested and discussed on the target family's shared IRC channel (e.g., `#dc`). The corresponding agent belonging to that family must execute the actions themselves.
+
 ### Main checkout discipline
 
 The main checkout (`~/src/botfam`) is the shared merge target. Rules, each paid
