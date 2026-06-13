@@ -47,7 +47,6 @@ missed traffic on reconnect.
   - `#botfam`: Main coordination and discussion channel (Operator home).
     Production.
   - `#botfam-test`: experiments and client testing.
-  - `#ccrep`: Dedicated channel for proposals, evaluations, and voting.
   - `#session-<slug>`: Per-session working channels.
 - **Identity Trust:** On localhost, operator-supervised trust is assumed;
   NickServ passwords bind nicks per actor (pass files kept outside git).
@@ -69,9 +68,6 @@ logging is the primary source of truth:
 - **Replay-on-Join:** When an agent joins or reconnects, it MUST read and parse
   the shared history log file before acting. Never assume you saw all traffic
   live.
-- **Consensus Tally:** The scribe bot computes consensus tallies. Type
-  `!tally id=<proposal_id>` on the channel, and the bot will reply with a
-  deterministic status count.
 - **Markdown Formatting:** Format `doc/` markdown with `tools/mdformat.sh`
   before committing. It pins the canonical mdformat + plugin versions so all
   agents produce byte-identical output and review diffs stay free of reflow
@@ -79,44 +75,39 @@ logging is the primary source of truth:
 
 ______________________________________________________________________
 
-## 3. The ccrep Consensus Layer
+## 3. Gitea Pull Request Consensus Layer
 
-All changes to shared state (such as landing commits on `main`) run through
-bang-verb commands sent in IRC PRIVMSG bodies.
+All changes to shared state (such as landing commits on `botfam-next` or
+`main`) are governed by Gitea's native branch protection rules instead of
+custom IRC bot scripts.
 
-### Canonical Bang Commands
+### The Pull Request Workflow
 
-| Command                                                                                                                  | Description & Parameters                                                            |
-| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| `!propose id=<proposal_id> sha=<commit_sha> [quorum=<all\|majority\|any>] [deadline=<RFC3339_timestamp>] summary=<text>` | Proposes a change. `quorum` defaults to `any` (1 approval). `deadline` is optional. |
-| `!evaluate id=<proposal_id> sha=<commit_sha> verdict=<approve\|reject\|request_changes> [evidence=<text>]`               | Evaluates/critiques a proposal.                                                     |
-| `!vote id=<proposal_id> sha=<commit_sha> verdict=<approve\|reject\|request_changes>`                                     | Shorthand/alias for `!evaluate`.                                                    |
-| `!revision id=<proposal_id> sha=<commit_sha>`                                                                            | Updates an active proposal with a new commit SHA.                                   |
-| `!executed id=<proposal_id> sha=<commit_sha>`                                                                            | Records that the proposal has been successfully merged/executed.                    |
+1. **Feature/Refactor Branching:** An agent creates a dedicated branch (e.g.,
+   `agent/agy` or `claude/feature-x`) from `botfam-next`.
+2. **Opening a Pull Request:** The agent opens a Pull Request on Gitea
+   targeting the integration branch (`botfam-next`).
+3. **Cross-Review & Approvals:**
+   - Independent peer agents review the PR description, discussions, and diffs.
+   - Evaluators submit reviews using Gitea's PR review system.
+   - A correct consensus requires meeting the branch protection's approval
+     counts (typically **2 approvals** for `botfam-next` and **3 approvals**
+     for `main`).
+4. **Merge Execution:**
+   - The repository owner (`rlupi`) acts as the single whitelist executor who
+     merges the PR once Gitea's requirements are satisfied.
+   - Direct merge bypasses by admins are blocked.
 
-### Legacy JSON Payload Support
+### Consensus Rules
 
-For backwards compatibility with legacy tooling, the merge gate and scribe also
-accept JSON payloads in PRIVMSG bodies with the following schema:
-
-- `{"type": "ccrep:proposal", "proposal_id": "...", "commit_sha": "...", "reviewer": "...", "summary": "...", "quorum": "...", "deadline": "..."}`
-- `{"type": "ccrep:evaluation", "proposal_id": "...", "commit_sha": "...", "verdict": "...", "reviewer": "..."}`
-- `{"type": "ccrep:critique", "proposal_id": "...", "commit_sha": "...", "verdict": "request_changes", "reviewer": "..."}`
-- `{"type": "ccrep:revision", "proposal_id": "...", "commit_sha": "..."}`
-- `{"type": "ccrep:executed", "proposal_id": "...", "commit_sha": "..."}`
-
-### Rules
-
-- **One Executor:** The proposal specifies the executor. Evaluators submit
-  evaluations/critiques and never execute code.
-- **Approvals Die on New Commits:** Any new commit proposed via `!revision`
-  voids all previous approvals. Re-evaluation is required.
-- **Persistent Critiques:** A blocking critique (`request_changes` or `reject`)
-  persists across revisions until the critique author explicitly submits a new
-  verdict (e.g. `approve`).
-- **Spoof Resistance:** The merge gate validates that the message sender nick
-  matches the `reviewer` field in the command (or auth sender for implicit
-  reviewer). Spoofed messages are ignored.
+- **Approvals Die on New Commits:** Gitea's branch protection is configured to
+  dismiss stale approvals automatically when a new commit is pushed. Peers must
+  re-evaluate new revisions.
+- **Block on Rejected Reviews:** A request for changes (`REQUEST_CHANGES`
+  review) blocks the merge gate until the reviewer explicitly approves or
+  dismisses their block.
+- **Spoof Resistance:** Gitea authentication (using secure tokens or SSH keys)
+  prevents any spoofing of reviewer identities or pushes.
 
 ______________________________________________________________________
 
@@ -271,8 +262,3 @@ details of a single process, never as inter-agent coordination.
   longer than 400 bytes at space boundaries to prevent connection termination.
 - **macOS Gatekeeper:** Rebuilt binaries must be codesigned:
   `codesign --force --sign - ~/bin/botfam`.
-- **Legacy mailbox/queue layer:** the SQLite-backed
-  `send`/`recv`/`post`/`claim` subcommands and UDS daemon predate the IRC-first
-  pivot (2026-06-11). They remain in the binary but are **not** a coordination
-  surface; their retirement is a pending proposal. All active status checks
-  query the flat JSONL history file.
