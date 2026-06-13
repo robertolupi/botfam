@@ -37,8 +37,10 @@ var errIdentityRequired = errors.New("identity required: pass actor, set COLLAB_
 // tolerated; identity conflicts are still rejected and a resolved identity
 // still binds the session as usual.
 var identityOptionalTools = map[string]bool{
-	"session_read": true,
-	"sweep":        true,
+	"session_read":  true,
+	"sweep":         true,
+	"worktree_init": true,
+	"worktree_sync": true,
 }
 
 type server struct {
@@ -193,6 +195,15 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("worktree_init",
+		mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
+		mcplib.WithString("target_actor", mcplib.Required()),
+		mcplib.WithString("work_dir"),
+	))
+	add(mcplib.NewTool("worktree_sync",
+		mcplib.WithDescription("Safely bring the worktree up to date with main (auto-stash, merge main, pop stash)."),
+		mcplib.WithString("work_dir"),
+	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
@@ -214,6 +225,28 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, err
 		}
 		actor = ""
+	}
+
+	if name == "worktree_init" {
+		targetActor := argString(args, "target_actor")
+		if targetActor == "" {
+			return nil, errors.New("target_actor is required")
+		}
+		var buf bytes.Buffer
+		err := fam.WorktreeCmd([]string{"init", targetActor, workDir}, &buf)
+		if err != nil {
+			return nil, err
+		}
+		return toolResult(map[string]any{"ok": true, "output": buf.String()})
+	}
+
+	if name == "worktree_sync" {
+		var buf bytes.Buffer
+		err := fam.WorktreeCmd([]string{"sync", workDir}, &buf)
+		if err != nil {
+			return nil, err
+		}
+		return toolResult(map[string]any{"ok": true, "output": buf.String()})
 	}
 
 	if name == "irc_write" {
