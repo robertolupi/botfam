@@ -1,6 +1,6 @@
 ---
 name: botfam-session-retrospective
-description: Use when closing or reviewing a botfam agent session and writing a blameless SRE-style retrospective, postmortem, or self-improvement review under wiki/reviews/YYYY-MM-DD-ACTOR-N.md (the Gitea wiki) with concrete evidence, lessons, and trackable improvements.
+description: Use when closing or reviewing a botfam agent session and writing a blameless SRE-style retrospective, postmortem, or self-improvement review under wiki/review-YYYY-MM-DD-ACTOR_N.md (the Gitea wiki) with concrete evidence, lessons, and trackable improvements.
 ---
 
 # Botfam Session Retrospective
@@ -51,7 +51,7 @@ at `wiki/` (cloned by `botfam newfam`, gitignored by the main repo).
 Write the review to:
 
 ```text
-wiki/reviews/YYYY-MM-DD-ACTOR-N.md
+wiki/review-YYYY-MM-DD-ACTOR_N.md
 ```
 
 Where:
@@ -67,7 +67,7 @@ Before writing:
 2. Determine the actor from `basename "$PWD"` using the protocol rule.
 3. If `wiki/` is missing, clone it:
    `git clone "$(git remote get-url gitea | sed 's/\.git$//').wiki.git" wiki`.
-4. List existing matching files in `wiki/reviews/`.
+4. List existing matching files in `wiki/review-*`.
 5. Pick the lowest positive integer `N` that does not already exist.
 
 If this repo already uses an older unnumbered review file for the same actor,
@@ -76,7 +76,7 @@ do not overwrite it. Start numbered files at `1`.
 After writing, commit and push from inside `wiki/` (no PR needed):
 
 ```sh
-cd wiki && git add reviews/ && git commit -m "docs: <actor> session retrospective <date>" && git push origin main
+cd wiki && git add review-*.md && git commit -m "docs: <actor> session retrospective <date>" && git push origin main
 ```
 
 Older retrospectives migrated out of `doc/review/` are indexed on the wiki's

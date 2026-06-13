@@ -129,7 +129,7 @@ context.
 ## Recording the result
 
 If the review is worth keeping, record the unified result on the Gitea wiki at
-`wiki/reviews/YYYY-MM-DD-<reviewer>.md` (per the operator instructions in
+`wiki/review-YYYY-MM-DD-<reviewer>.md` (per the operator instructions in
 `doc/review/EXTERNAL-REVIEW-PROMPT.md`) and format it with
 `tools/mdformat.sh <file>` before committing+pushing from inside `wiki/` (the
 wiki is its own repo, no PR needed — botfam#55). The raw per-model reviews stay
