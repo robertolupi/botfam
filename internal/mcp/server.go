@@ -37,8 +37,10 @@ var errIdentityRequired = errors.New("identity required: pass actor, set COLLAB_
 // tolerated; identity conflicts are still rejected and a resolved identity
 // still binds the session as usual.
 var identityOptionalTools = map[string]bool{
-	"session_read": true,
-	"sweep":        true,
+	"session_read":  true,
+	"sweep":         true,
+	"worktree_init": true,
+	"worktree_sync": true,
 }
 
 type server struct {
@@ -56,6 +58,7 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	}
 	mcpSrv := mcpserver.NewMCPServer("botfam", "0.1.0", mcpserver.WithToolCapabilities(false))
 	s.registerTools(mcpSrv)
+	s.registerResources(mcpSrv)
 	return serveStdio(context.Background(), mcpSrv, in, out)
 }
 
@@ -192,6 +195,15 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("worktree_init",
+		mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
+		mcplib.WithString("target_actor", mcplib.Required()),
+		mcplib.WithString("work_dir"),
+	))
+	add(mcplib.NewTool("worktree_sync",
+		mcplib.WithDescription("Safely bring the worktree up to date with main (auto-stash, merge main, pop stash)."),
+		mcplib.WithString("work_dir"),
+	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
@@ -213,6 +225,28 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, err
 		}
 		actor = ""
+	}
+
+	if name == "worktree_init" {
+		targetActor := argString(args, "target_actor")
+		if targetActor == "" {
+			return nil, errors.New("target_actor is required")
+		}
+		var buf bytes.Buffer
+		err := fam.WorktreeCmd([]string{"init", targetActor, workDir}, &buf)
+		if err != nil {
+			return nil, err
+		}
+		return toolResult(map[string]any{"ok": true, "output": buf.String()})
+	}
+
+	if name == "worktree_sync" {
+		var buf bytes.Buffer
+		err := fam.WorktreeCmd([]string{"sync", workDir}, &buf)
+		if err != nil {
+			return nil, err
+		}
+		return toolResult(map[string]any{"ok": true, "output": buf.String()})
 	}
 
 	if name == "irc_write" {
@@ -665,4 +699,54 @@ func argFloatPtr(args map[string]any, key string) *float64 {
 	}
 	v := argFloatDefault(args, key, 0)
 	return &v
+}
+
+func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
+	mcpSrv.AddResource(
+		mcplib.NewResource(
+			"botfam://fam/docs/protocol",
+			"botfam Coordination Protocol",
+			mcplib.WithMIMEType("text/markdown"),
+		),
+		s.handleReadResource,
+	)
+	mcpSrv.AddResource(
+		mcplib.NewResource(
+			"botfam://fam/docs/ops",
+			"botfam Operations Guide",
+			mcplib.WithMIMEType("text/markdown"),
+		),
+		s.handleReadResource,
+	)
+}
+
+func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	repoRoot := fam.RepoPath(cwd)
+
+	var filename string
+	switch req.Params.URI {
+	case "botfam://fam/docs/protocol":
+		filename = filepath.Join(repoRoot, "doc", "collab", "PROTOCOL.md")
+	case "botfam://fam/docs/ops":
+		filename = filepath.Join(repoRoot, "doc", "collab", "IRC-OPS.md")
+	default:
+		return nil, fmt.Errorf("unknown resource URI %q", req.Params.URI)
+	}
+
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read resource file: %w", err)
+	}
+
+	return []mcplib.ResourceContents{
+		mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "text/markdown",
+			Text:     string(content),
+		},
+	}, nil
 }

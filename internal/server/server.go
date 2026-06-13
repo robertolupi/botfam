@@ -54,6 +54,7 @@ type voteConnection struct {
 }
 
 type connKeyType struct{}
+
 var connKey = connKeyType{}
 
 type Server struct {
@@ -1801,7 +1802,6 @@ func (s *Server) validateRequestActor(r *http.Request, reqActor string, reqWorkD
 		mainGitRoot = filepath.Dir(commonDir)
 	}
 
-
 	evalMainGitRoot, err := filepath.EvalSymlinks(mainGitRoot)
 	if err != nil {
 		evalMainGitRoot = mainGitRoot
@@ -1904,9 +1904,9 @@ func isProcessAlive(pid int) bool {
 }
 
 type uiFamilyStateInfo struct {
-	Roster   []string                 `json:"roster"`
-	Presence map[string]string        `json:"presence"`
-	Sessions []uiSessionInfo          `json:"sessions"`
+	Roster   []string          `json:"roster"`
+	Presence map[string]string `json:"presence"`
+	Sessions []uiSessionInfo   `json:"sessions"`
 }
 
 type uiSessionInfo struct {
@@ -2145,8 +2145,6 @@ func (s *Server) handleTopicPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
-
 	msg, err := fs.store.TopicPublish(req.Topic, req.Actor, req.Body)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -2173,8 +2171,6 @@ func (s *Server) handleTopicListen(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Transfer-Encoding", "chunked")
@@ -2262,8 +2258,6 @@ func (s *Server) handleTopicCursorUpdate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-
-
 	err = fs.store.TopicCursorUpdate(req.Actor, req.Topic, req.LastReadID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -2290,14 +2284,11 @@ func (s *Server) handleTopicCursorRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
-
 	id, err := fs.store.TopicCursorRead(req.Actor, req.Topic)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
 
 	writeJSON(w, map[string]int64{"last_read_id": id})
 }

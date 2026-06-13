@@ -398,8 +398,8 @@ func TestIntegrationWorktreeBasedResolution(t *testing.T) {
 	bob.Call(t, "initialize", map[string]any{})
 
 	sent := alice.Tool(t, "send", map[string]any{
-		"to":   "bob",
-		"type": "hello",
+		"to":      "bob",
+		"type":    "hello",
 		"payload": map[string]any{"msg": "hi"},
 	})
 	sentID := sent["id"].(string)
@@ -627,7 +627,6 @@ func initGitRepo(t *testing.T, dir string) {
 	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
 }
 
-
 func TestIntegrationB_NarrowSafety(t *testing.T) {
 	root := t.TempDir()
 
@@ -817,7 +816,6 @@ func TestIntegrationB_NarrowSafety(t *testing.T) {
 		t.Fatalf("unexpected legitimate append result entry: %+v", entry)
 	}
 }
-
 
 func TestIntegrationLifecycleInvariants(t *testing.T) {
 	root := t.TempDir()
@@ -1784,5 +1782,3 @@ func TestIntegrationIrcWait(t *testing.T) {
 		t.Fatalf("unexpectedly matched history message in output, got %q", outStr)
 	}
 }
-
-

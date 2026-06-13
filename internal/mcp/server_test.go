@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -411,5 +412,87 @@ func TestIrcWaitToolTimeout(t *testing.T) {
 	}
 	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
 		t.Errorf("next_offset = %d, want snapshot size %d", out.NextOffset, len("12:00 <bob> static\n"))
+	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runCmd := func(name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("failed to run %s %v: %v", name, args, err)
+		}
+	}
+	runCmd("git", "init")
+	runCmd("git", "config", "user.name", "test")
+	runCmd("git", "config", "user.email", "test@example.com")
+	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
+}
+
+func TestWorktreeMcpTools(t *testing.T) {
+	s, _ := newTestServer(t)
+	tempDir := t.TempDir()
+	mainDir := filepath.Join(tempDir, "main")
+	if err := os.Mkdir(mainDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	initGitRepo(t, mainDir)
+
+	// Create a branch
+	cmd := exec.Command("git", "branch", "feature-branch")
+	cmd.Dir = mainDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create branch: %v", err)
+	}
+
+	// Create worktree
+	wtDir := filepath.Join(tempDir, "wt-bob")
+	cmd = exec.Command("git", "worktree", "add", wtDir, "feature-branch")
+	cmd.Dir = mainDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add worktree: %v", err)
+	}
+
+	// Call worktree_init via MCP
+	res, err := s.callTool(context.Background(), "worktree_init", map[string]any{
+		"target_actor": "bob",
+		"work_dir":     wtDir,
+	})
+	if err != nil {
+		t.Fatalf("worktree_init tool call failed: %v", err)
+	}
+
+	var initOut struct {
+		Ok     bool   `json:"ok"`
+		Output string `json:"output"`
+	}
+	decodeToolResult(t, res, &initOut)
+	if !initOut.Ok {
+		t.Error("expected ok=true")
+	}
+	if !strings.Contains(initOut.Output, "Worktree identity successfully set") {
+		t.Errorf("unexpected output: %s", initOut.Output)
+	}
+
+	// Call worktree_sync via MCP
+	res, err = s.callTool(context.Background(), "worktree_sync", map[string]any{
+		"work_dir": wtDir,
+	})
+	if err != nil {
+		t.Fatalf("worktree_sync tool call failed: %v", err)
+	}
+
+	var syncOut struct {
+		Ok     bool   `json:"ok"`
+		Output string `json:"output"`
+	}
+	decodeToolResult(t, res, &syncOut)
+	if !syncOut.Ok {
+		t.Error("expected ok=true")
+	}
+	if !strings.Contains(syncOut.Output, "Merging main into branch") {
+		t.Errorf("unexpected output: %s", syncOut.Output)
 	}
 }
