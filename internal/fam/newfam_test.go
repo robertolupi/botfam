@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -87,6 +88,45 @@ func TestNewfam(t *testing.T) {
 				t.Errorf("agent doc %s does not exist", docPath)
 			}
 		}
+	}
+}
+
+func TestWikiRemoteURL(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+
+	addRemote := func(name, url string) {
+		t.Helper()
+		cmd := exec.Command("git", "remote", "add", name, url)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git remote add %s: %v", name, err)
+		}
+	}
+
+	// No remote → error.
+	if _, err := wikiRemoteURL(dir); err == nil {
+		t.Errorf("expected error with no remote, got nil")
+	}
+
+	// origin fallback when gitea is absent.
+	addRemote("origin", "https://github.com/botfam/botfam.git")
+	got, err := wikiRemoteURL(dir)
+	if err != nil {
+		t.Fatalf("wikiRemoteURL with origin: %v", err)
+	}
+	if want := "https://github.com/botfam/botfam.wiki.git"; got != want {
+		t.Errorf("origin: got %q, want %q", got, want)
+	}
+
+	// gitea takes precedence over origin.
+	addRemote("gitea", "http://gitea:3000/botfam/botfam.git")
+	got, err = wikiRemoteURL(dir)
+	if err != nil {
+		t.Fatalf("wikiRemoteURL with gitea: %v", err)
+	}
+	if want := "http://gitea:3000/botfam/botfam.wiki.git"; got != want {
+		t.Errorf("gitea: got %q, want %q", got, want)
 	}
 }
 

@@ -205,6 +205,13 @@ func NewfamCmd(args []string, out io.Writer) error {
 		if err := worktreeInit([]string{actor, wtPath}, out); err != nil {
 			return fmt.Errorf("failed to initialize git identity in worktree %s: %w", wtPath, err)
 		}
+
+		// Clone the Gitea wiki into the worktree. Self-improvement docs
+		// (retrospectives, session reviews) live in the wiki, which has no
+		// branch protection, so they don't need double-approval PRs (#55).
+		// The wiki is its own git repo and is gitignored in the main repo;
+		// this is best-effort (non-load-bearing, may not be initialized).
+		cloneWiki(repoRoot, wtPath, out)
 	}
 
 	fmt.Fprintln(out, "\nbotfam bootstrap complete.")
@@ -213,6 +220,44 @@ func NewfamCmd(args []string, out io.Writer) error {
 	fmt.Fprintf(out, "Agents:      %s\n", strings.Join(agents, ", "))
 	fmt.Fprintf(out, "Human:       %s (worktree wt-%s)\n", humanActor, humanActor)
 	return nil
+}
+
+// wikiRemoteURL derives the Gitea wiki repo URL from the fam's git remote.
+// Gitea serves a repo's wiki as a sibling git repo at <repo>.wiki.git. It
+// prefers the "gitea" remote, falling back to "origin".
+func wikiRemoteURL(repoRoot string) (string, error) {
+	var raw string
+	for _, remote := range []string{"gitea", "origin"} {
+		if u, err := gitOne(repoRoot, "remote", "get-url", remote); err == nil && u != "" {
+			raw = u
+			break
+		}
+	}
+	if raw == "" {
+		return "", fmt.Errorf("no gitea or origin remote found")
+	}
+	return strings.TrimSuffix(raw, ".git") + ".wiki.git", nil
+}
+
+// cloneWiki clones the Gitea wiki into <wtPath>/wiki. It is best-effort: a
+// missing remote, an uninitialized wiki, or a clone failure is reported as a
+// warning rather than failing setup, since the wiki is non-load-bearing.
+func cloneWiki(repoRoot, wtPath string, out io.Writer) {
+	wikiURL, err := wikiRemoteURL(repoRoot)
+	if err != nil {
+		fmt.Fprintf(out, "  skipping wiki clone: %v\n", err)
+		return
+	}
+	dest := filepath.Join(wtPath, "wiki")
+	if _, err := os.Stat(filepath.Join(dest, ".git")); err == nil {
+		fmt.Fprintf(out, "  wiki already present: %s\n", dest)
+		return
+	}
+	if _, err := gitOutput(repoRoot, "clone", wikiURL, dest); err != nil {
+		fmt.Fprintf(out, "  warning: could not clone wiki %s: %v\n", wikiURL, err)
+		return
+	}
+	fmt.Fprintf(out, "  cloned wiki into %s\n", dest)
 }
 
 func writeClaudeSettings(checkout string) error {

@@ -1,12 +1,12 @@
 ---
 name: botfam-session-retrospective
-description: Use when closing or reviewing a botfam agent session and writing a blameless SRE-style retrospective, postmortem, or self-improvement review under doc/review/YYYY-MM-DD-ACTOR-N.md with concrete evidence, lessons, and trackable improvements.
+description: Use when closing or reviewing a botfam agent session and writing a blameless SRE-style retrospective, postmortem, or self-improvement review under wiki/review-YYYY-MM-DD-ACTOR_N.md (the Gitea wiki) with concrete evidence, lessons, and trackable improvements.
 ---
 
 # Botfam Session Retrospective
 
-Use this skill when asked to write a postmortem, retrospective, learning review,
-session review, or self-improvement artifact for a botfam session.
+Use this skill when asked to write a postmortem, retrospective, learning
+review, session review, or self-improvement artifact for a botfam session.
 
 The goal is to turn the session into durable learning for:
 
@@ -27,8 +27,8 @@ Use only evidence available from the current session or repo:
 - commits and diffs,
 - IRC channel logs — the primary coordination record:
   - your own client log (`scratch/irc/<actor>/log`, timestamped),
-  - the scribe's machine-readable ledger (JSONL at `COLLAB_HISTORY`,
-    one event per line with sender/type/target/body),
+  - the scribe's machine-readable ledger (JSONL at `COLLAB_HISTORY`, one event
+    per line with sender/type/target/body),
   - server-side history when available (ergo `CHATHISTORY`),
 - ccrep state from bang-verb lines in the ledger
   (`!propose`/`!evaluate`/`!vote` and scribe `!tally` replies),
@@ -43,33 +43,49 @@ is itself a finding.
 
 ## Output Path
 
+Retrospectives live in the **Gitea wiki**, not the main repo. The wiki is its
+own git repository (`<repo>.wiki.git`) with no branch protection, so reviews
+ship without a double-approval PR (botfam#55). Each worktree has a local clone
+at `wiki/` (cloned by `botfam newfam`, gitignored by the main repo).
+
 Write the review to:
 
 ```text
-doc/review/YYYY-MM-DD-ACTOR-N.md
+wiki/review-YYYY-MM-DD-ACTOR_N.md
 ```
 
 Where:
 
 - `YYYY-MM-DD` is the current local date.
-- `ACTOR` is the botfam actor name: the worktree basename with leading `wt-`
-  or `botfam-` stripped.
+- `ACTOR` is the botfam actor name: the worktree basename with leading `wt-` or
+  `botfam-` stripped.
 - `N` is the next progressive integer for that date and actor.
 
 Before writing:
 
 1. Read `doc/collab/PROTOCOL.md`.
 2. Determine the actor from `basename "$PWD"` using the protocol rule.
-3. List existing matching files in `doc/review/`.
-4. Pick the lowest positive integer `N` that does not already exist.
+3. If `wiki/` is missing, clone it:
+   `git clone "$(git remote get-url gitea | sed 's/\.git$//').wiki.git" wiki`.
+4. List existing matching files in `wiki/review-*`.
+5. Pick the lowest positive integer `N` that does not already exist.
 
 If this repo already uses an older unnumbered review file for the same actor,
 do not overwrite it. Start numbered files at `1`.
 
+After writing, commit and push from inside `wiki/` (no PR needed):
+
+```sh
+cd wiki && git add review-*.md && git commit -m "docs: <actor> session retrospective <date>" && git push origin main
+```
+
+Older retrospectives migrated out of `doc/review/` are indexed on the wiki's
+**Reviews** page.
+
 ## Workflow
 
-1. Gather evidence from git status, recent commits, relevant diffs, tests,
-   your IRC client log, and the scribe ledger when available.
+1. Gather evidence from git status, recent commits, relevant diffs, tests, your
+   IRC client log, and the scribe ledger when available.
 2. Reconstruct the timeline from evidence. IRC logs carry per-line timestamps —
    use them verbatim; the channel log is the authoritative event order. When
    your client was disconnected, mark the gap explicitly and fill it from the
