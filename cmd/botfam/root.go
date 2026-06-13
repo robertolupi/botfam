@@ -73,27 +73,11 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		fam.NewIrcClientCmd(),
 		fam.NewIrcWaitCmd(),
 		fam.NewForgeWaitCmd(),
-		newExternalReviewCmd(),
+		fam.NewExternalReviewCmd(),
 		fam.NewScribeCmd(),
 		fam.NewIrclog2SessionsCmd(),
 	)
 	return root
-}
-
-// passthrough wraps an existing fam handler as a Cobra leaf command. Flag
-// parsing is disabled so the handler's own argument parser receives the raw
-// arguments unchanged — this keeps behaviour (and the handlers' --help output)
-// identical while migrating the dispatch layer to Cobra. Per-command flags can
-// be promoted to pflags incrementally without touching the handlers.
-func passthrough(use, short string, handler func([]string, io.Writer) error) *cobra.Command {
-	return &cobra.Command{
-		Use:                use,
-		Short:              short,
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return handler(args, cmd.OutOrStdout())
-		},
-	}
 }
 
 func newVersionCmd() *cobra.Command {
@@ -117,11 +101,6 @@ func newServeCmd() *cobra.Command {
 			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
 		},
 	}
-}
-
-func newExternalReviewCmd() *cobra.Command {
-	return passthrough("external-review [flags] [MATERIAL...]",
-		"Fan a review prompt across one or more LLMs", fam.ExternalReviewCmd)
 }
 
 func isTerminal(f *os.File) bool {
