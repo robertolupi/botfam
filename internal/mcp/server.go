@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -704,7 +705,7 @@ func argFloatPtr(args map[string]any, key string) *float64 {
 func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	mcpSrv.AddResource(
 		mcplib.NewResource(
-			"botfam://fam/docs/protocol",
+			"botfam:///docs/protocol",
 			"botfam Coordination Protocol",
 			mcplib.WithMIMEType("text/markdown"),
 		),
@@ -712,7 +713,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	)
 	mcpSrv.AddResource(
 		mcplib.NewResource(
-			"botfam://fam/docs/ops",
+			"botfam:///docs/ops",
 			"botfam Operations Guide",
 			mcplib.WithMIMEType("text/markdown"),
 		),
@@ -725,16 +726,73 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	if err != nil {
 		return nil, err
 	}
-	repoRoot := fam.RepoPath(cwd)
+	localRepoRoot := fam.RepoPath(cwd)
+
+	u, err := url.Parse(req.Params.URI)
+	if err != nil {
+		return nil, fmt.Errorf("invalid resource URI %q: %w", req.Params.URI, err)
+	}
+
+	if u.Scheme != "botfam" {
+		return nil, fmt.Errorf("unsupported scheme %q (expected \"botfam\")", u.Scheme)
+	}
+
+	// Resolve target repository root based on authority (Host)
+	var targetRepoRoot string
+	if u.Host == "" {
+		targetRepoRoot = localRepoRoot
+	} else {
+		// Named authority: search under ~/.botfam/ for a family with a matching name or slug
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		botfamDir := filepath.Join(home, ".botfam")
+		entries, err := os.ReadDir(botfamDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read ~/.botfam: %w", err)
+		}
+
+		// Also check local family first to avoid file scanning if possible
+		localInfo, errInfo := (fam.Resolver{WorkDir: cwd}).Resolve()
+		localReg := fam.LoadFamRegistry(cwd)
+		if (errInfo == nil && u.Host == localInfo.Name) || u.Host == localReg.Name || u.Host == localReg.Slug {
+			targetRepoRoot = localRepoRoot
+		} else {
+			found := false
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				tomlPath := filepath.Join(botfamDir, entry.Name(), "fam.toml")
+				if _, err := os.Stat(tomlPath); err == nil {
+					reg, err := fam.ReadRegistry(tomlPath)
+					if err == nil {
+						if reg.Name == u.Host || reg.Slug == u.Host {
+							if len(reg.RepoPaths) > 0 {
+								targetRepoRoot = reg.RepoPaths[0]
+								found = true
+								break
+							}
+						}
+					}
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("unknown family authority %q", u.Host)
+			}
+		}
+	}
 
 	var filename string
-	switch req.Params.URI {
-	case "botfam://fam/docs/protocol":
-		filename = filepath.Join(repoRoot, "doc", "collab", "PROTOCOL.md")
-	case "botfam://fam/docs/ops":
-		filename = filepath.Join(repoRoot, "doc", "collab", "IRC-OPS.md")
+	path := filepath.Clean(u.Path)
+	switch path {
+	case "/docs/protocol":
+		filename = filepath.Join(targetRepoRoot, "doc", "collab", "PROTOCOL.md")
+	case "/docs/ops":
+		filename = filepath.Join(targetRepoRoot, "doc", "collab", "IRC-OPS.md")
 	default:
-		return nil, fmt.Errorf("unknown resource URI %q", req.Params.URI)
+		return nil, fmt.Errorf("unknown resource path %q", u.Path)
 	}
 
 	content, err := os.ReadFile(filename)
