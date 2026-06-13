@@ -30,16 +30,14 @@ Use only evidence available from the current session or repo:
   - the scribe's machine-readable ledger (JSONL at `COLLAB_HISTORY`, one event
     per line with sender/type/target/body),
   - server-side history when available (ergo `CHATHISTORY`),
-- ccrep state from bang-verb lines in the ledger
-  (`!propose`/`!evaluate`/`!vote` and scribe `!tally` replies),
-- review comments and verdicts (sent as `!evaluate` lines),
+- Gitea PR reviews, comments, and verdicts,
 - tests run and failures,
 - human interventions (operator messages on the channel),
 - TODOs and unresolved questions.
 
 If evidence is missing, say so explicitly. Do not infer intent. When client
-logs and the scribe ledger disagree, quote both and flag the divergence — that
-is itself a finding.
+logs and Gitea timeline disagree, quote both and flag the divergence — that is
+itself a finding.
 
 ## Output Path
 
@@ -57,14 +55,14 @@ wiki/review-YYYY-MM-DD-ACTOR_N.md
 Where:
 
 - `YYYY-MM-DD` is the current local date.
-- `ACTOR` is the botfam actor name: the worktree basename with leading `wt-` or
-  `botfam-` stripped.
+- `ACTOR` is the botfam actor name: resolved by running `botfam whoami` (or the
+  worktree directory basename with prefixes stripped per PROTOCOL §1).
 - `N` is the next progressive integer for that date and actor.
 
 Before writing:
 
 1. Read `doc/collab/PROTOCOL.md`.
-2. Determine the actor from `basename "$PWD"` using the protocol rule.
+2. Determine the actor by running `botfam whoami` (or using the protocol rule).
 3. If `wiki/` is missing, clone it:
    `git clone "$(git remote get-url gitea | sed 's/\.git$//').wiki.git" wiki`.
 4. List existing matching files in `wiki/review-*`.
