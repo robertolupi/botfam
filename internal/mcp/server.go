@@ -174,6 +174,7 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 	add(mcplib.NewTool("irc_write",
 		mcplib.WithDescription("Write a raw line to the IRC client's input pipe."),
 		mcplib.WithString("message", mcplib.Required()),
+		mcplib.WithString("target"),
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
@@ -219,6 +220,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		if message == "" {
 			return nil, errors.New("message is required")
 		}
+		target := argString(args, "target")
 
 		absWorkDir, err := filepath.Abs(workDir)
 		if err != nil {
@@ -241,6 +243,9 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		defer f.Close()
 
 		msg := message
+		if target != "" {
+			msg = fmt.Sprintf("/msg %s %s", target, message)
+		}
 		if !strings.HasSuffix(msg, "\n") {
 			msg += "\n"
 		}

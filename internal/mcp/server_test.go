@@ -237,6 +237,58 @@ func TestIrcWriteTool(t *testing.T) {
 			t.Errorf("expected line %q, got %q", "hello irc\n", line)
 		}
 	}
+
+	// Test writing with target parameter
+	readCh2 := make(chan string, 1)
+	errCh2 := make(chan error, 1)
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+
+	go func() {
+		f, err := os.OpenFile(fifoPath, os.O_RDONLY, 0)
+		if err != nil {
+			errCh2 <- err
+			return
+		}
+		defer f.Close()
+
+		lineCh := make(chan string, 1)
+		go func() {
+			reader := bufio.NewReader(f)
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			lineCh <- line
+		}()
+
+		select {
+		case line := <-lineCh:
+			readCh2 <- line
+		case <-ctx2.Done():
+			errCh2 <- ctx2.Err()
+		case <-time.After(2 * time.Second):
+			errCh2 <- fmt.Errorf("timeout waiting for FIFO read (target test)")
+		}
+	}()
+
+	_, err = s.callTool(context.Background(), "irc_write", map[string]any{
+		"work_dir": aliceDir,
+		"message":  "hello target",
+		"target":   "#chan",
+	})
+	if err != nil {
+		t.Fatalf("irc_write tool call with target failed: %v", err)
+	}
+
+	select {
+	case err := <-errCh2:
+		t.Fatalf("FIFO reader error on target test: %v", err)
+	case line := <-readCh2:
+		if line != "/msg #chan hello target\n" {
+			t.Errorf("expected line %q, got %q", "/msg #chan hello target\n", line)
+		}
+	}
 }
 
 // decodeToolResult unmarshals the JSON text payload of a tool result.
