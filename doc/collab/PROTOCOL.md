@@ -129,11 +129,89 @@ immediately.
 
 ### Repository Family Boundaries
 
-A multi-family orchestration setup (e.g., `botfam` and `deep-cuts` running on the same host) has strict isolation boundaries:
-- **Read-only access is permitted**: An agent is allowed to read files, status, or logs in another repository family's directory for reference and cross-checking.
-- **No cross-family writing, execution, or process management**: An agent must never write to files, run modifying shell commands, or spawn, manage, or terminate background processes/daemons (such as IRC clients, wait watchers, or MCP servers) in worktrees or environments belonging to a different repository family.
-- **No identity impersonation**: An agent must never impersonate or act on behalf of another agent or bot from a different repository family, nor use their credentials or local workspace configurations.
-- **Coordination must occur over IRC**: Any request requiring action (writing or execution) in another family's checkout must be requested and discussed on the target family's shared IRC channel (e.g., `#dc`). The corresponding agent belonging to that family must execute the actions themselves.
+A multi-family orchestration setup (e.g., `botfam` and `deep-cuts` running on
+the same host) has strict isolation boundaries:
+
+- **Read-only access is permitted**: An agent is allowed to read files, status,
+  or logs in another repository family's directory for reference and
+  cross-checking.
+- **No cross-family writing, execution, or process management**: An agent must
+  never write to files, run modifying shell commands, or spawn, manage, or
+  terminate background processes/daemons (such as IRC clients, wait watchers,
+  or MCP servers) in worktrees or environments belonging to a different
+  repository family.
+- **No identity impersonation**: An agent must never impersonate or act on
+  behalf of another agent or bot from a different repository family, nor use
+  their credentials or local workspace configurations.
+- **Coordination must occur over IRC**: Any request requiring action (writing
+  or execution) in another family's checkout must be requested and discussed on
+  the target family's shared IRC channel (e.g., `#dc`). The corresponding agent
+  belonging to that family must execute the actions themselves.
+
+### Offline Cross-Family Issue Tracking (Contract & Bindings)
+
+To allow asynchronous, offline issue tracking between repository families
+(where agents in different families may not be online at the same time), we
+establish a decoupled model consisting of a transport-agnostic contract (Layer
+1\) and interchangeable transport bindings (Layer 2).
+
+#### Layer 1: The Issue Tracking Contract (Transport-Agnostic)
+
+Every cross-family issue report must conform to a strict schema and state
+machine:
+
+- **JSON Payload Schema**:
+  ```json
+  {
+    "version": "1.0",
+    "timestamp": "2026-06-13T06:30:00Z",
+    "id": "dc-stale-venv-v1",
+    "source": {
+      "family": "deep-cuts",
+      "nick": "claude-dc",
+      "worktree": "wt-claude"
+    },
+    "target": {
+      "family": "botfam",
+      "nick": "agy"
+    },
+    "title": "Short descriptive title of the issue",
+    "description": "Detailed description of the issue or feature request",
+    "status": "reported",
+    "evidence": "Log trace, error snippet, or command output if applicable"
+  }
+  ```
+- **State Machine**: Issues follow the states
+  `reported -> acknowledged -> resolved`. All updates to an issue are keyed by
+  the unique issue `id` to ensure idempotency and prevent duplicate processing
+  across families.
+
+#### Layer 2: Transport Bindings
+
+The Layer 1 contract is transport-agnostic and can be satisfied by any of the
+following interchangeable transport bindings:
+
+- **Binding A (Shared `#cross` IRC Channel) [Preferred]**:
+  - **Transport**: Both families' IRC clients join the `#cross` channel on the
+    shared localhost `ergo` server.
+  - **Durability**: The scribe logs all events in `#cross` to the shared
+    out-of-repo history ledger at `~/.botfam/cross-fam/history.jsonl`. Clients
+    leverage `ergo`'s `CHATHISTORY` to replay missed events upon connection.
+  - **Spoof Resistance**: NickServ nick authentication ensures that nicks
+    cannot be impersonated on `#cross`.
+  - **Wake-on-Report**: Message arrival immediately triggers the standard
+    client log watcher (`irc-wait`), allowing real-time response.
+  - **Payload**: The JSON payload is serialized and sent as a channel PRIVMSG.
+- **Binding B (Shared File-System Queue) [Fallback]**:
+  - **Transport**: Used when the IRC server or clients are offline. JSON
+    payloads are dropped into the host-local shared directory
+    `~/.botfam/cross-fam/issues/`.
+  - **Filename Format**: Filenames must match the pattern:
+    `~/.botfam/cross-fam/issues/<yyyy-mm-dd>-<source-family>-<source-nick>-<slug>.json`.
+  - **Spoof Resistance**: None (assumes trust on local loopback).
+  - **Lifecycle**: The target family's processor agent scans the directory,
+    ingests pending `.json` files, and renames them to `.processed` (or moves
+    them to `processed/`) to prevent duplicate processing.
 
 ### Main checkout discipline
 
