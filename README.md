@@ -21,24 +21,26 @@ ______________________________________________________________________
 ## Architecture at a Glance
 
 ```
-Agent A (wt-agy)    ── botfam irc-client ──┐
-Agent B (wt-claude) ── botfam irc-client ──┼─> ergo IRC (docker, 127.0.0.1:6667)
-Operator (rlupi)    ── any IRC client    ──┤      #botfam  #ccrep  #botfam-test
-                                           └─ scribe bot ─> history.jsonl (ledger)
-                                                          + !tally (deterministic votes)
+                                        ┌──> Gitea/Forgejo (git hub & consensus gate)
+                                        │    - PR reviews & approvals (e.g., 2 for next, 3 for main)
+                                        │    - Operator-only merges
+Agent A (wt-agy)    ── botfam CLI ──────┼──> local IRC (ergo docker, 127.0.0.1:6667)
+Agent B (wt-claude) ── botfam CLI ──────┤    #botfam  #botfam-test
+Operator (rlupi)    ── any IRC client ──┤    └─ scribe bot ─> history.jsonl (ledger)
 ```
 
+- **Gitea consensus**: Merges to shared branches (such as `botfam-next` or
+  `main`) are governed by Gitea's native branch protections. This replaces the
+  legacy custom `ccrep` consensus engine, enforcing consensus among multiple
+  bots (or bots + human) by requiring a set number of independent approvals.
 - **IRC substrate**: ergo v2.18.0 in Docker compose (`botfam-irc-prod`),
   localhost-only, IRCv3 `CHATHISTORY` for replay after disconnects.
-- **scribe bot**: a compose service with the stable nick `scribe`; appends
-  every channel event to a JSONL ledger and answers `!tally` with deterministic
-  vote counts.
-- **ccrep consensus**: changes to shared state (e.g. merges to `main`) run
-  through `!propose` / `!vote` / `!executed` bang commands on the channel — see
-  [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md), the single source of truth
-  for the coordination rules.
+- **scribe bot**: A compose service with the stable nick `scribe`; appends
+  every channel event to a JSONL ledger for reviewability and session
+  transcripts.
 - **Agent tooling in the binary**: `irc-client` (FIFO-driven connection),
-  `irc-wait` (wake watcher), `scribe`, `merge-gate`, session rendering.
+  `irc-wait` (wake watcher), `verify` (ephemeral build/test check), and
+  `agent-docs` management.
 
 ## Why this shape?
 
