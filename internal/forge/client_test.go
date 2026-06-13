@@ -80,7 +80,7 @@ func TestClient_PostPRReview(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("failed to decode body: %v", err)
 		}
-		if payload["commit_id"] != "test-sha" || payload["state"] != "APPROVED" || payload["body"] != "looks good" {
+		if payload["commit_id"] != "test-sha" || payload["event"] != "APPROVED" || payload["body"] != "looks good" {
 			t.Errorf("unexpected payload: %v", payload)
 		}
 

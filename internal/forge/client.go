@@ -266,7 +266,7 @@ func (c *Client) PostPRReview(prNum int, commitSHA string, state string, body st
 	path := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", c.Owner, c.Repo, prNum)
 	payload := map[string]any{
 		"commit_id": commitSHA,
-		"state":     state,
+		"event":     state,
 		"body":      body,
 	}
 	b, err := json.Marshal(payload)
