@@ -56,6 +56,8 @@ func run() error {
 			return fam.TopicCmd(os.Args[2:], os.Stdout)
 		case "merge-gate":
 			return fam.MergeGateCmd(os.Args[2:], os.Stdout)
+		case "verify":
+			return fam.VerifyCmd(os.Args[2:], os.Stdout)
 		case "agent-docs":
 			return fam.AgentDocsCmd(os.Args[2:], os.Stdout)
 		case "vote":
@@ -194,6 +196,7 @@ Usage:
   botfam session <subcommand>
   botfam topic <subcommand>
   botfam merge-gate --commit <sha> --proposal <id>
+  botfam verify <sha> [pkgs...]
   botfam agent-docs generate|check
   botfam server [--socket <path>] [--port <port>]
   botfam vote --proposal <id> --verdict <verdict>
