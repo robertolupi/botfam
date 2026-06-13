@@ -38,13 +38,9 @@ done
 command -v curl >/dev/null || { echo "error: curl required" >&2; exit 2; }
 command -v jq   >/dev/null || { echo "error: jq required"   >&2; exit 2; }
 
-# actor: explicit, else this worktree's basename minus a wt-/botfam- prefix
-if [ -z "$ACTOR" ]; then
-  ACTOR="$(basename "$PWD")"; ACTOR="${ACTOR#wt-}"; ACTOR="${ACTOR#botfam-}"
-fi
-# fam: explicit, else $BOTFAM_FAM, else the worktree's parent dir name
-[ -n "$FAM" ] || FAM="${BOTFAM_FAM:-$(basename "$(dirname "$PWD")")}"
-[ -n "$TOKEN_FILE" ] || TOKEN_FILE="$HOME/.botfam/token-${FAM}-${ACTOR}"
+# Identity (sourced from lib-botfam.sh)
+source "$(dirname "$0")/lib-botfam.sh"
+derive_identity
 
 [ -n "$USER_IN" ] || read -rp "Forge username: " USER_IN
 
