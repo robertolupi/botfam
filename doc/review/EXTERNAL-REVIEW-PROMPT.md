@@ -47,9 +47,11 @@ are reviewing a session transcript, not the live system.
   (production) and `#botfam-test` (experiments); a **scribe** bot logs the
   channel and handles `!propose` / `!vote` / `!tally`.
 - The older mailbox/queue substrate (`botfam recv/post/claim`, SQLite store,
-  UDS daemon) still exists in the code but is **being replaced** by the IRC
-  layer. Do not propose making it canonical; that question is settled. Older
-  design docs describing a "maildir, no daemon" architecture are stale.
+  UDS daemon) and custom `ccrep` consensus engine have been fully retired and
+  deleted (as of 2026-06-13). The merge gate now relies entirely on Gitea's
+  native branch protection rules.
+- Gitea branch protection configuration (Required Approvals>=2, dismiss-stale,
+  block-on-rejected) is verified and linted via `tools/forge-gate.sh`.
 - Production runs via Docker compose (`botfam-irc-prod`: ergo v2.18.0 + scribe,
   data bind-mounted, localhost-only). A hermetic test substrate exists
   (`compose.test.yaml` + `docker/test-substrate.sh`).

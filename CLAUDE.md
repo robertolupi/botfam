@@ -10,7 +10,7 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
    coordination tools, the ccrep change protocol, worktree ownership, and
    platform gotchas.
 3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands
-   like `botfam inbox`, `botfam send`, `botfam claim`, etc. directly.
+   like `botfam worktree`, `botfam session`, `botfam verify`, etc. directly.
 4. **Connect to the IRC server immediately.** To join the conversation, run
    `botfam irc-client <name>` as a background task. A registered nick's pass
    file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the

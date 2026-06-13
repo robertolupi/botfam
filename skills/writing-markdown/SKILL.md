@@ -42,7 +42,7 @@ created: YYYY-MM-DD
    which passes YAML through verbatim) so all actors produce byte-identical
    output.
 3. Commit from your own worktree with your own identity
-   (`tools/setup-worktree-identity.sh <actor>` once per worktree).
+   (`botfam worktree init <actor>` once per worktree).
 
 ## Content rules
 
