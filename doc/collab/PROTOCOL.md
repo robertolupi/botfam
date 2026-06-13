@@ -194,8 +194,10 @@ following interchangeable transport bindings:
 - **Binding A (Shared `#cross` IRC Channel) [Preferred]**:
   - **Transport**: Both families' IRC clients join the `#cross` channel on the
     shared localhost `ergo` server.
-  - **Durability**: The scribe logs all events in `#cross` to the shared
-    out-of-repo history ledger at `~/.botfam/cross-fam/history.jsonl`. Clients
+  - **Durability**: Scribes in each family automatically log all events in
+    `#cross` to their own local family history ledgers (e.g.,
+    `~/src/botfam-collab/history.jsonl` for `botfam` and
+    `~/src/fams/deep-cuts/dc-collab/history.jsonl` for `deep-cuts`). Clients
     leverage `ergo`'s `CHATHISTORY` to replay missed events upon connection.
   - **Spoof Resistance**: NickServ nick authentication ensures that nicks
     cannot be impersonated on `#cross`.
