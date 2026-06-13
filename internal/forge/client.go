@@ -15,7 +15,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
+
+// defaultHTTPClient is the shared fallback used by every Client that does not
+// supply its own HTTPClient. Unlike http.DefaultClient it has a finite timeout
+// so a slow or stalled Gitea host cannot wedge a caller (e.g. the forge-wait
+// loop) forever. It is process-wide but never mutated, so it is safe to share.
+var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type Client struct {
 	BaseURL string // e.g. "http://gitea:3000/"
@@ -23,6 +30,10 @@ type Client struct {
 	Repo    string // e.g. "botfam"
 	Token   string
 	Remote  string
+
+	// HTTPClient, when set, overrides defaultHTTPClient for this Client's
+	// requests. Leave nil to use the timeout-bearing shared default.
+	HTTPClient *http.Client
 }
 
 type PullRequest struct {
@@ -276,7 +287,11 @@ func (c *Client) request(method, path string, body []byte) ([]byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		httpClient = defaultHTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
