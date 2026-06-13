@@ -13,9 +13,9 @@ func TestScribeCmdNickFlag(t *testing.T) {
 		t.Errorf("empty --nick: got %v, want non-empty-value error", err)
 	}
 
-	// Unknown arguments are still rejected.
+	// Unknown flags are still rejected (Cobra reports them as "unknown flag").
 	err = ScribeCmd([]string{"--nickname", "scribe-dc"}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "unknown scribe argument") {
-		t.Errorf("unknown arg: got %v, want unknown-argument error", err)
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+		t.Errorf("unknown arg: got %v, want unknown-flag error", err)
 	}
 }

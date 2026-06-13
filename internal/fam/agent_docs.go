@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"github.com/spf13/cobra"
 )
 
 var agentDocFiles = []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
@@ -63,49 +65,56 @@ type repoSkill struct {
 	Path        string
 }
 
-// AgentDocsCmd dispatches agent-doc generation subcommands.
+// AgentDocsCmd is the thin args/io entry point retained for tests; it builds
+// the Cobra command and runs it against args.
 func AgentDocsCmd(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return printAgentDocsHelp(out)
-	}
-
-	repoRoot := RepoPath(".")
-	switch args[0] {
-	case "generate":
-		if len(args) > 1 {
-			return fmt.Errorf("unknown argument %q", args[1])
-		}
-		if err := GenerateAgentDocs(repoRoot); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "Generated %s\n", strings.Join(agentDocFiles, ", "))
-		return nil
-	case "check":
-		if len(args) > 1 {
-			return fmt.Errorf("unknown argument %q", args[1])
-		}
-		stale, err := CheckAgentDocs(repoRoot)
-		if err != nil {
-			return err
-		}
-		if len(stale) > 0 {
-			return fmt.Errorf("agent docs are stale: %s; run botfam agent-docs generate", strings.Join(stale, ", "))
-		}
-		fmt.Fprintln(out, "Agent docs are up to date.")
-		return nil
-	case "-h", "--help", "help":
-		return printAgentDocsHelp(out)
-	default:
-		return fmt.Errorf("unknown agent-docs command %q", args[0])
-	}
+	return runCobra(NewAgentDocsCmd(), args, out)
 }
 
-func printAgentDocsHelp(out io.Writer) error {
-	fmt.Fprint(out, `Usage:
-  botfam agent-docs generate
-  botfam agent-docs check
-`)
-	return nil
+// NewAgentDocsCmd builds the `botfam agent-docs` Cobra command and its
+// generate/check subcommands.
+func NewAgentDocsCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:           "agent-docs",
+		Short:         "Generate or verify the harness entry docs (AGENTS/CLAUDE/GEMINI)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	c.AddCommand(
+		&cobra.Command{
+			Use:           "generate",
+			Short:         "Regenerate the harness entry docs from skills/*",
+			Args:          cobra.NoArgs,
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				if err := GenerateAgentDocs(RepoPath(".")); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "Generated %s\n", strings.Join(agentDocFiles, ", "))
+				return nil
+			},
+		},
+		&cobra.Command{
+			Use:           "check",
+			Short:         "Verify the harness entry docs are up to date",
+			Args:          cobra.NoArgs,
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				stale, err := CheckAgentDocs(RepoPath("."))
+				if err != nil {
+					return err
+				}
+				if len(stale) > 0 {
+					return fmt.Errorf("agent docs are stale: %s; run botfam agent-docs generate", strings.Join(stale, ", "))
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Agent docs are up to date.")
+				return nil
+			},
+		},
+	)
+	return c
 }
 
 func GenerateAgentDocs(repoRoot string) error {

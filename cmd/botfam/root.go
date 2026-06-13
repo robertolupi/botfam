@@ -69,12 +69,12 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		newNewfamCmd(),
 		newSessionCmd(),
 		fam.NewVerifyCmd(),
-		newAgentDocsCmd(),
+		fam.NewAgentDocsCmd(),
 		newIrcClientCmd(),
 		fam.NewIrcWaitCmd(),
 		fam.NewForgeWaitCmd(),
 		newExternalReviewCmd(),
-		newScribeCmd(),
+		fam.NewScribeCmd(),
 		newIrclog2SessionsCmd(),
 	)
 	return root
@@ -139,11 +139,6 @@ func newSessionCmd() *cobra.Command {
 		"Manage coordination sessions (open/list/render/close/extract)", fam.SessionCmd)
 }
 
-func newAgentDocsCmd() *cobra.Command {
-	return passthrough("agent-docs <generate|check>",
-		"Generate or verify the harness entry docs (AGENTS/CLAUDE/GEMINI)", fam.AgentDocsCmd)
-}
-
 func newIrcClientCmd() *cobra.Command {
 	return passthrough("irc-client <nick> [flags]",
 		"Run the FIFO-driven IRC client", fam.IrcClientCmd)
@@ -152,11 +147,6 @@ func newIrcClientCmd() *cobra.Command {
 func newExternalReviewCmd() *cobra.Command {
 	return passthrough("external-review [flags] [MATERIAL...]",
 		"Fan a review prompt across one or more LLMs", fam.ExternalReviewCmd)
-}
-
-func newScribeCmd() *cobra.Command {
-	return passthrough("scribe [flags]",
-		"Run the channel scribe bot (logs IRC events to the ledger)", fam.ScribeCmd)
 }
 
 func newIrclog2SessionsCmd() *cobra.Command {
