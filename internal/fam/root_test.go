@@ -123,6 +123,25 @@ func TestResolver(t *testing.T) {
 		t.Errorf("expected worktree Actor to be %q, got %q", "bob", infoWt.Actor)
 	}
 
+	// A nested subdirectory inside the worktree
+	nestedSubDir := filepath.Join(wtDir, "cmd", "botfam")
+	if err := os.MkdirAll(nestedSubDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolve from the nested subdirectory inside the worktree
+	rSub := Resolver{
+		WorkDir: nestedSubDir,
+		Env:     []string{},
+	}
+	infoSub, err := rSub.Resolve()
+	if err != nil {
+		t.Fatalf("resolve from nested subdirectory failed: %v", err)
+	}
+	if infoSub.Actor != "bob" {
+		t.Errorf("expected subdirectory Actor to resolve to %q, got %q", "bob", infoSub.Actor)
+	}
+
 	// Assert the root is derived from git history (starts with fam-)
 	if !strings.HasPrefix(infoMain.Name, "fam-") {
 		t.Errorf("expected family name to start with 'fam-', got %q", infoMain.Name)
