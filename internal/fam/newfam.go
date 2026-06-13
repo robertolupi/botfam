@@ -295,7 +295,10 @@ func cleanLegacyMCP(checkout string) {
 	if !isGitTracked(checkout, mcpPath) {
 		_ = os.Remove(mcpPath)
 	}
-	_ = os.Remove(filepath.Join(checkout, ".agents", "mcp_config.json"))
+	agentsPath := filepath.Join(checkout, ".agents", "mcp_config.json")
+	if !isGitTracked(checkout, agentsPath) {
+		_ = os.Remove(agentsPath)
+	}
 	_ = os.Remove(filepath.Join(checkout, ".codex", "config.toml"))
 
 	_ = os.Remove(filepath.Join(checkout, ".agents"))
