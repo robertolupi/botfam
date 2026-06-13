@@ -2,6 +2,7 @@
 .gomodcache/
 /botfam
 .claude/settings.local.json
+.mcp.json
 scratch/
 doc/collab/history.jsonl
 .DS_Store
