@@ -5,23 +5,42 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+
+	"github.com/spf13/cobra"
 )
 
-// WorktreeCmd handles "botfam worktree <init|sync|register> [args]"
+// WorktreeCmd is the thin args/io entry point retained for tests; it builds the
+// Cobra command and runs it against args.
 func WorktreeCmd(args []string, out io.Writer) error {
-	if len(args) < 1 {
-		return fmt.Errorf("usage: botfam worktree <init|sync|register> [args]")
+	return runCobra(NewWorktreeCmd(), args, out)
+}
+
+// NewWorktreeCmd builds the `botfam worktree` Cobra command and its
+// init/sync/register subcommands.
+func NewWorktreeCmd() *cobra.Command {
+	c := &cobra.Command{
+		Use:           "worktree",
+		Short:         "Manage agent git worktrees (init/sync/register)",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
-	switch args[0] {
-	case "init":
-		return worktreeInit(args[1:], out)
-	case "sync":
-		return worktreeSync(args[1:], out)
-	case "register":
-		return worktreeRegister(args[1:], out)
-	default:
-		return fmt.Errorf("unknown worktree subcommand %q", args[0])
+	sub := func(use, short string, fn func([]string, io.Writer) error) *cobra.Command {
+		return &cobra.Command{
+			Use:           use,
+			Short:         short,
+			SilenceUsage:  true,
+			SilenceErrors: true,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return fn(args, cmd.OutOrStdout())
+			},
+		}
 	}
+	c.AddCommand(
+		sub("init <actor> [path]", "Initialize a worktree's git identity", worktreeInit),
+		sub("sync [path]", "Sync a worktree with the fam object stores", worktreeSync),
+		sub("register [path]", "Register all worktrees of this repo into the fam registry", worktreeRegister),
+	)
+	return c
 }
 
 // worktreeRegister enumerates this repo's git worktrees and unions their paths

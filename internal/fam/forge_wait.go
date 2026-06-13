@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/spf13/cobra"
 )
 
 // indentTruncate prefixes every line of s and caps the total length so a long
@@ -24,58 +24,51 @@ func indentTruncate(s, prefix string, max int) string {
 	return strings.Join(lines, "\n")
 }
 
-const forgeWaitHelp = `Usage:
-  botfam forge-wait [--once] [--interval S] [--timeout S] [--mark-read]
-
-Block until this agent has unread forge notifications — a review requested, a
-comment, a mention, or a new issue/PR assigned to you (all subject types, not
-just PRs) — then print them and exit. The forge analogue of "botfam irc-wait",
-so the harness can wake the agent on forge activity instead of a human nudging
-it.
-
-  --once        check once; print the result and return (don't block).
-  (default)     poll every --interval until there's activity, then return.
-  --interval S  poll interval in seconds (default 30).
-  --timeout S   give up after S seconds with nothing (error exit).
-  --mark-read   mark the surfaced notifications read (needs write:notification).
-
-Requires the token to carry the notification scope (forge-login.sh requests it).
-`
-
-// ForgeWaitCmd handles "botfam forge-wait [flags]" (issue #17).
+// ForgeWaitCmd is the thin args/io entry point retained for tests and the MCP
+// layer; it builds the Cobra command and runs it against args.
 func ForgeWaitCmd(args []string, out io.Writer) error {
-	once := false
-	markRead := false
-	interval := 30 * time.Second
-	var timeout time.Duration
-	for i := 0; i < len(args); i++ {
-		switch a := args[i]; a {
-		case "-h", "--help", "help":
-			fmt.Fprint(out, forgeWaitHelp)
-			return nil
-		case "--once":
-			once = true
-		case "--mark-read":
-			markRead = true
-		case "--interval", "--timeout":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("%s requires a value in seconds", a)
-			}
-			s, err := strconv.Atoi(args[i])
-			if err != nil || s < 0 {
-				return fmt.Errorf("%s: invalid seconds %q", a, args[i])
-			}
-			if a == "--interval" {
-				interval = time.Duration(s) * time.Second
-			} else {
-				timeout = time.Duration(s) * time.Second
-			}
-		default:
-			return fmt.Errorf("unknown argument %q", a)
-		}
-	}
+	return runCobra(NewForgeWaitCmd(), args, out)
+}
 
+// NewForgeWaitCmd builds the `botfam forge-wait` Cobra command (issue #17).
+func NewForgeWaitCmd() *cobra.Command {
+	var (
+		once      bool
+		markRead  bool
+		intervalS int
+		timeoutS  int
+	)
+	c := &cobra.Command{
+		Use:   "forge-wait",
+		Short: "Wait for new Gitea notifications (review requests, comments, mentions)",
+		Long: `Block until this agent has unread forge notifications — a review requested,
+a comment, a mention, or a new issue/PR assigned to you (all subject types,
+not just PRs) — then print them and exit. The forge analogue of
+"botfam irc-wait", so the harness can wake the agent on forge activity.
+
+Requires the token to carry the notification scope (forge-login.sh requests it).`,
+		Args:          cobra.NoArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if intervalS < 0 {
+				return fmt.Errorf("--interval: invalid seconds %d", intervalS)
+			}
+			if timeoutS < 0 {
+				return fmt.Errorf("--timeout: invalid seconds %d", timeoutS)
+			}
+			return runForgeWait(cmd.OutOrStdout(), once, markRead,
+				time.Duration(intervalS)*time.Second, time.Duration(timeoutS)*time.Second)
+		},
+	}
+	c.Flags().BoolVar(&once, "once", false, "check once and return (don't block)")
+	c.Flags().BoolVar(&markRead, "mark-read", false, "mark the surfaced notifications read (needs write:notification)")
+	c.Flags().IntVar(&intervalS, "interval", 30, "poll interval in seconds")
+	c.Flags().IntVar(&timeoutS, "timeout", 0, "give up after this many seconds with nothing (0 = wait forever)")
+	return c
+}
+
+func runForgeWait(out io.Writer, once, markRead bool, interval, timeout time.Duration) error {
 	actor := os.Getenv("COLLAB_ACTOR")
 	if actor == "" {
 		if info, err := (Resolver{WorkDir: "."}).Resolve(); err == nil {

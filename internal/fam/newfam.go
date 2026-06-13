@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/spf13/cobra"
 )
 
 const newfamHelp = `Usage:
@@ -20,34 +22,31 @@ It sets up the registry, creates git worktrees for all agents and the human oper
 harness permissions, and generates agent documentation.
 `
 
-// NewfamCmd handles "botfam newfam <project-name> --agents alice,bob" (issue #44).
+// NewfamCmd is the thin args/io entry point retained for tests; it builds the
+// Cobra command and runs it against args.
 func NewfamCmd(args []string, out io.Writer) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: botfam newfam <project-name> --agents agy,claude,codex")
-	}
-	projectName := args[0]
-	if projectName == "-h" || projectName == "--help" || projectName == "help" {
-		fmt.Fprint(out, newfamHelp)
-		return nil
-	}
+	return runCobra(NewNewfamCmd(), args, out)
+}
 
-	var agents []string
-	for i := 1; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case strings.HasPrefix(arg, "--agents="):
-			agents = splitCSV(strings.TrimPrefix(arg, "--agents="))
-		case arg == "--agents":
-			i++
-			if i >= len(args) {
-				return fmt.Errorf("--agents requires a comma-separated value")
-			}
-			agents = splitCSV(args[i])
-		default:
-			return fmt.Errorf("unknown setup argument %q", arg)
-		}
+// NewNewfamCmd builds the `botfam newfam` Cobra command (issue #44).
+func NewNewfamCmd() *cobra.Command {
+	var agentsCSV string
+	c := &cobra.Command{
+		Use:           "newfam <project> --agents agy,claude,codex",
+		Short:         "Initialize a new botfam project (worktrees, registry, docs)",
+		Long:          newfamHelp,
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runNewfam(args[0], splitCSV(agentsCSV), cmd.OutOrStdout())
+		},
 	}
+	c.Flags().StringVar(&agentsCSV, "agents", "", "comma-separated agent names")
+	return c
+}
 
+func runNewfam(projectName string, agents []string, out io.Writer) error {
 	if projectName == "" {
 		return fmt.Errorf("project name is required")
 	}

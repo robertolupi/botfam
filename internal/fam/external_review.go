@@ -15,6 +15,7 @@ import (
 	"github.com/openai/openai-go/v2/option"
 	"github.com/openai/openai-go/v2/shared"
 	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/spf13/cobra"
 )
 
 const externalReviewHelp = `Usage:
@@ -52,120 +53,87 @@ type erProvider struct {
 	keyEnv  string // env var holding the API key ("" = none, e.g. ollama)
 }
 
-// ExternalReviewCmd handles "botfam external-review" (issue #39). It supersedes
-// the old tools/external-review.sh.
-func ExternalReviewCmd(args []string, out io.Writer) error {
-	promptFile := "doc/review/EXTERNAL-REVIEW-PROMPT.md"
-	outDir := ""
-	pr := ""
-	sessionFile := ""
-	milestoneName := ""
-	since := ""
-	until := ""
-	redact := true
-	ollamaHost := os.Getenv("OLLAMA_HOST")
-	if ollamaHost == "" {
-		ollamaHost = "http://localhost:11434"
-	}
-	var ollama, openaiM, gemini []string
-	var materials []string
+// externalReviewOpts holds the parsed flags for `botfam external-review`.
+type externalReviewOpts struct {
+	promptFile        string
+	outDir            string
+	pr                string
+	sessionFile       string
+	milestoneName     string
+	since             string
+	until             string
+	snapshotTimestamp string
+	ollamaHost        string
+	redact            bool
+	withDiffs         bool
+	interactionOnly   bool
+	ollama            []string
+	openaiM           []string
+	gemini            []string
+	materials         []string
+}
 
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		need := func() (string, error) {
-			i++
-			if i >= len(args) {
-				return "", fmt.Errorf("%s requires a value", a)
-			}
-			return args[i], nil
-		}
-		switch {
-		case a == "-h" || a == "--help" || a == "help":
-			fmt.Fprint(out, externalReviewHelp)
-			return nil
-		case a == "--pr":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			pr = v
-		case a == "--session-file":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			sessionFile = v
-		case a == "--milestone":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			milestoneName = v
-		case a == "--ollama":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			ollama = append(ollama, v)
-		case a == "--openai":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			openaiM = append(openaiM, v)
-		case a == "--gemini":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			gemini = append(gemini, v)
-		case a == "--prompt":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			promptFile = v
-		case a == "--out":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			outDir = v
-		case a == "--ollama-host":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			ollamaHost = v
-		case a == "--since":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			since = v
-		case a == "--until":
-			v, err := need()
-			if err != nil {
-				return err
-			}
-			until = v
-		case a == "--redact":
-			redact = true
-		case a == "--no-redact":
-			redact = false
-		case strings.HasPrefix(a, "-"):
-			// Ignore other flags that might be passed down to sessionExtract (like --with-diffs / --interaction-only / --since / --until)
-			if a == "--with-diffs" || a == "--interaction-only" || a == "--snapshot-timestamp" || a == "--since" || a == "--until" {
-				if a == "--snapshot-timestamp" || a == "--since" || a == "--until" {
-					_, _ = need() // consume the value
-				}
-				continue
-			}
-			return fmt.Errorf("unknown option %q", a)
-		default:
-			materials = append(materials, a)
-		}
+// ExternalReviewCmd is the thin args/io entry point retained for tests; it
+// builds the Cobra command and runs it against args.
+func ExternalReviewCmd(args []string, out io.Writer) error {
+	return runCobra(NewExternalReviewCmd(), args, out)
+}
+
+// NewExternalReviewCmd builds the `botfam external-review` Cobra command
+// (issue #39). It supersedes the old tools/external-review.sh.
+func NewExternalReviewCmd() *cobra.Command {
+	var opts externalReviewOpts
+	var noRedact bool
+	defaultOllamaHost := os.Getenv("OLLAMA_HOST")
+	if defaultOllamaHost == "" {
+		defaultOllamaHost = "http://localhost:11434"
 	}
+	c := &cobra.Command{
+		Use:           "external-review [flags] [MATERIAL...]",
+		Short:         "Fan a review prompt across one or more LLMs",
+		Long:          externalReviewHelp,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.redact = opts.redact && !noRedact
+			opts.materials = args
+			return runExternalReview(opts, cmd.OutOrStdout())
+		},
+	}
+	f := c.Flags()
+	f.StringVar(&opts.pr, "pr", "", "synthesize material from a Gitea PR index")
+	f.StringVar(&opts.sessionFile, "session-file", "", "ingest an extracted milestone session markdown file")
+	f.StringVar(&opts.milestoneName, "milestone", "", "extract a milestone session and review it")
+	f.StringArrayVar(&opts.ollama, "ollama", nil, "ollama model to run (repeatable)")
+	f.StringArrayVar(&opts.openaiM, "openai", nil, "OpenAI model to run (repeatable; needs OPENAI_API_KEY)")
+	f.StringArrayVar(&opts.gemini, "gemini", nil, "Gemini model to run (repeatable; needs GEMINI_API_KEY)")
+	f.StringVar(&opts.promptFile, "prompt", "doc/review/EXTERNAL-REVIEW-PROMPT.md", "canonical prompt file")
+	f.StringVar(&opts.outDir, "out", "", "output dir (default $BOTFAM_REVIEW_DIR/<ts>-<slug>)")
+	f.StringVar(&opts.ollamaHost, "ollama-host", defaultOllamaHost, "ollama host URL")
+	f.StringVar(&opts.since, "since", "", "milestone sugar: only events at/after this RFC3339 timestamp")
+	f.StringVar(&opts.until, "until", "", "milestone sugar: only events at/before this RFC3339 timestamp")
+	f.StringVar(&opts.snapshotTimestamp, "snapshot-timestamp", "", "milestone sugar: freeze the timeline at this RFC3339 timestamp")
+	f.BoolVar(&opts.redact, "redact", true, "milestone sugar: scrub secrets/paths before output")
+	f.BoolVar(&noRedact, "no-redact", false, "milestone sugar: disable redaction")
+	f.BoolVar(&opts.withDiffs, "with-diffs", false, "milestone sugar: append full raw diffs")
+	f.BoolVar(&opts.interactionOnly, "interaction-only", false, "milestone sugar: omit the technical diff summary")
+	return c
+}
+
+func runExternalReview(opts externalReviewOpts, out io.Writer) error {
+	promptFile := opts.promptFile
+	outDir := opts.outDir
+	pr := opts.pr
+	sessionFile := opts.sessionFile
+	milestoneName := opts.milestoneName
+	since := opts.since
+	until := opts.until
+	redact := opts.redact
+	ollamaHost := opts.ollamaHost
+	ollama := opts.ollama
+	openaiM := opts.openaiM
+	gemini := opts.gemini
+	materials := opts.materials
 
 	if len(materials) == 0 && pr == "" && sessionFile == "" && milestoneName == "" {
 		return fmt.Errorf("no material file(s) and no --pr <index>, --session-file <path>, or --milestone <name> (see --help)")
@@ -225,19 +193,14 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 		if !redact {
 			extractArgs = append(extractArgs, "--no-redact")
 		}
-		for _, arg := range args {
-			if arg == "--with-diffs" {
-				extractArgs = append(extractArgs, "--with-diffs")
-			}
-			if arg == "--interaction-only" {
-				extractArgs = append(extractArgs, "--interaction-only")
-			}
+		if opts.withDiffs {
+			extractArgs = append(extractArgs, "--with-diffs")
 		}
-		// Also scan manually for --snapshot-timestamp
-		for j := 0; j < len(args); j++ {
-			if args[j] == "--snapshot-timestamp" && j+1 < len(args) {
-				extractArgs = append(extractArgs, "--snapshot-timestamp", args[j+1])
-			}
+		if opts.interactionOnly {
+			extractArgs = append(extractArgs, "--interaction-only")
+		}
+		if opts.snapshotTimestamp != "" {
+			extractArgs = append(extractArgs, "--snapshot-timestamp", opts.snapshotTimestamp)
 		}
 
 		var extractOut bytes.Buffer
