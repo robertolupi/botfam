@@ -32,8 +32,8 @@ deadline: none
   session logs compacted by `tools/merge_sessions.py`, 21 tool skills with a
   generated `skills/INDEX.md`, and hand-written harness pointer files. It lacks
   the IRC layer (coordination is the legacy Python collab MCP mailboxes),
-  agent-authored commits (all 565 commits are the operator's), and
-  `doc/review/` retrospectives.
+  agent-authored commits (all 565 commits are the operator's), and wiki-hosted
+  session retrospectives.
 - Ratified end goal: botfam replaces the deep-cuts Python harness once it
   reaches feature parity. Consequence: **bring the IRC fam to deep-cuts and
   retire collab MCP there — no permanent bridges between the two merge

@@ -9,7 +9,9 @@ touched.
 
 ## Run the smoke test
 
-    docker/test-substrate.sh
+```
+docker/test-substrate.sh
+```
 
 Builds both images, waits for ergo to be healthy, then a scripted client joins
 `#botfam`, sends `!tally id=smoke`, and asserts scribe replies and wrote the
@@ -34,15 +36,15 @@ The migration this substrate gated is **done**: production runs as compose
 project `botfam-irc-prod` via `docker/prod/compose.yaml` (ergo v2.18.0 +
 scribe). Operational contract:
 
-- Host exposure `127.0.0.1:6667` only, plaintext (localhost-by-design; no
-  TLS listener).
+- Host exposure `127.0.0.1:6667` only, plaintext (localhost-by-design; no TLS
+  listener).
 - Data bind-mounted from `~/botfam-irc/data` (`ircd.db`, `ergo_history.db`,
   `chat.log`); real `ircd.yaml` (with the live oper hash) lives in
   `~/botfam-irc/`, never in git.
 - `restart: unless-stopped` on both services; server log rotated by Docker
-  (`json-file`, 20m × 8). `chat.log` rotation is an open item (AI-R6 in
-  `doc/review/2026-06-11-unified.md`).
+  (`json-file`, 20m × 8). `chat.log` rotation is an open item (AI-R6 in the
+  wiki's `review-2026-06-11-unified` page).
 - **IRC is down whenever Docker Desktop is down** — enable start-at-login
   (operator-owned; F9 waiver recorded in the unified retrospective).
-- `ircd.db` + `ergo_history.db` were migrated into the volume with zero
-  data loss; CHATHISTORY verified across the cutover.
+- `ircd.db` + `ergo_history.db` were migrated into the volume with zero data
+  loss; CHATHISTORY verified across the cutover.

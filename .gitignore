@@ -2,7 +2,9 @@
 .gomodcache/
 /botfam
 .claude/settings.local.json
+.mcp.json
 scratch/
+wiki/
 doc/collab/history.jsonl
 .DS_Store
 .obsidian/

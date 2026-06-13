@@ -109,9 +109,9 @@ material path(s). Instruct it to:
   point.
 - **Flag wrong-premise / confabulation.** A reviewer working from stale ground
   truth, or one that fabricated facts not present in the material, produces
-  confidently wrong advice (verified failure mode — see
-  `doc/review/2026-06-11-meta.md`). Call these out and discount them rather
-  than averaging them in.
+  confidently wrong advice (verified failure mode — see the wiki's
+  `review-2026-06-11-meta` page). Call these out and discount them rather than
+  averaging them in.
 - **Preserve the canonical section shape** from the prompt — what landed
   cleanly, pain points, blind spots, proposals, action items, open questions —
   so the unified review is comparable to past ones.
@@ -128,10 +128,11 @@ context.
 
 ## Recording the result
 
-If the review is worth keeping, record the unified result under
-`doc/review/YYYY-MM-DD-<reviewer>.md` (per the operator instructions in
+If the review is worth keeping, record the unified result on the Gitea wiki at
+`wiki/review-YYYY-MM-DD-<reviewer>.md` (per the operator instructions in
 `doc/review/EXTERNAL-REVIEW-PROMPT.md`) and format it with
-`tools/mdformat.sh <file>` before committing. The raw per-model reviews stay
+`tools/mdformat.sh <file>` before committing+pushing from inside `wiki/` (the
+wiki is its own repo, no PR needed — botfam#55). The raw per-model reviews stay
 out-of-repo under `~/.botfam/reviews/` — do not commit them.
 
 ## Don't

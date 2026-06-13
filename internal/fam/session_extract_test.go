@@ -1,6 +1,7 @@
 package fam
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,5 +100,29 @@ func TestDeduplicateEvents(t *testing.T) {
 	}
 	if deduped[0].Body != "hello" || deduped[1].Body != "world" {
 		t.Errorf("deduplicateEvents() output mismatch")
+	}
+}
+
+func TestSessionExtractInvalidTime(t *testing.T) {
+	t.Setenv("BOTFAM_ACTOR", "agy")
+	err := sessionExtract([]string{"--milestone", "test", "--since", "invalid-time"}, nil)
+	if err == nil {
+		t.Error("expected error for invalid --since format, got nil")
+	} else if !strings.Contains(err.Error(), "invalid --since format") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+
+	err = sessionExtract([]string{"--milestone", "test", "--until", "invalid-time"}, nil)
+	if err == nil {
+		t.Error("expected error for invalid --until format, got nil")
+	} else if !strings.Contains(err.Error(), "invalid --until format") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+
+	err = sessionExtract([]string{"--milestone", "test", "--snapshot-timestamp", "invalid-time"}, nil)
+	if err == nil {
+		t.Error("expected error for invalid --snapshot-timestamp format, got nil")
+	} else if !strings.Contains(err.Error(), "invalid --snapshot-timestamp format") {
+		t.Errorf("unexpected error message: %v", err)
 	}
 }
