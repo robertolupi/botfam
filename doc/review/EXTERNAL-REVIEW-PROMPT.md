@@ -44,21 +44,18 @@ and unified diff), not the live system.
 
 ## Ground truth (as of 2026-06-11 — trust this over anything else)
 
-- **(Updated 2026-06-13)** Coordination has since moved to a **self-hosted
-  forge**: proposals are pull requests, votes are PR reviews, and the merge
-  gate is **native branch protection** (required approvals), not custom code.
-  The IRC/mailbox notes below are session-era context; for a **PR review**,
-  treat the forge model as current.
-- **IRC is the canonical coordination substrate.** This was decided and
-  operator-ratified on 2026-06-11. A dockerized ergo server hosts `#botfam`
-  (production) and `#botfam-test` (experiments); a **scribe** bot logs the
-  channel and handles `!propose` / `!vote` / `!tally`.
+- **Coordination runs on a self-hosted forge (Gitea/Forgejo), as of
+  2026-06-13.** Proposals are pull requests, votes are PR reviews, and the
+  merge gate is **native branch protection** (Required Approvals≥2,
+  dismiss-stale, block-on-rejected) — verified/linted via
+  `tools/forge-gate.sh`, not custom code. For a **PR review**, this is the
+  model that matters.
+- **IRC** (a dockerized ergo server hosting `#botfam`/`#botfam-test`) is still
+  the live chat channel, but no longer the consensus substrate: the old scribe
+  `!propose` / `!vote` / `!tally` flow has been retired.
 - The older mailbox/queue substrate (`botfam recv/post/claim`, SQLite store,
-  UDS daemon) and custom `ccrep` consensus engine have been fully retired and
-  deleted (as of 2026-06-13). The merge gate now relies entirely on Gitea's
-  native branch protection rules.
-- Gitea branch protection configuration (Required Approvals>=2, dismiss-stale,
-  block-on-rejected) is verified and linted via `tools/forge-gate.sh`.
+  UDS daemon) and the custom `ccrep` consensus engine were **fully retired and
+  deleted** (2026-06-13). Older design docs describing those are stale.
 - Production runs via Docker compose (`botfam-irc-prod`: ergo v2.18.0 + scribe,
   data bind-mounted, localhost-only). A hermetic test substrate exists
   (`compose.test.yaml` + `docker/test-substrate.sh`).
