@@ -205,14 +205,14 @@ func sessionClose(args []string, out io.Writer) error {
 
 	// Stage and commit the rendered file (skipped if BOTFAM_FORCE_CLOSE=1)
 	if os.Getenv("BOTFAM_FORCE_CLOSE") != "1" {
-		relFile := filepath.Join("wiki", "session-"+slug+".md")
-		if _, err := gitOutput(repoRoot, "add", relFile); err != nil {
+		wikiDir := filepath.Join(repoRoot, "wiki")
+		if _, err := gitOutput(wikiDir, "add", "session-"+slug+".md"); err != nil {
 			return fmt.Errorf("staging session markdown: %w", err)
 		}
 
 		// Commit interactively, allowing editing of the pre-populated commit message
 		commitCmd := exec.Command("git", "commit", "-e", "-m", fmt.Sprintf("archive: close session %s", slug))
-		commitCmd.Dir = repoRoot
+		commitCmd.Dir = wikiDir
 		commitCmd.Stdin = os.Stdin
 		commitCmd.Stdout = os.Stdout
 		commitCmd.Stderr = os.Stderr
