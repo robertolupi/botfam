@@ -60,6 +60,9 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 	pr := ""
 	sessionFile := ""
 	milestoneName := ""
+	since := ""
+	until := ""
+	redact := true
 	ollamaHost := os.Getenv("OLLAMA_HOST")
 	if ollamaHost == "" {
 		ollamaHost = "http://localhost:11434"
@@ -134,10 +137,26 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 				return err
 			}
 			ollamaHost = v
+		case a == "--since":
+			v, err := need()
+			if err != nil {
+				return err
+			}
+			since = v
+		case a == "--until":
+			v, err := need()
+			if err != nil {
+				return err
+			}
+			until = v
+		case a == "--redact":
+			redact = true
+		case a == "--no-redact":
+			redact = false
 		case strings.HasPrefix(a, "-"):
-			// Ignore other flags that might be passed down to sessionExtract (like --with-diffs / --interaction-only)
-			if a == "--with-diffs" || a == "--interaction-only" || a == "--snapshot-timestamp" {
-				if a == "--snapshot-timestamp" {
+			// Ignore other flags that might be passed down to sessionExtract (like --with-diffs / --interaction-only / --since / --until)
+			if a == "--with-diffs" || a == "--interaction-only" || a == "--snapshot-timestamp" || a == "--since" || a == "--until" {
+				if a == "--snapshot-timestamp" || a == "--since" || a == "--until" {
 					_, _ = need() // consume the value
 				}
 				continue
@@ -197,6 +216,15 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 		tmpFile := filepath.Join(tmpDir, "session.md")
 
 		extractArgs := []string{"--milestone", milestoneName, "--out", tmpFile}
+		if since != "" {
+			extractArgs = append(extractArgs, "--since", since)
+		}
+		if until != "" {
+			extractArgs = append(extractArgs, "--until", until)
+		}
+		if !redact {
+			extractArgs = append(extractArgs, "--no-redact")
+		}
 		for _, arg := range args {
 			if arg == "--with-diffs" {
 				extractArgs = append(extractArgs, "--with-diffs")
@@ -224,9 +252,13 @@ func ExternalReviewCmd(args []string, out io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("session file not found: %s", sessionFile)
 		}
-		material.Write(b)
-		_ = os.WriteFile(filepath.Join(outDir, "session.md"), b, 0o644)
-		fmt.Fprintf(out, "read session file material: %d bytes\n", len(b))
+		contentStr := string(b)
+		if redact {
+			contentStr = redactSecrets(contentStr)
+		}
+		material.WriteString(contentStr)
+		_ = os.WriteFile(filepath.Join(outDir, "session.md"), []byte(contentStr), 0o644)
+		fmt.Fprintf(out, "read session file material: %d bytes\n", len(contentStr))
 	} else if pr != "" {
 		m, err := assemblePRMaterial(pr)
 		if err != nil {

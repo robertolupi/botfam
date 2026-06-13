@@ -89,6 +89,29 @@ func sessionExtract(args []string, out io.Writer) error {
 		return errors.New("missing required flag: --milestone <title-or-id>")
 	}
 
+	var sinceTime, untilTime, snapshotTime time.Time
+	if opts.Since != "" {
+		t, err := time.Parse(time.RFC3339, opts.Since)
+		if err != nil {
+			return fmt.Errorf("invalid --since format (expected RFC3339, e.g. 2006-01-02T15:04:05Z): %w", err)
+		}
+		sinceTime = t
+	}
+	if opts.Until != "" {
+		t, err := time.Parse(time.RFC3339, opts.Until)
+		if err != nil {
+			return fmt.Errorf("invalid --until format (expected RFC3339, e.g. 2006-01-02T15:04:05Z): %w", err)
+		}
+		untilTime = t
+	}
+	if opts.SnapshotTimestamp != "" {
+		t, err := time.Parse(time.RFC3339, opts.SnapshotTimestamp)
+		if err != nil {
+			return fmt.Errorf("invalid --snapshot-timestamp format (expected RFC3339, e.g. 2006-01-02T15:04:05Z): %w", err)
+		}
+		snapshotTime = t
+	}
+
 	actor := os.Getenv("BOTFAM_ACTOR")
 	if actor == "" {
 		actor = os.Getenv("COLLAB_ACTOR")
@@ -167,17 +190,6 @@ func sessionExtract(args []string, out io.Writer) error {
 	// 3. Extract events
 	var events []*timelineEntry
 	var prs []*forge.Issue
-
-	var sinceTime, untilTime, snapshotTime time.Time
-	if opts.Since != "" {
-		sinceTime, _ = time.Parse(time.RFC3339, opts.Since)
-	}
-	if opts.Until != "" {
-		untilTime, _ = time.Parse(time.RFC3339, opts.Until)
-	}
-	if opts.SnapshotTimestamp != "" {
-		snapshotTime, _ = time.Parse(time.RFC3339, opts.SnapshotTimestamp)
-	}
 
 	earliestEvent := time.Now()
 	latestEvent := time.Time{}
