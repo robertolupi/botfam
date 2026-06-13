@@ -16,6 +16,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/robertolupi/botfam/internal/ccrep"
+	"github.com/robertolupi/botfam/internal/forge"
 )
 
 func getSocketPath() (string, error) {
@@ -159,7 +162,60 @@ func sendDaemonRequest(ctx context.Context, endpoint string, reqPayload any, res
 	return nil
 }
 
-// VoteCmd casts a vote by establishing a persistent connection to the daemon
+func buildEngine(ctx context.Context, proposalID string, isMerge bool) (*ccrep.Engine, error) {
+	info, err := (Resolver{WorkDir: "."}).Resolve()
+	if err != nil {
+		return nil, err
+	}
+
+	actor := os.Getenv("COLLAB_ACTOR")
+	if actor == "" {
+		actor = info.Actor
+	}
+	if actor == "" {
+		actor = "operator"
+	}
+
+	var roster []string
+	if info.Root != "" {
+		reg, err := ReadRegistry(filepath.Join(info.Root, "fam.toml"))
+		if err == nil {
+			roster = reg.Roster
+		}
+	}
+
+	if UseForge() {
+		client, err := forge.NewClient(".", actor)
+		if err != nil {
+			return nil, err
+		}
+		var vc ccrep.VersionControl
+		if isMerge {
+			vc = &GiteaVersionControl{Client: client, ProposalID: proposalID, WorkDir: "."}
+		} else {
+			vc = &GitVersionControl{WorkDir: "."}
+		}
+		ledger := &GiteaLedger{Client: client, Roster: roster, WorkDir: "."}
+		transport := &GiteaTransport{Client: client}
+		return ccrep.New(vc, ledger, transport, actor, ccrep.QuorumMajority), nil
+	} else if udsActive() {
+		vc := &GitVersionControl{WorkDir: "."}
+		ledger := &UdsLedger{WorkDir: "."}
+		transport := &UdsTransport{WorkDir: ".", Actor: actor, Ledger: ledger}
+		return ccrep.New(vc, ledger, transport, actor, ccrep.QuorumMajority), nil
+	} else {
+		vc := &GitVersionControl{WorkDir: "."}
+		ledger := &IrcLedger{WorkDir: ".", Roster: roster}
+		transport := &IrcTransport{WorkDir: ".", Actor: actor}
+		return ccrep.New(vc, ledger, transport, actor, ccrep.QuorumMajority), nil
+	}
+}
+
+func shaMatches(full, want string) bool {
+	return full == want || strings.HasPrefix(full, want)
+}
+
+// VoteCmd casts a vote
 func VoteCmd(args []string, out io.Writer) error {
 	var proposalID string
 	var verdict string
@@ -191,11 +247,15 @@ func VoteCmd(args []string, out io.Writer) error {
 		return errors.New("missing required --verdict <approve|reject|request_changes>")
 	}
 
-	info, err := (Resolver{WorkDir: "."}).Resolve()
+	engine, err := buildEngine(context.Background(), proposalID, false)
 	if err != nil {
 		return err
 	}
 
+	info, err := (Resolver{WorkDir: "."}).Resolve()
+	if err != nil {
+		return err
+	}
 	actor := os.Getenv("COLLAB_ACTOR")
 	if actor == "" {
 		actor = info.Actor
@@ -204,30 +264,47 @@ func VoteCmd(args []string, out io.Writer) error {
 		actor = "operator"
 	}
 
-	commitSHA, err := gitOne(".", "rev-parse", "HEAD")
-	if err != nil {
-		return fmt.Errorf("failed to read git HEAD: %w", err)
-	}
+	if UseForge() {
+		prNum, err := strconv.Atoi(proposalID)
+		if err != nil {
+			return fmt.Errorf("invalid Gitea proposal (PR) ID: %w", err)
+		}
+		tally, err := engine.Tally(context.Background(), ccrep.TallyArgs{ID: proposalID})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "Submitting PR review to Gitea for PR %d (commit %s) as %s (%s)...\n", prNum, tally.LatestSHA, actor, verdict)
 
-	payload := map[string]any{
-		"work_dir":    info.Root,
-		"actor":       actor,
-		"proposal_id": proposalID,
-		"verdict":     verdict,
-		"commit_sha":  commitSHA,
-	}
+		vArgs := ccrep.VoteArgs{
+			ID:      proposalID,
+			Verdict: ccrep.Verdict(strings.ToLower(verdict)),
+		}
+		_, err = engine.Vote(context.Background(), vArgs)
+		if err != nil {
+			return err
+		}
 
-	fmt.Fprintf(out, "Casting vote %q on proposal %q (commit %s) as actor %q...\n", verdict, proposalID, commitSHA, actor)
+		fmt.Fprintln(out, "Vote successfully submitted to Gitea!")
+		return nil
+	} else {
+		engineVerdict := strings.ToLower(verdict)
+		if engineVerdict == "reject" {
+			engineVerdict = "request_changes"
+		}
 
-	var result struct {
-		Status string `json:"status"`
-	}
-	if err := sendDaemonRequest(context.Background(), "vote", payload, &result); err != nil {
-		return err
-	}
+		vArgs := ccrep.VoteArgs{
+			ID:      proposalID,
+			Verdict: ccrep.Verdict(engineVerdict),
+		}
+		res, err := engine.Vote(context.Background(), vArgs)
+		if err != nil {
+			return err
+		}
 
-	fmt.Fprintf(out, "Vote connection released: status %s\n", result.Status)
-	return nil
+		fmt.Fprintf(out, "Casting vote %q on proposal %q (commit %s) as actor %q...\n", verdict, proposalID, res.SHA, actor)
+		fmt.Fprintf(out, "Vote connection released: status %s\n", "released")
+		return nil
+	}
 }
 
 // TallyCmd prints the status and all votes for a proposal
@@ -251,50 +328,46 @@ func TallyCmd(args []string, out io.Writer) error {
 		return errors.New("missing required --proposal <id>")
 	}
 
-	info, err := (Resolver{WorkDir: "."}).Resolve()
+	engine, err := buildEngine(context.Background(), proposalID, false)
 	if err != nil {
 		return err
 	}
 
-	payload := map[string]any{
-		"work_dir":    info.Root,
-		"proposal_id": proposalID,
-	}
-
-	type voteInfo struct {
-		Actor      string    `json:"actor"`
-		Verdict    string    `json:"verdict"`
-		CommitSHA  string    `json:"commit_sha"`
-		Timestamp  time.Time `json:"timestamp"`
-		IsPresent  bool      `json:"is_present"`
-		Provenance string    `json:"provenance"`
-	}
-
-	var result struct {
-		ProposalID   string              `json:"proposal_id"`
-		Status       string              `json:"status"`
-		Votes        map[string]voteInfo `json:"votes"`
-		DecisionRule string              `json:"decision_rule"`
-		LatestSHA    string              `json:"latest_sha"`
-		Author       string              `json:"author"`
-	}
-
-	if err := sendDaemonRequest(context.Background(), "tally", payload, &result); err != nil {
+	tally, err := engine.Tally(context.Background(), ccrep.TallyArgs{ID: proposalID})
+	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "Proposal:      %s\n", result.ProposalID)
-	fmt.Fprintf(out, "Author:        %s\n", result.Author)
-	fmt.Fprintf(out, "Latest SHA:    %s\n", result.LatestSHA)
-	fmt.Fprintf(out, "Decision Rule: %s\n", result.DecisionRule)
-	fmt.Fprintf(out, "Status:        %s\n", result.Status)
+	statusStr := tally.Status
+	if statusStr == ccrep.StatusApproved {
+		statusStr = "MET"
+	} else if statusStr == ccrep.StatusChangesRequested {
+		statusStr = "BLOCKED"
+	} else if statusStr == ccrep.StatusPending {
+		statusStr = "PENDING"
+	}
+
+	fmt.Fprintf(out, "Proposal:      %s\n", tally.ProposalID)
+	fmt.Fprintf(out, "Author:        %s\n", tally.Author)
+	fmt.Fprintf(out, "Latest SHA:    %s\n", tally.LatestSHA)
+	fmt.Fprintf(out, "Decision Rule: %s\n", tally.Quorum)
+	fmt.Fprintf(out, "Status:        %s\n", statusStr)
 	fmt.Fprintln(out, "Votes:")
-	if len(result.Votes) == 0 {
+	if len(tally.Votes) == 0 {
 		fmt.Fprintln(out, "  (none)")
 	} else {
-		for _, v := range result.Votes {
-			fmt.Fprintf(out, "  - %s: %s (commit: %s, present: %t, provenance: %s)\n",
-				v.Actor, v.Verdict, v.CommitSHA, v.IsPresent, v.Provenance)
+		for _, v := range tally.Votes {
+			verdictStr := string(v.Verdict)
+			if verdictStr == "request_changes" {
+				verdictStr = "reject"
+			}
+			if UseForge() {
+				fmt.Fprintf(out, "  - %s: %s (commit: %s, present: %t)\n",
+					v.Actor, verdictStr, v.SHA, v.Present)
+			} else {
+				fmt.Fprintf(out, "  - %s: %s (commit: %s, present: %t, provenance: %s)\n",
+					v.Actor, verdictStr, v.SHA, v.Present, "ccrep")
+			}
 		}
 	}
 	return nil
@@ -305,6 +378,7 @@ func ProposeCmd(args []string, out io.Writer) error {
 	var proposalID string
 	var quorum string
 	var deadlineStr string
+	var summary string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if strings.HasPrefix(arg, "--proposal=") {
@@ -328,6 +402,13 @@ func ProposeCmd(args []string, out io.Writer) error {
 			if i < len(args) {
 				deadlineStr = args[i]
 			}
+		} else if strings.HasPrefix(arg, "--summary=") {
+			summary = strings.TrimPrefix(arg, "--summary=")
+		} else if arg == "--summary" {
+			i++
+			if i < len(args) {
+				summary = args[i]
+			}
 		} else {
 			return fmt.Errorf("unknown propose argument %q", arg)
 		}
@@ -337,74 +418,44 @@ func ProposeCmd(args []string, out io.Writer) error {
 		return errors.New("missing required --proposal <id>")
 	}
 
-	info, err := (Resolver{WorkDir: "."}).Resolve()
+	engine, err := buildEngine(context.Background(), proposalID, false)
 	if err != nil {
 		return err
 	}
 
-	actor := os.Getenv("COLLAB_ACTOR")
-	if actor == "" {
-		actor = info.Actor
+	if quorum == "" || quorum == "consensus" {
+		quorum = "majority"
 	}
-	if actor == "" {
-		actor = "operator"
-	}
-
-	commitSHA, err := gitOne(".", "rev-parse", "HEAD")
-	if err != nil {
-		return fmt.Errorf("failed to read git HEAD: %w", err)
+	if summary == "" {
+		summary = "Proposal " + proposalID
 	}
 
-	var deadline float64
+	var formattedDeadline string
 	if deadlineStr != "" {
 		if d, err := time.ParseDuration(deadlineStr); err == nil {
-			deadline = float64(time.Now().Add(d).Unix())
-		} else if ts, err := strconv.ParseFloat(deadlineStr, 64); err == nil {
-			deadline = ts
+			formattedDeadline = time.Now().Add(d).Format(time.RFC3339)
+		} else if ts, err := strconv.ParseInt(deadlineStr, 10, 64); err == nil {
+			formattedDeadline = time.Unix(ts, 0).Format(time.RFC3339)
 		} else {
-			return fmt.Errorf("invalid deadline %q: must be duration or unix timestamp", deadlineStr)
+			formattedDeadline = deadlineStr
 		}
 	}
 
-	if quorum == "" {
-		quorum = "majority"
-	}
-
-	bodyMap := map[string]any{
-		"type":        "ccrep:proposal",
-		"proposal_id": proposalID,
-		"commit_sha":  commitSHA,
-		"reviewer":    actor,
-		"payload": map[string]any{
-			"proposal_id": proposalID,
-			"quorum":      quorum,
-		},
-	}
-	if deadline > 0 {
-		bodyMap["payload"].(map[string]any)["deadline"] = deadline
-	}
-
-	bodyBytes, err := json.Marshal(bodyMap)
+	res, err := engine.Propose(context.Background(), ccrep.ProposeArgs{
+		ID:       proposalID,
+		Summary:  summary,
+		Quorum:   ccrep.Quorum(quorum),
+		Deadline: formattedDeadline,
+	})
 	if err != nil {
 		return err
 	}
 
-	payload := map[string]any{
-		"work_dir": info.Root,
-		"actor":    actor,
-		"session":  proposalID,
-		"body":     string(bodyBytes),
-	}
-
-	if err := sendDaemonRequest(context.Background(), "session_append", payload, nil); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(out, "Proposed commit %s for proposal %q with quorum %q\n", commitSHA, proposalID, quorum)
+	fmt.Fprintf(out, "Proposed commit %s for proposal %q with quorum %q\n", res.SHA, proposalID, quorum)
 	return nil
 }
 
-// ApproveCmd generates and appends a ccrep:evaluation event
+// ApproveCmd approves a proposal (shortcut for vote --verdict approve)
 func ApproveCmd(args []string, out io.Writer) error {
 	var proposalID string
 	var verdict string
@@ -440,7 +491,6 @@ func ApproveCmd(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-
 	actor := os.Getenv("COLLAB_ACTOR")
 	if actor == "" {
 		actor = info.Actor
@@ -449,52 +499,35 @@ func ApproveCmd(args []string, out io.Writer) error {
 		actor = "operator"
 	}
 
-	// Tally proposal to get latest SHA
-	tallyPayload := map[string]any{
-		"work_dir":    info.Root,
-		"proposal_id": proposalID,
-	}
-
-	type voteInfo struct {
-		Actor      string    `json:"actor"`
-		Verdict    string    `json:"verdict"`
-		CommitSHA  string    `json:"commit_sha"`
-		Timestamp  time.Time `json:"timestamp"`
-		IsPresent  bool      `json:"is_present"`
-		Provenance string    `json:"provenance"`
-	}
-	var tallyResult struct {
-		ProposalID string              `json:"proposal_id"`
-		LatestSHA  string              `json:"latest_sha"`
-		Votes      map[string]voteInfo `json:"votes"`
-	}
-
-	if err := sendDaemonRequest(context.Background(), "tally", tallyPayload, &tallyResult); err != nil {
+	engine, err := buildEngine(context.Background(), proposalID, false)
+	if err != nil {
 		return err
 	}
 
-	if tallyResult.LatestSHA == "" {
+	tally, err := engine.Tally(context.Background(), ccrep.TallyArgs{ID: proposalID})
+	if err != nil {
+		return err
+	}
+
+	if tally.LatestSHA == "" {
 		return fmt.Errorf("no active proposal found for id %q; cannot approve", proposalID)
 	}
 
-	payload := map[string]any{
-		"work_dir":    info.Root,
-		"actor":       actor,
-		"proposal_id": proposalID,
-		"verdict":     verdict,
-		"commit_sha":  tallyResult.LatestSHA,
-	}
-
-	fmt.Fprintf(out, "Casting approval %q on proposal %q (commit %s) as actor %q...\n", verdict, proposalID, tallyResult.LatestSHA, actor)
-
-	var result struct {
-		Status string `json:"status"`
-	}
-	if err := sendDaemonRequest(context.Background(), "vote", payload, &result); err != nil {
+	res, err := engine.Vote(context.Background(), ccrep.VoteArgs{
+		ID:      proposalID,
+		Verdict: ccrep.Verdict(strings.ToLower(verdict)),
+	})
+	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "Approval connection released: status %s\n", result.Status)
+	if UseForge() {
+		fmt.Fprintf(out, "Submitting PR review to Gitea for PR %s (commit %s) as %s (%s)...\n", proposalID, res.SHA, actor, verdict)
+		fmt.Fprintln(out, "Vote successfully submitted to Gitea!")
+	} else {
+		fmt.Fprintf(out, "Casting approval %q on proposal %q (commit %s) as actor %q...\n", verdict, proposalID, res.SHA, actor)
+		fmt.Fprintf(out, "Approval connection released: status %s\n", "released")
+	}
 	return nil
 }
 
@@ -519,106 +552,55 @@ func MergeCmd(args []string, out io.Writer) error {
 		return errors.New("missing required --proposal <id>")
 	}
 
-	info, err := (Resolver{WorkDir: "."}).Resolve()
+	engine, err := buildEngine(context.Background(), proposalID, true)
 	if err != nil {
 		return err
 	}
 
-	actor := os.Getenv("COLLAB_ACTOR")
-	if actor == "" {
-		actor = info.Actor
-	}
-	if actor == "" {
-		actor = "operator"
-	}
-
-	// 1. Check tally status
-	tallyPayload := map[string]any{
-		"work_dir":    info.Root,
-		"proposal_id": proposalID,
-	}
-
-	type voteInfo struct {
-		Actor      string    `json:"actor"`
-		Verdict    string    `json:"verdict"`
-		CommitSHA  string    `json:"commit_sha"`
-		Timestamp  time.Time `json:"timestamp"`
-		IsPresent  bool      `json:"is_present"`
-		Provenance string    `json:"provenance"`
-	}
-	var tallyResult struct {
-		ProposalID   string              `json:"proposal_id"`
-		Status       string              `json:"status"`
-		Votes        map[string]voteInfo `json:"votes"`
-		DecisionRule string              `json:"decision_rule"`
-		LatestSHA    string              `json:"latest_sha"`
-		Author       string              `json:"author"`
-	}
-
-	if err := sendDaemonRequest(context.Background(), "tally", tallyPayload, &tallyResult); err != nil {
+	tally, err := engine.Tally(context.Background(), ccrep.TallyArgs{ID: proposalID})
+	if err != nil {
 		return err
 	}
 
-	if tallyResult.Status != "MET" {
-		return fmt.Errorf("cannot merge proposal %q: status is %s (must be MET)", proposalID, tallyResult.Status)
-	}
-
-	// 2. Perform git merge
-	fmt.Fprintf(out, "Consensus MET. Merging commit %s for proposal %q...\n", tallyResult.LatestSHA, proposalID)
-
-	repoRoot := RepoPath(".")
-	mergeOutput, err := gitOutput(repoRoot, "merge", "--no-ff", "-m", fmt.Sprintf("archive: merge proposal %s", proposalID), tallyResult.LatestSHA)
-	if err != nil {
-		return fmt.Errorf("git merge failed: %w; output:\n%s", err, string(mergeOutput))
-	}
-	fmt.Fprint(out, string(mergeOutput))
-
-	// Get the resulting HEAD SHA
-	newHeadSHA, err := gitOne(repoRoot, "rev-parse", "HEAD")
-	if err != nil {
-		return fmt.Errorf("failed to get new HEAD SHA: %w", err)
-	}
-
-	// Snapshot presence
-	var presence []string
-	var absentees []string
-	for _, v := range tallyResult.Votes {
-		if v.IsPresent {
-			presence = append(presence, v.Actor)
-		} else {
-			absentees = append(absentees, v.Actor)
+	if UseForge() {
+		prNum, err := strconv.Atoi(proposalID)
+		if err != nil {
+			return fmt.Errorf("invalid Gitea proposal (PR) ID: %w", err)
 		}
-	}
 
-	// 3. Emit ccrep:executed event
-	bodyMap := map[string]any{
-		"type":        "ccrep:executed",
-		"proposal_id": proposalID,
-		"commit_sha":  newHeadSHA,
-		"reviewer":    actor,
-		"payload": map[string]any{
-			"proposal_id": proposalID,
-			"presence":    presence,
-			"absentees":   absentees,
-		},
-	}
+		var buf bytes.Buffer
+		gateArgs := []string{"--proposal", proposalID, "--commit", tally.LatestSHA}
+		if err := MergeGateCmd(gateArgs, &buf); err != nil {
+			return fmt.Errorf("consensus gate failed for PR %d: %w\nOutput:\n%s", prNum, err, buf.String())
+		}
+		fmt.Fprint(out, buf.String())
 
-	bodyBytes, err := json.Marshal(bodyMap)
-	if err != nil {
-		return err
-	}
+		fmt.Fprintf(out, "Consensus MET. Merging PR %d (commit %s) on Gitea...\n", prNum, tally.LatestSHA)
 
-	appendPayload := map[string]any{
-		"work_dir": info.Root,
-		"actor":    actor,
-		"session":  proposalID,
-		"body":     string(bodyBytes),
-	}
+		res, err := engine.Merge(context.Background(), ccrep.MergeArgs{ID: proposalID})
+		if err != nil {
+			return err
+		}
 
-	if err := sendDaemonRequest(context.Background(), "session_append", appendPayload, nil); err != nil {
-		return err
-	}
+		fmt.Fprintf(out, "Merged successfully. Resulting remote HEAD SHA: %s\n", res.HeadSHA)
+		return nil
+	} else {
+		if tally.Status != ccrep.StatusApproved {
+			statusStr := tally.Status
+			if statusStr == ccrep.StatusChangesRequested {
+				statusStr = "BLOCKED"
+			}
+			return fmt.Errorf("cannot merge proposal %q: status is %s (must be MET)", proposalID, statusStr)
+		}
 
-	fmt.Fprintf(out, "Merged successfully. Resulting commit SHA: %s\n", newHeadSHA)
-	return nil
+		fmt.Fprintf(out, "Consensus MET. Merging commit %s for proposal %q...\n", tally.LatestSHA, proposalID)
+
+		res, err := engine.Merge(context.Background(), ccrep.MergeArgs{ID: proposalID})
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(out, "Merged successfully. Resulting commit SHA: %s\n", res.HeadSHA)
+		return nil
+	}
 }
