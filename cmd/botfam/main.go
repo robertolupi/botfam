@@ -165,9 +165,21 @@ func run() error {
 		default:
 			return fmt.Errorf("unknown command %q", os.Args[1])
 		}
+	} else {
+		if !isTerminal(os.Stdin) && !isTerminal(os.Stdout) {
+			return mcp.Serve(os.Stdin, os.Stdout, os.Stderr)
+		}
 	}
 	printHelp()
 	return nil
+}
+
+func isTerminal(f *os.File) bool {
+	stat, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) != 0
 }
 
 func printHelp() {
