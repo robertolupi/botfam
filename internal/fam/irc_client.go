@@ -46,6 +46,31 @@ func NewIrcClientCmd() *cobra.Command {
 	return c
 }
 
+// emitter serializes timestamped log/stdout writes so the FIFO-reader and
+// socket-reader goroutines in runIrcClient cannot interleave or corrupt lines.
+type emitter struct {
+	mu      sync.Mutex
+	logFile io.Writer
+	out     io.Writer
+	now     func() time.Time // overridable in tests; defaults to time.Now
+}
+
+func (e *emitter) emit(line string) {
+	now := e.now
+	if now == nil {
+		now = time.Now
+	}
+	formatted := fmt.Sprintf("[%s] %s\n", now().Format("15:04:05"), line)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.logFile != nil {
+		_, _ = io.WriteString(e.logFile, formatted)
+	}
+	if e.out != nil {
+		_, _ = io.WriteString(e.out, formatted)
+	}
+}
+
 func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer) error {
 	famReg := LoadFamRegistry(".")
 	mainChannel, _ := FamChannels(famReg)
@@ -107,12 +132,13 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 	}
 	defer logFile.Close()
 
-	emitHelper := func(line string) {
-		stamp := time.Now().Format("15:04:05")
-		formatted := fmt.Sprintf("[%s] %s\n", stamp, line)
-		_, _ = logFile.WriteString(formatted)
-		_, _ = fmt.Fprint(out, formatted)
-	}
+	// emitHelper is called from both the FIFO-reader goroutine and the
+	// socket-reader loop, so the emitter serializes its writes to logFile/out.
+	// Without that lock the two writers race and can interleave/corrupt log
+	// lines — and the log is the durable wake signal that irc-wait/ReadIrcLog
+	// parse line-by-line. (conn.Write is separately safe per net.Conn.)
+	em := &emitter{logFile: logFile, out: out}
+	emitHelper := em.emit
 
 	emitHelper(fmt.Sprintf("* connecting to %s as %s, channel %s", server, nick, channel))
 	emitHelper(fmt.Sprintf("* send: write lines to %s", fifoPath))
