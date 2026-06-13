@@ -423,7 +423,7 @@ func ProposeCmd(args []string, out io.Writer) error {
 		return err
 	}
 
-	if quorum == "" {
+	if quorum == "" || quorum == "consensus" {
 		quorum = "majority"
 	}
 	if summary == "" {

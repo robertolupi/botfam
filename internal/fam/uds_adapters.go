@@ -83,11 +83,16 @@ func (l *UdsLedger) Tally(ctx context.Context, proposalID string) (ccrep.TallyRe
 		})
 	}
 
+	qRule := tallyResult.DecisionRule
+	if qRule == "consensus" {
+		qRule = "majority"
+	}
+
 	return ccrep.TallyResult{
 		ProposalID: tallyResult.ProposalID,
 		LatestSHA:  tallyResult.LatestSHA,
 		Status:     status,
-		Quorum:     ccrep.Quorum(tallyResult.DecisionRule),
+		Quorum:     ccrep.Quorum(qRule),
 		Author:     tallyResult.Author,
 		Approvals:  approvals,
 		Votes:      votes,
