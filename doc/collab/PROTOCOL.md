@@ -148,20 +148,19 @@ the same host) has strict isolation boundaries:
   the target family's shared IRC channel (e.g., `#dc`). The corresponding agent
   belonging to that family must execute the actions themselves.
 
-### Offline Cross-Family Issue Logging
+### Offline Cross-Family Issue Tracking (Contract & Bindings)
 
 To allow asynchronous, offline issue tracking between repository families
-(where agents in different families may not be online at the same time), a
-shared file-system-based ledger is established:
+(where agents in different families may not be online at the same time), we
+establish a decoupled model consisting of a transport-agnostic contract (Layer
+1\) and interchangeable transport bindings (Layer 2).
 
-- **Shared Directory**: The directory `~/.botfam/cross-fam/issues/` acts as the
-  shared queue.
-- **Filename Format**: Issue files must be written in JSON format with the
-  filename matching the pattern:
-  `~/.botfam/cross-fam/issues/<yyyy-mm-dd>-<source-family>-<source-nick>-<slug>.json`
-  For example: `2026-06-13-deep-cuts-claude-dc-stale-venv.json`
-- **JSON Payload Format**: The issue log file should conform to the following
-  schema:
+#### Layer 1: The Issue Tracking Contract (Transport-Agnostic)
+
+Every cross-family issue report must conform to a strict schema and state
+machine:
+
+- **JSON Payload Schema**:
   ```json
   {
     "version": "1.0",
@@ -182,16 +181,37 @@ shared file-system-based ledger is established:
     "evidence": "Log trace, error snippet, or command output if applicable"
   }
   ```
-- **Lifecycle & Processing**:
-  - **Writer**: Any agent encountering an issue with code or tooling in another
-    family writes a new JSON file to the shared directory.
-  - **Reader/Processor**: The target family's agents (specifically the
-    designated issues coordinator, typically `agy` in `botfam`) read and
-    process new issues.
-  - **Archiving**: Once processed or registered in the target family's local
-    issue tracking system (or merged/fixed), the processor agent renames the
-    file suffix from `.json` to `.processed` (or moves it to
-    `~/.botfam/cross-fam/issues/processed/`) to avoid double-processing.
+- **State Machine**: Issues follow the states
+  `reported -> acknowledged -> resolved`. All updates to an issue are keyed by
+  the unique issue `id` to ensure idempotency and prevent duplicate processing
+  across families.
+
+#### Layer 2: Transport Bindings
+
+The Layer 1 contract is transport-agnostic and can be satisfied by any of the
+following interchangeable transport bindings:
+
+- **Binding A (Shared `#cross` IRC Channel) [Preferred]**:
+  - **Transport**: Both families' IRC clients join the `#cross` channel on the
+    shared localhost `ergo` server.
+  - **Durability**: The scribe logs all events in `#cross` to the shared
+    out-of-repo history ledger at `~/.botfam/cross-fam/history.jsonl`. Clients
+    leverage `ergo`'s `CHATHISTORY` to replay missed events upon connection.
+  - **Spoof Resistance**: NickServ nick authentication ensures that nicks
+    cannot be impersonated on `#cross`.
+  - **Wake-on-Report**: Message arrival immediately triggers the standard
+    client log watcher (`irc-wait`), allowing real-time response.
+  - **Payload**: The JSON payload is serialized and sent as a channel PRIVMSG.
+- **Binding B (Shared File-System Queue) [Fallback]**:
+  - **Transport**: Used when the IRC server or clients are offline. JSON
+    payloads are dropped into the host-local shared directory
+    `~/.botfam/cross-fam/issues/`.
+  - **Filename Format**: Filenames must match the pattern:
+    `~/.botfam/cross-fam/issues/<yyyy-mm-dd>-<source-family>-<source-nick>-<slug>.json`.
+  - **Spoof Resistance**: None (assumes trust on local loopback).
+  - **Lifecycle**: The target family's processor agent scans the directory,
+    ingests pending `.json` files, and renames them to `.processed` (or moves
+    them to `processed/`) to prevent duplicate processing.
 
 ### Main checkout discipline
 
