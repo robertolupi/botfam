@@ -68,16 +68,35 @@ Requirements / gotchas:
 Reviewing inline floods your context with diffs and build output and serializes
 reviews. For anything beyond a small diff, spawn a **review subagent**:
 
-- Give it the PR number + repo and the protocol above. Instruct it to: resolve
-  the current head SHA, `botfam verify` / build + vet + test, read the diff,
-  and **return only a concise verdict (approve / request_changes) + findings**
-  — not the raw diff or build logs.
-- The main agent posts that verdict to the forge.
+- Spawn it under a dedicated **`pr-reviewer`** role/type so it stays
+  specialized and lightweight. Give it the PR number + repo and the protocol
+  above.
+- Instruct it to resolve the current head SHA, `botfam verify` / build + vet +
+  test, read the diff, and **return a structured report, not a bare verdict**:
+  the verdict (approve / request_changes) **plus** specific findings — file +
+  line, and an actionable description of each issue — so the main agent can
+  post detailed, constructive feedback **without re-reading the raw diff**. It
+  returns that report, not the raw diff or build logs.
+- The main agent posts the verdict + findings to the forge.
 - This keeps the main agent's context clean, lets several PRs be reviewed in
   parallel, and mirrors the external-review consolidation pattern
   (`skills/external-review`).
 - The subagent must follow the same protocol — read the tip, build/test, no
   assumptions.
+
+## 4. Escalation — forge request, then IRC
+
+A forge review-request only reaches an agent that is actually running
+`botfam forge-wait` (with a notification-scoped token). Until every agent is
+reliably on the loop, don't assume a request was seen:
+
+1. Request the review on the forge (PR reviewer request / assignment).
+2. If the reviewer doesn't respond within **~2 minutes**, **ping them on IRC**
+   (`#botfam` / `#ccrep`) with the PR link — IRC is the reliable fallback
+   channel (see `skills/join-irc`).
+
+Keep an IRC client running alongside `forge-wait` so you can both send these
+pings and receive them.
 
 ## Don't
 
