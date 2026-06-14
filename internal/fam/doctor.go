@@ -14,12 +14,13 @@ import (
 // NewDoctorCmd builds `botfam doctor` — environment self-diagnosis. Each check
 // reports ok/warn/fail with a remediation hint and the command exits non-zero
 // if any check fails, so an agent or operator can see what's wrong (and how to
-// fix it) instead of debugging by hand. First check: forge credential identity
-// (the push-attribution leak, #150). Part of observability #144.
+// fix it) instead of debugging by hand. Checks: forge credential identity (the
+// push-authentication leak, #150) and git author identity (the commit-authorship
+// audit, #157). Part of observability #144.
 func NewDoctorCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:           "doctor",
-		Short:         "Diagnose the agent's environment (forge credential identity, …)",
+		Short:         "Diagnose the agent's environment (forge credential + git author identity, …)",
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -31,6 +32,7 @@ func NewDoctorCmd() *cobra.Command {
 			out := cmd.OutOrStdout()
 			checks := []doctorCheck{
 				credentialHelperCheck(wd),
+				gitIdentityCheck(wd),
 			}
 			failed := false
 			for _, ch := range checks {
@@ -109,6 +111,57 @@ func credentialHelperCheck(workDir string) doctorCheck {
 			"run `botfam setup` / `tools/forge-setup.sh` to configure git-credential-botfam"}
 	}
 	return doctorCheck{name, doctorOK, fmt.Sprintf("effective helper(s) for %s: %s", url, strings.Join(values, ", ")), ""}
+}
+
+// gitIdentityCheck is the audit half of the push-attribution story (#157,
+// follow-on to #152): the credential-helper check covers *push authentication*,
+// this covers *commit authorship*. Per docs/protocol §5 each actor must set
+// `git config --worktree user.name <actor>`; if a worktree never set its
+// identity, commits silently inherit the global/shared user.name and are
+// mis-attributed even when the push helper is correct.
+func gitIdentityCheck(workDir string) doctorCheck {
+	var actor string
+	if info, err := (Resolver{WorkDir: workDir}).Resolve(); err == nil {
+		actor = info.Actor
+	}
+	name, _ := gitOne(workDir, "config", "user.name")
+	email, _ := gitOne(workDir, "config", "user.email")
+	return evaluateGitIdentity(actor, name, email)
+}
+
+// evaluateGitIdentity is the pure decision behind gitIdentityCheck: given the
+// resolved actor and the effective git author identity, decide ok/warn/fail.
+func evaluateGitIdentity(actor, name, email string) doctorCheck {
+	const checkName = "git author identity"
+	name = strings.TrimSpace(name)
+	email = strings.TrimSpace(email)
+	switch {
+	case name == "":
+		return doctorCheck{checkName, doctorFail,
+			"no git user.name configured — commits will inherit the global/shared identity and be mis-attributed",
+			gitIdentityFix(actor)}
+	case actor != "" && name != actor:
+		return doctorCheck{checkName, doctorWarn,
+			fmt.Sprintf("git user.name %q does not match the resolved actor %q", name, actor),
+			gitIdentityFix(actor)}
+	case email == "":
+		return doctorCheck{checkName, doctorWarn,
+			fmt.Sprintf("git user.name is %q but user.email is unset", name),
+			gitIdentityFix(actor)}
+	default:
+		return doctorCheck{checkName, doctorOK,
+			fmt.Sprintf("commits authored as %s <%s>", name, email), ""}
+	}
+}
+
+// gitIdentityFix is the remediation hint for a missing/mismatched worktree
+// identity. It names the resolved actor when known, else a placeholder.
+func gitIdentityFix(actor string) string {
+	who := actor
+	if who == "" {
+		who = "<actor>"
+	}
+	return fmt.Sprintf("set the worktree identity — `git config --worktree user.name %s` (and user.email)", who)
 }
 
 // offendingHelpers returns the configured helpers that are NOT botfam's — any

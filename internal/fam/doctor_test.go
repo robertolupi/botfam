@@ -24,6 +24,34 @@ func TestParseCredentialHelpers(t *testing.T) {
 	}
 }
 
+func TestEvaluateGitIdentity(t *testing.T) {
+	cases := []struct {
+		name       string
+		actor      string
+		userName   string
+		email      string
+		wantStatus string
+	}{
+		{"empty name fails", "claude", "", "x@y.z", doctorFail},
+		{"whitespace name fails", "claude", "   ", "x@y.z", doctorFail},
+		{"mismatch warns", "claude", "agy", "x@y.z", doctorWarn},
+		{"missing email warns", "claude", "claude", "", doctorWarn},
+		{"match with email ok", "claude", "claude", "roberto.lupi+claude@gmail.com", doctorOK},
+		{"unresolved actor with name+email ok", "", "claude", "x@y.z", doctorOK},
+		{"unresolved actor empty name fails", "", "", "", doctorFail},
+	}
+	for _, tc := range cases {
+		got := evaluateGitIdentity(tc.actor, tc.userName, tc.email)
+		if got.status != tc.wantStatus {
+			t.Errorf("%s: evaluateGitIdentity(%q,%q,%q) status = %q, want %q",
+				tc.name, tc.actor, tc.userName, tc.email, got.status, tc.wantStatus)
+		}
+		if got.status != doctorOK && got.fix == "" {
+			t.Errorf("%s: non-ok check should carry a fix hint", tc.name)
+		}
+	}
+}
+
 func TestOffendingHelpers(t *testing.T) {
 	cases := []struct {
 		name string
