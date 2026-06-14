@@ -404,20 +404,6 @@ func argString(args map[string]any, key string) string {
 	return ""
 }
 
-func argStringDefault(args map[string]any, key, def string) string {
-	if v := argString(args, key); v != "" {
-		return v
-	}
-	return def
-}
-
-func argObject(args map[string]any, key string) map[string]any {
-	if v, ok := args[key].(map[string]any); ok {
-		return v
-	}
-	return map[string]any{}
-}
-
 func argFloatDefault(args map[string]any, key string, def float64) float64 {
 	switch v := args[key].(type) {
 	case float64:
@@ -427,14 +413,6 @@ func argFloatDefault(args map[string]any, key string, def float64) float64 {
 	default:
 		return def
 	}
-}
-
-func argFloatPtr(args map[string]any, key string) *float64 {
-	if _, ok := args[key]; !ok {
-		return nil
-	}
-	v := argFloatDefault(args, key, 0)
-	return &v
 }
 
 func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
