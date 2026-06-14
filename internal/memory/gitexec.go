@@ -30,11 +30,12 @@ func gitEmail(actor string) string {
 }
 
 // CloneWiki clones authURL (a token-authenticated <repo>.wiki.git URL) into dir.
-// If dir already contains a clone it is reused after a fetch. branch defaults to
-// "master" when empty.
+// If dir already contains a clone it is reused after a fetch. When branch is
+// empty the remote's default branch is detected (Gitea wikis vary between
+// "master" and "main"), falling back to "master".
 func CloneWiki(authURL, dir, branch string) (*WikiGit, error) {
 	if branch == "" {
-		branch = "master"
+		branch = detectDefaultBranch(authURL)
 	}
 	w := &WikiGit{dir: dir, branch: branch}
 	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
@@ -114,6 +115,25 @@ func (w *WikiGit) PullRebase() error {
 }
 
 func (w *WikiGit) run(args ...string) (string, error) { return runGit(w.dir, args...) }
+
+// detectDefaultBranch asks the remote for its HEAD symref without a local clone,
+// so we clone the right branch on the first try. Falls back to "master".
+func detectDefaultBranch(authURL string) string {
+	out, err := runGit("", "ls-remote", "--symref", authURL, "HEAD")
+	if err == nil {
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "ref:") && strings.Contains(line, "HEAD") {
+				// "ref: refs/heads/main\tHEAD"
+				fields := strings.Fields(line)
+				if len(fields) >= 2 {
+					return strings.TrimPrefix(fields[1], "refs/heads/")
+				}
+			}
+		}
+	}
+	return "master"
+}
 
 func runGit(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
