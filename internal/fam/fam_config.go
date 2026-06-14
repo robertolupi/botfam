@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 // Legacy defaults used when no fam registry is resolvable. They match the
@@ -32,14 +34,11 @@ func LoadFamRegistry(workDir string) Registry {
 	return reg
 }
 
-// FamSlug returns the short identifier used in derived channel names,
-// ledger directories, and pass-file names: the explicit fam.toml slug when
-// set, else the fam name.
+// FamSlug returns the short identifier used in derived channel names, ledger
+// directories, and pass-file names: the explicit fam.toml slug when set, else
+// the fam name. Delegates to famconfig (#231).
 func FamSlug(reg Registry) string {
-	if reg.Slug != "" {
-		return reg.Slug
-	}
-	return reg.Name
+	return famconfig.FamSlug(reg)
 }
 
 // FamBranch returns the integration branch for this family: the explicit
