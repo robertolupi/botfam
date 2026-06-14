@@ -153,6 +153,33 @@ func TestResolveFamRefusesBaseCheckout(t *testing.T) {
 	}
 }
 
+// TestResolverBareNameActor: the core Resolver (used by whoami and friends)
+// resolves a bare-name worktree's actor against the fam.toml roster (the wt-
+// prefix is retired); the base/main checkout (not a roster member) gets none.
+func TestResolverBareNameActor(t *testing.T) {
+	famDir := resolveFamFixture(t)
+
+	agy := filepath.Join(famDir, "agy")
+	gitInit(t, agy)
+	info, err := (Resolver{WorkDir: agy}).Resolve()
+	if err != nil {
+		t.Fatalf("Resolve(agy): %v", err)
+	}
+	if info.Actor != "agy" {
+		t.Errorf("actor = %q, want agy (bare-name from roster)", info.Actor)
+	}
+
+	main := filepath.Join(famDir, "main")
+	gitInit(t, main)
+	info2, err := (Resolver{WorkDir: main}).Resolve()
+	if err != nil {
+		t.Fatalf("Resolve(main): %v", err)
+	}
+	if info2.Actor != "" {
+		t.Errorf("main actor = %q, want empty (not a roster member)", info2.Actor)
+	}
+}
+
 func TestResolveFamMissingFamTOML(t *testing.T) {
 	famDir := t.TempDir() // no fam.toml
 	wt := filepath.Join(famDir, "claude")

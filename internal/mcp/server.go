@@ -149,8 +149,14 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	if err != nil {
 		return nil, err
 	}
-	if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
-		return nil, err
+	// Membership: a migrated fam proves it via its <fam-dir>/fam.toml roster — if
+	// ResolveFam accepts this worktree as a declared [agent.<name>], that IS
+	// membership. The legacy content-hash object-store check (which doesn't know
+	// about freshly-cloned fams) only applies when there's no fam.toml.
+	if _, rfErr := fam.ResolveFam(workDir); rfErr != nil {
+		if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
+			return nil, err
+		}
 	}
 
 	actor, err := s.resolveActor(argString(args, "actor"), info.Actor)
