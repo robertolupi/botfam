@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -30,6 +31,11 @@ type mcpServer struct {
 // third_party/gitea-mcp submodule), not bare PATH names — so a brew-installed
 // gitea-mcp-server (or a stale botfam) earlier on PATH cannot shadow the
 // vendored builds (the ambiguity that bit deep-cuts).
+//
+// When gopls is installed, its built-in MCP server (`gopls mcp`) is also
+// registered, giving the agent Go-aware tooling (diagnostics, symbol
+// references, rename, search, vulncheck). gopls is an optional developer tool
+// resolved via PATH to an absolute path; its absence is not an error.
 func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
 	if forgeURL == "" {
 		return fmt.Errorf("cannot render .mcp.json: forge_url is empty (set it in fam.toml)")
@@ -50,12 +56,30 @@ func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
 			Env:     map[string]string{"GITEA_ACCESS_TOKEN_FILE": tokenPath},
 		},
 	}}
+	// gopls ships an MCP server (`gopls mcp`); register it for Go tooling when
+	// installed, resolved to an absolute path so a stale copy can't shadow it.
+	if goplsPath := lookGopls(); goplsPath != "" {
+		cfg.MCPServers["gopls"] = mcpServer{Command: goplsPath, Args: []string{"mcp"}}
+	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n')
 	return os.WriteFile(filepath.Join(worktree, ".mcp.json"), data, 0o644)
+}
+
+// lookGopls returns the absolute path to the gopls binary if it is on PATH,
+// else "" (gopls is optional — its absence must not fail the render).
+func lookGopls() string {
+	p, err := exec.LookPath("gopls")
+	if err != nil {
+		return ""
+	}
+	if abs, aerr := filepath.Abs(p); aerr == nil {
+		return abs
+	}
+	return p
 }
 
 // RenderGitIdentity sets the worktree's git user.name/user.email from the

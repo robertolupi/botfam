@@ -39,6 +39,18 @@ func TestRenderClaudeMCP(t *testing.T) {
 	if bf, ok := cfg.MCPServers["botfam"]; !ok || bf.Command != wantBotfam {
 		t.Errorf("botfam server = %+v ok=%v, want command %q", bf, ok, wantBotfam)
 	}
+
+	// gopls is registered iff installed, at its resolved absolute path.
+	gopls, ok := cfg.MCPServers["gopls"]
+	if wantGopls := lookGopls(); wantGopls != "" {
+		if !ok {
+			t.Errorf("gopls is installed (%s) but not registered; got %+v", wantGopls, cfg.MCPServers)
+		} else if gopls.Command != wantGopls || len(gopls.Args) != 1 || gopls.Args[0] != "mcp" {
+			t.Errorf("gopls server = %+v, want command %q args [mcp]", gopls, wantGopls)
+		}
+	} else if ok {
+		t.Errorf("gopls not installed but registered: %+v", gopls)
+	}
 }
 
 func TestRenderClaudeMCPRequiresForgeURL(t *testing.T) {
