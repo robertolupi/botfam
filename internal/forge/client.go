@@ -232,7 +232,14 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			legacyFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s", actor))
 			if _, err := os.Stat(legacyFile); err == nil {
 				tokenFile = legacyFile
-			} else {
+			} else if os.Getenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK") == "1" {
+				// Opt-in only. The token-botfam-<actor>-test files are minted by
+				// the local test Forgejo (docker/bootstrap-test-forgejo.sh).
+				// Never fall back to them in production — that would silently run
+				// commands like forge-wait / external-review against test
+				// credentials instead of failing closed (#70). Test harnesses
+				// that want this path set BOTFAM_ALLOW_TEST_TOKEN_FALLBACK=1 (or,
+				// preferably, pass GITEA_TOKEN explicitly).
 				testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
 				if _, err := os.Stat(testFile); err == nil {
 					tokenFile = testFile
