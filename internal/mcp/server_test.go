@@ -570,6 +570,11 @@ func TestMcpResources(t *testing.T) {
 	if !strings.Contains(tr.Text, "Coordination Protocol") {
 		t.Errorf("expected embedded protocol content, got %q", tr.Text)
 	}
+	// The corpus is a Go template; serving it must execute the template
+	// (e.g. {{.IntegrationBranch}}), never leak raw template syntax.
+	if strings.Contains(tr.Text, "{{") {
+		t.Errorf("served doc contains unrendered template syntax: %q", tr.Text)
+	}
 
 	// 2. The discovery root and its JSON index.
 	req.Params.URI = "botfam:///"
