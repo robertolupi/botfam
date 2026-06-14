@@ -138,3 +138,38 @@ func TestResolve(t *testing.T) {
 		t.Errorf("expected gitea, got %s", prov.Source())
 	}
 }
+
+func TestParseProjections(t *testing.T) {
+	ps := ParseProjections([]string{
+		"reviews:review-*",
+		" proposals : proposal-* ", // trimmed
+		"bad-no-glob",              // skipped (no colon)
+		":justglob",                // skipped (no name)
+		"../evil:review-*",         // skipped (invalid name)
+	})
+	if len(ps) != 2 {
+		t.Fatalf("expected 2 projections, got %d: %+v", len(ps), ps)
+	}
+	if ps[0] != (Projection{Name: "reviews", Match: "review-*"}) {
+		t.Errorf("p0 = %+v", ps[0])
+	}
+	if ps[1] != (Projection{Name: "proposals", Match: "proposal-*"}) {
+		t.Errorf("p1 = %+v", ps[1])
+	}
+}
+
+func TestFilter(t *testing.T) {
+	metas := []PageMeta{
+		{Name: "review-2026-06-14-agy"},
+		{Name: "review-2026-06-13-claude"},
+		{Name: "proposal-mcp"},
+		{Name: "Home"},
+	}
+	got := Filter(metas, "review-*")
+	if len(got) != 2 || got[0].Name != "review-2026-06-14-agy" || got[1].Name != "review-2026-06-13-claude" {
+		t.Errorf("unexpected filter result: %+v", got)
+	}
+	if len(Filter(metas, "nomatch-*")) != 0 {
+		t.Error("expected no matches")
+	}
+}

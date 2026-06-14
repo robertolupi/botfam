@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -157,6 +158,41 @@ func (p CacheProvider) Index() ([]PageMeta, error) {
 		})
 	}
 	return metas, nil
+}
+
+// Projection is a fam-declared curated index: a name plus a glob matched
+// against flat wiki page names (e.g. {Name:"reviews", Match:"review-*"}).
+type Projection struct {
+	Name  string
+	Match string
+}
+
+// ParseProjections parses fam.toml "name:glob" entries into Projections,
+// skipping malformed ones. Names are constrained like page names so a
+// projection can be safely addressed as botfam:///<name>.
+func ParseProjections(entries []string) []Projection {
+	var ps []Projection
+	for _, e := range entries {
+		name, glob, ok := strings.Cut(e, ":")
+		name, glob = strings.TrimSpace(name), strings.TrimSpace(glob)
+		if !ok || name == "" || glob == "" || !ValidPageName(name) {
+			continue
+		}
+		ps = append(ps, Projection{Name: name, Match: glob})
+	}
+	return ps
+}
+
+// Filter returns the index entries whose page name matches glob (path.Match
+// semantics), preserving order.
+func Filter(metas []PageMeta, glob string) []PageMeta {
+	var out []PageMeta
+	for _, m := range metas {
+		if ok, err := path.Match(glob, m.Name); err == nil && ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // Resolve picks the live provider, falling back to a flagged-stale local cache.

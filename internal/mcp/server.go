@@ -451,6 +451,11 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	// discovered via the index rather than statically advertised.
 	add("botfam:///wiki", "botfam live wiki index", "text/markdown")
 	add("botfam:///wiki/index.json", "botfam live wiki index (json)", "application/json")
+	// Fam-declared wiki projections (#120), advertised from the local registry.
+	for _, proj := range buildDiscoveryData(".").projections {
+		add("botfam:///"+proj.Name, "botfam projection: "+proj.Name, "text/markdown")
+		add("botfam:///"+proj.Name+".json", "botfam projection: "+proj.Name, "application/json")
+	}
 }
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
@@ -628,6 +633,36 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		}
 		return markdownResource(req.Params.URI, renderWikiPage(page)), nil
 	default:
+		// A fam-declared wiki projection? botfam:///<name> or <name>.json (#120).
+		pname := strings.TrimPrefix(path, "/")
+		wantJSON := strings.HasSuffix(pname, ".json")
+		pname = strings.TrimSuffix(pname, ".json")
+		for _, proj := range d.projections {
+			if proj.Name != pname {
+				continue
+			}
+			prov, err := wikiProvider(dataWorkDir, d.tmpl.Actor)
+			if err != nil {
+				return nil, err
+			}
+			idx, err := prov.Index()
+			if err != nil {
+				return nil, fmt.Errorf("projection %q: %w", proj.Name, err)
+			}
+			metas := wiki.Filter(idx, proj.Match)
+			if wantJSON {
+				body, err := renderProjectionJSON(proj.Name, proj.Match, prov.Source(), metas)
+				if err != nil {
+					return nil, err
+				}
+				return []mcplib.ResourceContents{mcplib.TextResourceContents{
+					URI:      req.Params.URI,
+					MIMEType: "application/json",
+					Text:     string(body),
+				}}, nil
+			}
+			return markdownResource(req.Params.URI, renderProjectionMarkdown(proj.Name, proj.Match, prov.Source(), metas)), nil
+		}
 		return nil, fmt.Errorf("unknown resource path %q", u.Path)
 	}
 }

@@ -875,3 +875,65 @@ func TestMcpWikiCacheFallback(t *testing.T) {
 		t.Error("expected error for invalid wiki page name")
 	}
 }
+
+// TestMcpProjections covers #120: a fam-declared wiki_projections entry is
+// served as botfam:///<name>[.json], filtering the wiki index by glob.
+func TestMcpProjections(t *testing.T) {
+	s, root := newTestServer(t)
+	initGitRepo(t, root)
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	// Declare a projection in fam.toml.
+	famToml := "name = \"testfam\"\nwiki_projections = [\"reviews:review-*\"]\n"
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte(famToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Local wiki cache: two reviews + one unrelated page.
+	wikiDir := filepath.Join(root, "wiki")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"review-2026-06-14-agy", "review-2026-06-13-claude", "Home"} {
+		if err := os.WriteFile(filepath.Join(wikiDir, name+".md"), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := mcplib.ReadResourceRequest{}
+
+	// Markdown projection lists only review-* pages.
+	req.Params.URI = "botfam:///reviews"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reviews: %v", err)
+	}
+	txt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(txt, "review-2026-06-14-agy") || strings.Contains(txt, "Home") {
+		t.Errorf("projection should list reviews only, got %q", txt)
+	}
+
+	// JSON projection carries the schema and filtered pages.
+	req.Params.URI = "botfam:///reviews.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reviews.json: %v", err)
+	}
+	jtxt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(jtxt, "botfam.projection.v1") || !strings.Contains(jtxt, "review-2026-06-13-claude") {
+		t.Errorf("unexpected projection json: %q", jtxt)
+	}
+
+	// An undeclared projection name still errors.
+	req.Params.URI = "botfam:///nonexistent-projection"
+	if _, err := s.handleReadResource(context.Background(), req); err == nil {
+		t.Error("expected error for undeclared projection")
+	}
+}
