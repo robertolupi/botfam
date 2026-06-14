@@ -233,7 +233,7 @@ func (s *server) resolveDiscoveryWorkDirVia(ctx context.Context) (dir, via strin
 	var requestRoots rootsRequester
 	if s.mcpSrv != nil {
 		requestRoots = func(ctx context.Context) (*mcplib.ListRootsResult, error) {
-			return s.mcpSrv.RequestRoots(ctx, mcplib.ListRootsRequest{})
+			return s.requestRootsWithCache(ctx)
 		}
 	}
 	return resolveWorkDir(ctx, os.Getenv("COLLAB_ROOT"), cwd, os.Getenv("PWD"), requestRoots, famResolvable)
@@ -241,25 +241,18 @@ func (s *server) resolveDiscoveryWorkDirVia(ctx context.Context) (dir, via strin
 
 // resolveWorkDir is the pure tier chain behind resolveDiscoveryWorkDirVia (first
 // hit wins), separated from the live inputs (env, CWD, MCP client, fam
-// detection) so every tier — including the client `roots` path that only fires
-// on a system-wide mount (cwd=="/") — is testable:
+// detection) so every tier — including the client `roots` path — is testable:
 //  1. collabRoot (COLLAB_ROOT env, explicit)
-//  2. cwd, if it is a real dir other than "/" (per-project mounts, the CLI, tests)
-//  3. client workspace roots via requestRoots (system-wide mounts, cwd=="/")
+//  2. client workspace roots via requestRoots (gated on the resolvable check)
+//  3. cwd, if it is a real dir other than "/" (per-project mounts, the CLI, tests)
 //  4. pwd (the launching shell's PWD), if it sits inside a fam
 //  5. cwd as a last resort (surfaces <unresolved> + a health warning)
 //
 // resolvable reports whether a candidate dir sits inside a fam (famResolvable in
-// production); tiers 3 and 4 only accept candidates it approves.
+// production); tiers 2 and 4 only accept candidates it approves.
 func resolveWorkDir(ctx context.Context, collabRoot, cwd, pwd string, requestRoots rootsRequester, resolvable func(string) bool) (dir, via string) {
 	if collabRoot != "" {
 		return collabRoot, "collab_root"
-	}
-	// A real working dir is the caller's context. Only "/" (a system-wide
-	// mount's CWD) is treated as "no context" so we fall through to client
-	// roots / PWD.
-	if cwd != "" && cwd != "/" {
-		return cwd, "cwd"
 	}
 	if requestRoots != nil {
 		if res, err := requestRoots(ctx); err == nil && res != nil {
@@ -269,6 +262,12 @@ func resolveWorkDir(ctx context.Context, collabRoot, cwd, pwd string, requestRoo
 				}
 			}
 		}
+	}
+	// A real working dir is the caller's context. Only "/" (a system-wide
+	// mount's CWD) is treated as "no context" so we fall through to client
+	// roots / PWD.
+	if cwd != "" && cwd != "/" {
+		return cwd, "cwd"
 	}
 	if pwd != "" && resolvable(pwd) {
 		return pwd, "pwd"
@@ -283,6 +282,7 @@ func resolveWorkDir(ctx context.Context, collabRoot, cwd, pwd string, requestRoo
 func famResolvable(dir string) bool {
 	return fam.FamSlug(fam.LoadFamRegistry(dir)) != ""
 }
+
 
 // fileURIToPath turns a file:// root URI into a local path, or "" if not a
 // file URI.

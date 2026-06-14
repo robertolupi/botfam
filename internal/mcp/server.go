@@ -49,9 +49,13 @@ type server struct {
 	lockMode bool
 	mcpSrv   *mcpserver.MCPServer
 
-	mu    sync.Mutex
-	actor string
+	mu             sync.Mutex
+	actor          string
+	cachedRoots    *mcplib.ListRootsResult
+	cachedRootsErr error
+	rootsCached    bool
 }
+
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	s := &server{
@@ -764,3 +768,45 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		return nil, fmt.Errorf("unknown resource path %q", u.Path)
 	}
 }
+
+func (s *server) requestRootsWithCache(ctx context.Context) (*mcplib.ListRootsResult, error) {
+	s.mu.Lock()
+	if s.rootsCached {
+		res, err := s.cachedRoots, s.cachedRootsErr
+		s.mu.Unlock()
+		return res, err
+	}
+	s.mu.Unlock()
+
+	sess := mcpserver.ClientSessionFromContext(ctx)
+	if sess == nil {
+		err := fmt.Errorf("no active client session")
+		s.mu.Lock()
+		s.cachedRoots = nil
+		s.cachedRootsErr = err
+		s.rootsCached = true
+		s.mu.Unlock()
+		return nil, err
+	}
+
+	if _, ok := sess.(mcpserver.SessionWithRoots); !ok {
+		err := fmt.Errorf("client does not support roots capability")
+		s.mu.Lock()
+		s.cachedRoots = nil
+		s.cachedRootsErr = err
+		s.rootsCached = true
+		s.mu.Unlock()
+		return nil, err
+	}
+
+	res, err := s.mcpSrv.RequestRoots(ctx, mcplib.ListRootsRequest{})
+
+	s.mu.Lock()
+	s.cachedRoots = res
+	s.cachedRootsErr = err
+	s.rootsCached = true
+	s.mu.Unlock()
+
+	return res, err
+}
+

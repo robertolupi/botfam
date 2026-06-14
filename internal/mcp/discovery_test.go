@@ -112,11 +112,9 @@ func TestResolveWorkDirSkipsUnresolvableRoots(t *testing.T) {
 	}
 }
 
-// TestResolveWorkDirPerProjectShortCircuitsBeforeRoots pins new-claude's
-// finding: a per-project mount (cwd inside a fam) resolves at tier 2 and never
-// consults the client roots, so the roots tier truly only matters for
-// system-wide mounts (#136).
-func TestResolveWorkDirPerProjectShortCircuitsBeforeRoots(t *testing.T) {
+// TestResolveWorkDirRootsPrioritizedOverCWD asserts that client roots are
+// prioritized over CWD, so if both are present and resolvable, the roots tier wins.
+func TestResolveWorkDirRootsPrioritizedOverCWD(t *testing.T) {
 	project := "/Users/x/wt-claude"
 	other := "/Users/x/wt-other"
 	called := false
@@ -125,13 +123,14 @@ func TestResolveWorkDirPerProjectShortCircuitsBeforeRoots(t *testing.T) {
 		return &mcplib.ListRootsResult{Roots: []mcplib.Root{{URI: "file://" + other}}}, nil
 	}
 	dir, via := resolveWorkDir(context.Background(), "", project, "", requestRoots, resolves(project, other))
-	if dir != project || via != "cwd" {
-		t.Errorf("resolveWorkDir = (%q, %q), want (%q, cwd)", dir, via, project)
+	if dir != other || via != "roots" {
+		t.Errorf("resolveWorkDir = (%q, %q), want (%q, roots)", dir, via, other)
 	}
-	if called {
-		t.Error("client roots were consulted on a per-project mount; tier 2 must short-circuit")
+	if !called {
+		t.Error("expected client roots to be consulted and win over CWD")
 	}
 }
+
 
 // TestResolveWorkDirRootsFallthroughToPWD covers a system-wide mount whose
 // client either has no roots capability or returns nothing addressable: it must
