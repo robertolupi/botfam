@@ -106,4 +106,19 @@ func TestReplayHistory(t *testing.T) {
 	if nextOffset2 != nextOffset {
 		t.Errorf("expected nextOffset to be %d, got %d", nextOffset, nextOffset2)
 	}
+
+	// Case 5: empty since (default to last 100 lines)
+	lines, _, err = ReplayHistory(historyPath, "agy", "agy-botfam", "", []string{"#botfam"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 3 {
+		t.Errorf("expected 3 lines for empty since, got %d: %v", len(lines), lines)
+	}
+
+	// Case 6: unrecognized since (should return error)
+	_, _, err = ReplayHistory(historyPath, "agy", "agy-botfam", "24h", []string{"#botfam"})
+	if err == nil {
+		t.Error("expected error for unrecognized since '24h', got nil")
+	}
 }

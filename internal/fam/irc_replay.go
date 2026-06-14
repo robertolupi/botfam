@@ -44,15 +44,19 @@ func ReplayHistory(historyPath, actor, matchNick, since string, filterChans []st
 		} else if strings.HasPrefix(since, "offset:") {
 			mode = "offset"
 			valStr := strings.TrimPrefix(since, "offset:")
-			if v, err := strconv.ParseInt(valStr, 10, 64); err == nil {
-				offsetVal = v
+			v, err := strconv.ParseInt(valStr, 10, 64)
+			if err != nil {
+				return nil, 0, fmt.Errorf("invalid offset value %q: %w", valStr, err)
 			}
+			offsetVal = v
 		} else if strings.HasPrefix(since, "lines:") {
 			mode = "lines"
 			valStr := strings.TrimPrefix(since, "lines:")
-			if v, err := strconv.Atoi(valStr); err == nil {
-				linesVal = v
+			v, err := strconv.Atoi(valStr)
+			if err != nil {
+				return nil, 0, fmt.Errorf("invalid lines value %q: %w", valStr, err)
 			}
+			linesVal = v
 		} else {
 			// Try parsing as number
 			if v, err := strconv.ParseInt(since, 10, 64); err == nil {
@@ -63,8 +67,12 @@ func ReplayHistory(historyPath, actor, matchNick, since string, filterChans []st
 					mode = "lines"
 					linesVal = int(v)
 				}
+			} else {
+				return nil, 0, fmt.Errorf("unrecognized since option %q (supported: last_part, last_seen, offset:N, lines:N, or a bare integer)", since)
 			}
 		}
+	} else {
+		mode = "lines"
 	}
 
 	// Helper to check channel filter
