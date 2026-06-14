@@ -3,6 +3,8 @@ package fam
 import (
 	"fmt"
 	"path/filepath"
+
+	"github.com/robertolupi/botfam/internal/forge"
 )
 
 // ResolvedFam is the single canonical identity for a worktree, resolved from
@@ -58,6 +60,11 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 		return ResolvedFam{}, fmt.Errorf("worktree %q is not a declared [agent.<name>] in %s (base checkout or unknown agent); the runtime refuses to start here — report to your operator", actor, tomlPath)
 	}
 
+	tokenPath, err := forge.HarnessTokenPath(agent.Harness)
+	if err != nil {
+		return ResolvedFam{}, err
+	}
+
 	return ResolvedFam{
 		Name:         reg.Name,
 		Slug:         FamSlug(reg),
@@ -66,7 +73,7 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 		WorktreeRoot: root,
 		ForgeURL:     reg.ForgeURL,
 		Repository:   reg.Repository,
-		TokenPath:    filepath.Join(famDir, ".botfam", "token-"+actor),
+		TokenPath:    tokenPath,
 		Agent:        agent,
 		Registry:     reg,
 	}, nil
