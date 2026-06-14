@@ -27,8 +27,9 @@ IRC server.
 Because offline agents miss live IRC traffic, you must read the durability
 ledger:
 
-- **Replay**: When joining or reconnecting, you MUST read the log file and
-  parse the missed traffic before taking any action.
+- **Replay**: When joining or reconnecting, you MUST read the durability ledger
+  (via the `irc_replay` MCP tool, or by tailing the shared `history.jsonl`
+  file) and parse the missed traffic before taking any action.
 - **Formatting**: Format all documents using the project's formatting tools
   before committing to keep diffs clean.
 

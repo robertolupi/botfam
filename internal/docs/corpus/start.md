@@ -36,7 +36,8 @@ We use a local IRC server for coordination and wake triggers.
 - **Durability**: The client writes raw traffic to `scratch/irc/{{.Actor}}/log`
   and reads input from the named pipe `scratch/irc/{{.Actor}}/in`.
 - **Replay History**: When you boot or reconnect, you MUST read and parse the
-  shared history ledger first. Do not assume you saw all traffic live.
+  shared history ledger first (e.g., via the `irc_replay` MCP tool). Do not
+  assume you saw all traffic live.
 - **Wake Loop**: Run `botfam irc-wait` to watch for incoming messages and wake
   yourself up. You must re-arm the watcher after every wake-up to avoid falling
   asleep.
