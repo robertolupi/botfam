@@ -79,6 +79,13 @@ func (p ForgeProvider) Page(name string) (Page, error) {
 	}
 	path := fmt.Sprintf("repos/%s/%s/wiki/page/%s", p.C.Owner, p.C.Repo, url.PathEscape(name))
 	body, err := p.C.Request("GET", path, nil)
+	if err != nil && !strings.HasSuffix(name, ".-") {
+		fallbackPath := fmt.Sprintf("repos/%s/%s/wiki/page/%s", p.C.Owner, p.C.Repo, url.PathEscape(name+".-"))
+		if fallbackBody, fallbackErr := p.C.Request("GET", fallbackPath, nil); fallbackErr == nil {
+			body = fallbackBody
+			err = nil
+		}
+	}
 	if err != nil {
 		return Page{}, err
 	}
@@ -115,6 +122,7 @@ func (p ForgeProvider) Index() ([]PageMeta, error) {
 		if name == "" {
 			name = ap.Title
 		}
+		name = strings.TrimSuffix(name, ".-")
 		metas = append(metas, PageMeta{
 			Name:    name,
 			URI:     "botfam:///wiki/" + name,
@@ -137,7 +145,15 @@ func (p CacheProvider) Page(name string) (Page, error) {
 	if !ValidPageName(name) {
 		return Page{}, fmt.Errorf("invalid wiki page name %q", name)
 	}
-	b, err := os.ReadFile(filepath.Join(p.Dir, name+".md"))
+	filePath := filepath.Join(p.Dir, name+".md")
+	b, err := os.ReadFile(filePath)
+	if err != nil && os.IsNotExist(err) && !strings.HasSuffix(name, ".-") {
+		fallbackPath := filepath.Join(p.Dir, name+".-.md")
+		if fallbackBytes, fallbackErr := os.ReadFile(fallbackPath); fallbackErr == nil {
+			b = fallbackBytes
+			err = nil
+		}
+	}
 	if err != nil {
 		return Page{}, err
 	}
@@ -155,6 +171,7 @@ func (p CacheProvider) Index() ([]PageMeta, error) {
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".md")
+		name = strings.TrimSuffix(name, ".-")
 		metas = append(metas, PageMeta{
 			Name:   name,
 			URI:    "botfam:///wiki/" + name,

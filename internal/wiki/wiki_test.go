@@ -187,3 +187,81 @@ func TestFilter(t *testing.T) {
 		t.Error("expected no matches")
 	}
 }
+
+func TestWikiNormalization(t *testing.T) {
+	t.Run("ForgeProvider fallback and index trimming", func(t *testing.T) {
+		requests := 0
+		client := fakeForgeClient(func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			if r.URL.Path == "/api/v1/repos/o/r/wiki/page/test-hyphen-page" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if r.URL.Path == "/api/v1/repos/o/r/wiki/page/test-hyphen-page.-" {
+				w.Write([]byte(`{"title":"test-hyphen-page","content_base64":"Y29udGVudA==","last_commit":{"sha":"abc123","commit":{"author":{"date":"2026-06-14T00:00:00Z"}}}}`))
+				return
+			}
+			if r.URL.Path == "/api/v1/repos/o/r/wiki/pages" {
+				w.Write([]byte(`[{"title":"test-hyphen-page","sub_url":"test-hyphen-page.-","last_commit":{"sha":"abc123","commit":{"author":{"date":"2026-06-14T00:00:00Z"}}}}]`))
+				return
+			}
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		})
+
+		p := ForgeProvider{C: client}
+
+		// Test Page() fallback
+		page, err := p.Page("test-hyphen-page")
+		if err != nil {
+			t.Fatalf("Page error: %v", err)
+		}
+		if page.Content != "content" {
+			t.Errorf("expected 'content', got %q", page.Content)
+		}
+		if requests != 2 {
+			t.Errorf("expected 2 requests for Page(), got %d", requests)
+		}
+
+		// Test Index() trimming
+		metas, err := p.Index()
+		if err != nil {
+			t.Fatalf("Index error: %v", err)
+		}
+		if len(metas) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(metas))
+		}
+		if metas[0].Name != "test-hyphen-page" {
+			t.Errorf("expected Name 'test-hyphen-page', got %q", metas[0].Name)
+		}
+	})
+
+	t.Run("CacheProvider fallback and index trimming", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "test-hyphen-page.-.md"), []byte("cached content"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		p := CacheProvider{Dir: dir}
+
+		// Test Page() fallback
+		page, err := p.Page("test-hyphen-page")
+		if err != nil {
+			t.Fatalf("Page error: %v", err)
+		}
+		if page.Content != "cached content" {
+			t.Errorf("expected 'cached content', got %q", page.Content)
+		}
+
+		// Test Index() trimming
+		metas, err := p.Index()
+		if err != nil {
+			t.Fatalf("Index error: %v", err)
+		}
+		if len(metas) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(metas))
+		}
+		if metas[0].Name != "test-hyphen-page" {
+			t.Errorf("expected Name 'test-hyphen-page', got %q", metas[0].Name)
+		}
+	})
+}
