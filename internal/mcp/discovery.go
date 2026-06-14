@@ -154,8 +154,11 @@ func buildDiscoveryData(workDir string) discoveryData {
 		d.tmpl.Fam = info.Name
 	}
 	reg := fam.LoadFamRegistry(workDir)
-	if d.tmpl.Fam == "" {
-		d.tmpl.Fam = fam.FamSlug(reg)
+	// The registry's human fam name (e.g. "botfam") wins over the resolver's
+	// root-set id (e.g. "fam-09d3..."), which is only a stable fallback when no
+	// fam.toml is configured.
+	if slug := fam.FamSlug(reg); slug != "" {
+		d.tmpl.Fam = slug
 	}
 	d.tmpl.MainChannel, d.tmpl.CcrepChannel = fam.FamChannels(reg)
 	d.tmpl.IntegrationBranch = fam.FamBranch(reg)
