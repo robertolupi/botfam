@@ -1,6 +1,24 @@
 package fam
 
-import "testing"
+import (
+	"io"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// TestRunCloneRequiresForgeURLBeforeMutating asserts clone fails fast on a
+// missing --forge-url and leaves no half-built fam dir behind (#200).
+func TestRunCloneRequiresForgeURLBeforeMutating(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "fam-should-not-exist")
+	err := runClone("http://gitea:3000/o/r.git", cloneOpts{dir: dir, forgeURL: "", agentsSpec: "claude=claude-code"}, io.Discard)
+	if err == nil {
+		t.Fatal("expected error for missing --forge-url")
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("clone mutated the filesystem before validating --forge-url: %s exists", dir)
+	}
+}
 
 func TestParseCloneURL(t *testing.T) {
 	cases := []struct {

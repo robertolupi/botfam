@@ -41,13 +41,14 @@ type cloneOpts struct {
 }
 
 func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
+	// Validate everything that can be checked BEFORE any filesystem/git mutation,
+	// so a bad invocation never leaves a half-built fam dir (#200).
+	if strings.TrimSpace(opts.forgeURL) == "" {
+		return fmt.Errorf("--forge-url is required (e.g. http://gitea.home.rlupi.com:3000/); it cannot be reliably derived from an SSH remote (#184)")
+	}
 	name, repository := parseCloneURL(gitURL)
 	if name == "" {
 		return fmt.Errorf("could not derive a repo name from %q", gitURL)
-	}
-	slug := opts.slug
-	if slug == "" {
-		slug = name
 	}
 	agents, err := parseAgentsSpec(opts.agentsSpec)
 	if err != nil {
@@ -55,6 +56,10 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 	}
 	if len(agents) == 0 {
 		return fmt.Errorf("no agents specified")
+	}
+	slug := opts.slug
+	if slug == "" {
+		slug = name
 	}
 
 	famDir := opts.dir
