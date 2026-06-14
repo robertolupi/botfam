@@ -56,21 +56,26 @@ AGY_TOKEN="$(tr -d '\r\n' < "$HOME/.botfam/token-botfam-agy-test")"
 CLAUDE_TOKEN="$(tr -d '\r\n' < "$HOME/.botfam/token-botfam-claude-test")"
 [ -n "$ADMIN_TOKEN" ] && [ -n "$CAROL_TOKEN" ] && [ -n "$AGY_TOKEN" ] && [ -n "$CLAUDE_TOKEN" ] && ok "users + tokens (claude/agy/carol/admin)" || bad "token setup"
 
-note "3. initialize repo via git-credential-botfam (exercises the push helper, #4)"
+note "3. initialize repo via 'botfam credential' (exercises the push helper, #4/#212)"
 WORK="$(mktemp -d)"; REPO_DIR="$WORK/botfam"
 git clone -q "$FORGE/botfam/botfam.git" "$REPO_DIR" 2>/dev/null || { git init -q "$REPO_DIR"; git -C "$REPO_DIR" remote add origin "$FORGE/botfam/botfam.git"; }
+# Build the binary so the helper is the real `botfam credential` subcommand.
+BOTFAM_BIN="$WORK/botfam"
+go build -o "$BOTFAM_BIN" ./cmd/botfam >/dev/null 2>&1 || { bad "go build botfam (for credential helper)"; BOTFAM_BIN=""; }
 push_as() { # push_as <user> <token-literal> <args...>
   local user="$1" tok="$2"; shift 2
   local tf; tf="$(mktemp)"; printf '%s' "$tok" > "$tf"
   BOTFAM_FORGE_HOST="localhost:13000" BOTFAM_FORGE_USER="$user" BOTFAM_TOKEN_FILE="$tf" \
-    git -C "$REPO_DIR" -c "credential.$FORGE.helper=$PWD/tools/git-credential-botfam" "$@"
+    git -C "$REPO_DIR" -c "credential.$FORGE.helper=!$BOTFAM_BIN credential" "$@"
   local rc=$?; rm -f "$tf"; return $rc
 }
 ( cd "$REPO_DIR"
   git config user.email claude-bot@example.com; git config user.name claude-bot
   echo "# botfam test" > README.md; git add README.md; git commit -q -m "init" )
-push_as claude-bot "$CLAUDE_TOKEN" push -q origin HEAD:refs/heads/botfam-next 2>/dev/null \
-  && ok "git push via git-credential-botfam (created botfam-next)" || bad "helper push failed"
+if [ -n "$BOTFAM_BIN" ]; then
+  push_as claude-bot "$CLAUDE_TOKEN" push -q origin HEAD:refs/heads/botfam-next 2>/dev/null \
+    && ok "git push via 'botfam credential' (created botfam-next)" || bad "helper push failed"
+fi
 areq "$ADMIN_TOKEN" PATCH /repos/botfam/botfam '{"default_branch":"botfam-next"}' >/dev/null
 
 note "4. provision + lint the go-native gate (forge-gate.sh apply/check)"
