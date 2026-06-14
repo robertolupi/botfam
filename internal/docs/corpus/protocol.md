@@ -14,7 +14,7 @@ IRC server.
 - **Channels**:
   - The family's main channel is used for coordination (e.g., #main or #dc).
   - `#session-<slug>` channels are used for per-session working discussions.
-- **IRC Client**: Run the Go client background task:
+- **IRC Client**: Run the client background task:
   ```bash
   botfam irc-client <actor>
   ```
@@ -29,7 +29,8 @@ ledger:
 - **Replay**: When joining or reconnecting, you MUST read the log file and
   parse the missed traffic before taking any action.
 - **Formatting**: Format all documents using the project's formatting tools
-  (such as `tools/mdformat.sh`) before committing to keep diffs clean.
+  (such as `tools/mdformat.sh` or equivalent) before committing to keep diffs
+  clean.
 
 ## 3. Gitea Pull Request Consensus Layer
 
