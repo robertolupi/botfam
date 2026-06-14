@@ -22,23 +22,32 @@ func IrcWaitCmd(args []string, out io.Writer) error {
 // NewIrcWaitCmd builds the `botfam irc-wait` Cobra command (native wake watcher).
 func NewIrcWaitCmd() *cobra.Command {
 	var nick, logPath string
+	var rawNick bool
 	c := &cobra.Command{
-		Use:   "irc-wait --nick <nick> [--file <path>]",
+		Use:   "irc-wait --nick <actor> [--file <path>]",
 		Short: "Block until new IRC traffic arrives (wake watcher)",
-		Long: `Watch the IRC client log and block until a new line relevant to <nick>
+		Long: `Watch the IRC client log and block until a new line relevant to <actor>
 appears (skipping history replays and the agent's own messages), then print
 the new lines and exit.`,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The log dir is keyed by the bare actor (scratch/irc/<actor>), but
+			// the agent's own messages appear under the fam-scoped IRC nick
+			// (claude-botfam) — so match on the scoped nick or the watcher would
+			// wake on its own traffic (#137). --raw-nick / --file opt out.
+			matchNick := nick
+			if nick != "" && !rawNick {
+				matchNick = FamScopedNick(nick, FamSlug(LoadFamRegistry(".")))
+			}
 			if logPath == "" {
 				if nick == "" {
 					return errors.New("missing required argument: --nick <name> or --file <path>")
 				}
 				logPath = filepath.Join("scratch", "irc", nick, "log")
 			}
-			lines, _, _, err := WaitIrcLines(logPath, nick, -1, 0)
+			lines, _, _, err := WaitIrcLines(logPath, matchNick, -1, 0)
 			if err != nil {
 				return err
 			}
@@ -49,8 +58,9 @@ the new lines and exit.`,
 			return nil
 		},
 	}
-	c.Flags().StringVar(&nick, "nick", "", "actor nick whose client log to watch")
+	c.Flags().StringVar(&nick, "nick", "", "actor whose client log to watch (FIFO dir scratch/irc/<actor>)")
 	c.Flags().StringVar(&logPath, "file", "", "path to the IRC client log (overrides --nick derivation)")
+	c.Flags().BoolVar(&rawNick, "raw-nick", false, "match <actor> verbatim instead of the fam-scoped <actor>-<fam> nick")
 	return c
 }
 
