@@ -22,7 +22,16 @@ git -C "$REPO_ROOT" submodule update --init --recursive
 
 # 3. Build botfam
 echo "Building botfam..."
-go build -v -o "$BIN_DIR/botfam" "$REPO_ROOT/cmd/botfam"
+version="dev"
+if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  sha=$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  date=$(git -C "$REPO_ROOT" log -1 --format=%cs 2>/dev/null || echo "unknown")
+  if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+    sha="${sha}-dirty"
+  fi
+  version="0.1.0 ($sha, $date)"
+fi
+go build -v -ldflags "-X 'github.com/robertolupi/botfam/internal/fam.BuildSHA=$version'" -o "$BIN_DIR/botfam" "$REPO_ROOT/cmd/botfam"
 
 # 4. Build gitea-mcp-server
 echo "Building gitea-mcp-server..."

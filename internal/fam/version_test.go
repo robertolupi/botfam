@@ -9,9 +9,9 @@ func TestGetVersionCompiled(t *testing.T) {
 	oldBuildSHA := BuildSHA
 	defer func() { BuildSHA = oldBuildSHA }()
 
-	BuildSHA = "test-sha-12345"
+	BuildSHA = "0.1.0 (test-sha-12345, 2026-06-14)"
 	ver := GetVersion()
-	if ver != "test-sha-12345" {
+	if ver != "0.1.0 (test-sha-12345, 2026-06-14)" {
 		t.Errorf("expected GetVersion to return compiled BuildSHA, got %q", ver)
 	}
 }
@@ -26,9 +26,9 @@ func TestGetVersionFallback(t *testing.T) {
 		t.Error("expected GetVersion to not be empty")
 	}
 
-	// It should either be a 40-character hex string (valid git SHA) or "dev" (if git command fails in test env)
-	isHex := regexp.MustCompile(`^[0-9a-f]{40}$`).MatchString(ver)
-	if !isHex && ver != "dev" {
-		t.Errorf("expected GetVersion to return a 40-character hex string or 'dev', got %q", ver)
+	// It should either match "0.1.0 ([0-9a-f]{7}(-dirty)?)" or "0.1.0 ([0-9a-f]{7}(-dirty)?, [0-9-]{10})" or "dev"
+	isVersionPattern := regexp.MustCompile(`^0\.1\.0 \([0-9a-f]{7}(-dirty)?(, [0-9-]{10})?\)$`).MatchString(ver)
+	if !isVersionPattern && ver != "dev" {
+		t.Errorf("expected GetVersion to return '0.1.0 (<7-char-hex>)' or 'dev', got %q", ver)
 	}
 }

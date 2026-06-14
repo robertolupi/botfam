@@ -4,6 +4,9 @@ import (
 	"runtime/debug"
 )
 
+// Version is the current semantic version of botfam.
+const Version = "0.1.0"
+
 // BuildSHA is injected at compile time via -ldflags.
 // If not injected, it defaults to "dev".
 var BuildSHA = "dev"
@@ -19,6 +22,7 @@ func GetVersion() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		var revision string
 		var modified bool
+		var vcsTime string
 		for _, setting := range info.Settings {
 			if setting.Key == "vcs.revision" {
 				revision = setting.Value
@@ -26,12 +30,23 @@ func GetVersion() string {
 			if setting.Key == "vcs.modified" && setting.Value == "true" {
 				modified = true
 			}
+			if setting.Key == "vcs.time" {
+				vcsTime = setting.Value
+			}
 		}
 		if revision != "" {
-			if modified {
-				return revision + "-dirty"
+			short := revision
+			if len(short) > 7 {
+				short = short[:7]
 			}
-			return revision
+			if modified {
+				short += "-dirty"
+			}
+			date := ""
+			if len(vcsTime) >= 10 {
+				date = ", " + vcsTime[:10]
+			}
+			return Version + " (" + short + date + ")"
 		}
 	}
 
