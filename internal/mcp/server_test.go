@@ -550,22 +550,15 @@ func TestMcpResources(t *testing.T) {
 		_ = os.Chdir(oldCwd)
 	})
 
-	// Create a dummy PROTOCOL.md under the temp root's doc/collab/
-	collabDir := filepath.Join(root, "doc", "collab")
-	if err := os.MkdirAll(collabDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	dummyContent := "dummy protocol content"
-	if err := os.WriteFile(filepath.Join(collabDir, "PROTOCOL.md"), []byte(dummyContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// NOTE: no local doc/ is created. #117's contract is that docs/* are served
+	// from the embedded corpus, so discovery must work in a docless repo.
 
-	// 1. Test empty authority (local family docs)
+	// 1. docs/protocol is served from the embedded corpus (not a local file).
 	req := mcplib.ReadResourceRequest{}
 	req.Params.URI = "botfam:///docs/protocol"
 	res, err := s.handleReadResource(context.Background(), req)
 	if err != nil {
-		t.Fatalf("failed to read empty authority resource: %v", err)
+		t.Fatalf("failed to read embedded protocol: %v", err)
 	}
 	if len(res) == 0 {
 		t.Fatal("no resource contents returned")
@@ -574,31 +567,55 @@ func TestMcpResources(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected text resource contents, got %T", res[0])
 	}
-	if tr.Text != dummyContent {
-		t.Errorf("expected text %q, got %q", dummyContent, tr.Text)
+	if !strings.Contains(tr.Text, "Coordination Protocol") {
+		t.Errorf("expected embedded protocol content, got %q", tr.Text)
 	}
 
-	// 2. Test named authority matching local family
+	// 2. The discovery root and its JSON index.
+	req.Params.URI = "botfam:///"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read discovery root: %v", err)
+	}
+	if rootText := res[0].(mcplib.TextResourceContents).Text; !strings.Contains(rootText, "Start here") {
+		t.Errorf("root resource missing orientation, got %q", rootText)
+	}
+
+	req.Params.URI = "botfam:///index.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read index.json: %v", err)
+	}
+	var idx struct {
+		Schema    string   `json:"schema"`
+		Resources []string `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &idx); err != nil {
+		t.Fatalf("index.json is not valid JSON: %v", err)
+	}
+	if idx.Schema != "botfam.discovery.v1" {
+		t.Errorf("index schema = %q, want botfam.discovery.v1", idx.Schema)
+	}
+	if len(idx.Resources) == 0 {
+		t.Error("index.json advertises no resources")
+	}
+
+	// 3. Named authority matching the local family still resolves.
 	resolved, err := (fam.Resolver{WorkDir: root}).Resolve()
 	if err == nil && resolved.Name != "" {
 		req.Params.URI = fmt.Sprintf("botfam://%s/docs/protocol", resolved.Name)
-		res, err = s.handleReadResource(context.Background(), req)
-		if err != nil {
+		if _, err := s.handleReadResource(context.Background(), req); err != nil {
 			t.Fatalf("failed to read local named authority resource: %v", err)
-		}
-		tr = res[0].(mcplib.TextResourceContents)
-		if tr.Text != dummyContent {
-			t.Errorf("expected text %q, got %q", dummyContent, tr.Text)
 		}
 	}
 
-	// 3. Negative cases: unknown path, unsupported scheme, and an unknown
-	// named authority must all error rather than read an unintended file.
+	// 4. Negative cases: unknown slug, traversal, unsupported scheme, and an
+	// unknown named authority must all error.
 	negatives := []struct {
 		name string
 		uri  string
 	}{
-		{"unknown path", "botfam:///docs/nonexistent"},
+		{"unknown slug", "botfam:///docs/nonexistent"},
 		{"traversal attempt", "botfam:///../../etc/passwd"},
 		{"unsupported scheme", "file:///docs/protocol"},
 		{"unknown authority", "botfam://definitely-not-a-real-fam/docs/protocol"},

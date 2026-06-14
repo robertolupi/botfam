@@ -20,7 +20,15 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/fam"
+)
+
+// serverName/serverVersion identify this MCP server in its handshake and in
+// the self-discovery resources (botfam:/// and index.json).
+const (
+	serverName    = "botfam"
+	serverVersion = "0.1.0"
 )
 
 // errIdentityRequired signals that no actor identity could be resolved from
@@ -48,7 +56,7 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 		envActor: os.Getenv("COLLAB_ACTOR"),
 		lockMode: lockActorEnabled(),
 	}
-	mcpSrv := mcpserver.NewMCPServer("botfam", "0.1.0", mcpserver.WithToolCapabilities(false))
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false))
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
 	return serveStdio(context.Background(), mcpSrv, in, out)
@@ -416,22 +424,17 @@ func argFloatDefault(args map[string]any, key string, def float64) float64 {
 }
 
 func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
-	mcpSrv.AddResource(
-		mcplib.NewResource(
-			"botfam:///docs/protocol",
-			"botfam Coordination Protocol",
-			mcplib.WithMIMEType("text/markdown"),
-		),
-		s.handleReadResource,
-	)
-	mcpSrv.AddResource(
-		mcplib.NewResource(
-			"botfam:///docs/ops",
-			"botfam Operations Guide",
-			mcplib.WithMIMEType("text/markdown"),
-		),
-		s.handleReadResource,
-	)
+	add := func(uri, name, mime string) {
+		mcpSrv.AddResource(mcplib.NewResource(uri, name, mcplib.WithMIMEType(mime)), s.handleReadResource)
+	}
+	// One discovery root, plus its structured form.
+	add("botfam:///", "botfam discovery root", "text/markdown")
+	add("botfam:///index.json", "botfam discovery index", "application/json")
+	// The embedded generic docs corpus (#117). Served from the binary, so
+	// these work in a repo with no local doc/ checked in.
+	for _, slug := range discoverySlugs {
+		add("botfam:///docs/"+slug, "botfam doc: "+slug, "text/markdown")
+	}
 }
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
@@ -497,27 +500,45 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		}
 	}
 
-	var filename string
+	// Build the fam-specific runtime context. Local (and local-named) reads use
+	// cwd; a resolved cross-fam authority uses that fam's repo root.
+	dataWorkDir := cwd
+	if targetRepoRoot != localRepoRoot {
+		dataWorkDir = targetRepoRoot
+	}
+	d := buildDiscoveryData(dataWorkDir)
+
 	path := filepath.Clean(u.Path)
-	switch path {
-	case "/docs/protocol":
-		filename = filepath.Join(targetRepoRoot, "doc", "collab", "PROTOCOL.md")
-	case "/docs/ops":
-		filename = filepath.Join(targetRepoRoot, "doc", "collab", "IRC-OPS.md")
+	if u.Path == "" || path == "." {
+		path = "/"
+	}
+
+	switch {
+	case path == "/":
+		return markdownResource(req.Params.URI, renderRoot(d)), nil
+	case path == "/index.json":
+		body, err := renderIndexJSON(d)
+		if err != nil {
+			return nil, err
+		}
+		return []mcplib.ResourceContents{mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "application/json",
+			Text:     string(body),
+		}}, nil
+	case strings.HasPrefix(path, "/docs/"):
+		// Embedded generic corpus (#117): served from the binary, never the
+		// local checkout. Unknown slugs fail closed with the known set.
+		slug := strings.TrimPrefix(path, "/docs/")
+		if !isKnownSlug(slug) {
+			return nil, fmt.Errorf("unknown doc %q (known: %s)", slug, strings.Join(discoverySlugs, ", "))
+		}
+		content, err := docs.Render(slug, d.tmpl)
+		if err != nil {
+			return nil, fmt.Errorf("render doc %q: %w", slug, err)
+		}
+		return markdownResource(req.Params.URI, content), nil
 	default:
 		return nil, fmt.Errorf("unknown resource path %q", u.Path)
 	}
-
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read resource file: %w", err)
-	}
-
-	return []mcplib.ResourceContents{
-		mcplib.TextResourceContents{
-			URI:      req.Params.URI,
-			MIMEType: "text/markdown",
-			Text:     string(content),
-		},
-	}, nil
 }
