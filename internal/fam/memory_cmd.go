@@ -68,6 +68,30 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 
 func today() string { return time.Now().Format("2006-01-02") }
 
+// mergeForUpdate carries an existing fact's state onto a new write so an
+// update-in-place doesn't silently lose metadata: it preserves Created, stamps
+// Updated, merges the author, and keeps Scope/Type/Concepts/Supersedes the
+// caller did not explicitly override on this write (changed reports whether a
+// flag was set). Status/Body always come from the new write.
+func mergeForUpdate(m, existing memory.Memory, actor string, changed func(string) bool) memory.Memory {
+	m.Created = existing.Created
+	m.Updated = today()
+	m.Authors = memory.SortAuthors(append(existing.Authors, actor))
+	if !changed("scope") {
+		m.Scope = existing.Scope
+	}
+	if !changed("type") {
+		m.Type = existing.Type
+	}
+	if !changed("concepts") {
+		m.Concepts = existing.Concepts
+	}
+	if !changed("supersedes") {
+		m.Supersedes = existing.Supersedes
+	}
+	return m
+}
+
 func newMemoryWriteCmd() *cobra.Command {
 	var title, body, typ, scope, concepts, supersedes string
 	c := &cobra.Command{
@@ -91,6 +115,12 @@ func newMemoryWriteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Read any existing fact FIRST and fail closed on a read/parse error:
+			// overwriting a page we couldn't parse would silently destroy it.
+			existing, err := store.Load(title)
+			if err != nil {
+				return fmt.Errorf("could not read existing fact %q (refusing to overwrite): %w", title, err)
+			}
 			m := memory.Memory{
 				Title:      title,
 				Status:     memory.StatusLive,
@@ -102,11 +132,8 @@ func newMemoryWriteCmd() *cobra.Command {
 				Supersedes: splitCSV(supersedes),
 				Body:       body,
 			}
-			// Update-in-place: preserve Created, stamp Updated, merge authors.
-			if existing, err := store.Load(title); err == nil && existing != nil {
-				m.Created = existing.Created
-				m.Updated = today()
-				m.Authors = memory.SortAuthors(append(existing.Authors, actor))
+			if existing != nil {
+				m = mergeForUpdate(m, *existing, actor, cmd.Flags().Changed)
 			}
 			if err := store.Write(m, actor); err != nil {
 				if errors.Is(err, memory.ErrConflict) {
