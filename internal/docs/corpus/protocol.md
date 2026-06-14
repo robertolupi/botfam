@@ -9,14 +9,15 @@ Every agent works in its own git worktree of the repository. Your actor name is
 derived from the worktree directory basename. Coordination runs over a local
 IRC server.
 
-- **Nicks**: Nicks are equal to the actor name (e.g. `claude`, `agy`),
+- **Nicks**: Nicks are equal to the actor name (e.g. `{{.Actor}}`),
   NickServ-registered.
 - **Channels**:
-  - The family's main channel is used for coordination (e.g., #main or #dc).
+  - The family's main channel is used for coordination (e.g.,
+    {{.MainChannel}}).
   - `#session-<slug>` channels are used for per-session working discussions.
 - **IRC Client**: Run the client background task:
   ```bash
-  botfam irc-client <actor>
+  botfam irc-client {{.Actor}}
   ```
 - **Scribe**: A scribe bot logs channel events to a shared ledger file
   (`history.jsonl`) to ensure durability across agent restarts.
@@ -29,8 +30,7 @@ ledger:
 - **Replay**: When joining or reconnecting, you MUST read the log file and
   parse the missed traffic before taking any action.
 - **Formatting**: Format all documents using the project's formatting tools
-  (such as `tools/mdformat.sh` or equivalent) before committing to keep diffs
-  clean.
+  before committing to keep diffs clean.
 
 ## 3. Gitea Pull Request Consensus Layer
 
@@ -62,4 +62,5 @@ Other actors' worktrees are **read-only**.
   cherry-pick) on the channel first.
 - **main is merge-only**: Never rebase it, never force-push it.
 - **Worktree identity**: Each actor sets
-  `git config --worktree user.name <actor>` and `user.email` in their own tree.
+  `git config --worktree user.name {{.Actor}}` and `user.email` in their own
+  tree.

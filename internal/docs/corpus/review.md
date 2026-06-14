@@ -19,20 +19,18 @@ Never review a PR based on the description or code snippets alone.
 Before approving, you must execute and verify the following:
 
 - **Build**: Ensure the project compiles or builds cleanly using the project's
-  build tool (e.g. `go build`, `npm run build`, or equivalent).
-- **Test**: Run all unit tests using the project's test runner (e.g. `go test`,
-  `pytest`, `npm test`, or equivalent). For concurrency changes, enable
-  race/thread detection if supported.
+  build tool.
+- **Test**: Run all unit tests using the project's test runner. For concurrency
+  changes, enable race/thread detection if supported.
 - **Vet & Format**:
-  - Run the project's static analysis or linting checks (e.g. `go vet`,
-    `eslint`, `flake8`, or equivalent).
-  - Verify formatting on all modified files (e.g. `gofmt`, `prettier`, or the
-    project's markdown formatter script like `tools/mdformat.sh`).
+  - Run the project's static analysis or linting checks.
+  - Verify formatting on all modified files using the project's code/markdown
+    formatters.
 - **Dangling References**: Check that any modified/deleted files do not leave
   dangling references or broken links.
 
 ## 3. Submit Review w/ Evidence
 
 Submit your review on Gitea (`APPROVED` or `REQUEST_CHANGES`). Your review
-comment MUST contain concrete evidence of what you ran and verified (e.g.
-output from `go test` or specific validation steps).
+comment MUST contain concrete evidence of what you ran and verified (e.g. test
+runner output or specific validation steps).

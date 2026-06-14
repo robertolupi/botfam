@@ -25,7 +25,7 @@ func TestReadEmbeddedDocs(t *testing.T) {
 }
 
 func TestEmbeddedCorpusIsGeneric(t *testing.T) {
-	// Grep all files under corpus/ and assert they contain no fam-specific strings
+	// Grep all files under corpus/ and assert they contain no fam-specific or toolchain-specific strings
 	forbidden := []string{
 		"#botfam",
 		"gitea:3000",
@@ -37,6 +37,11 @@ func TestEmbeddedCorpusIsGeneric(t *testing.T) {
 		"wt-rlupi",
 		"robertolupi",
 		"roberto.lupi",
+		"go test",
+		"go build",
+		"gofmt",
+		"go vet",
+		"mdformat",
 	}
 
 	err := fs.WalkDir(Files, "corpus", func(path string, d fs.DirEntry, err error) error {
@@ -55,12 +60,66 @@ func TestEmbeddedCorpusIsGeneric(t *testing.T) {
 		contentStr := strings.ToLower(string(content))
 		for _, f := range forbidden {
 			if strings.Contains(contentStr, strings.ToLower(f)) {
-				t.Errorf("file %s contains forbidden fam-specific string %q", path, f)
+				t.Errorf("file %s contains forbidden/specific string %q", path, f)
 			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("failed to walk corpus: %v", err)
+	}
+}
+
+func TestTemplateRendering(t *testing.T) {
+	data := TemplateData{
+		Actor:         "testactor",
+		Fam:           "testfam",
+		MainChannel:   "#testmain",
+		CcrepChannel:  "#testccrep",
+		OperatorEmail: "operator@test.com",
+		OperatorName:  "testoperator",
+		ForgeURL:      "http://testforge:3000",
+	}
+
+	slugs := []string{"start", "protocol", "ops", "operator", "review", "worktrees", "markdown"}
+	for _, slug := range slugs {
+		content, err := Render(slug, data)
+		if err != nil {
+			t.Errorf("failed to render embedded doc %q: %v", slug, err)
+			continue
+		}
+		if len(content) == 0 {
+			t.Errorf("rendered doc %q is empty", slug)
+		}
+
+		contentStr := string(content)
+		// Check that the template syntax tags like {{ or }} are not present in the rendered output
+		if strings.Contains(contentStr, "{{") || strings.Contains(contentStr, "}}") {
+			t.Errorf("rendered doc %q contains unrendered template tags:\n%s", slug, contentStr)
+		}
+
+		// Verify that specific fuzzed values actually exist in the output where expected
+		switch slug {
+		case "start":
+			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "testfam") {
+				t.Errorf("rendered start.md missing expected placeholders: %s", contentStr)
+			}
+		case "worktrees":
+			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "operator@test.com") {
+				t.Errorf("rendered worktrees.md missing expected placeholders: %s", contentStr)
+			}
+		case "ops":
+			if !strings.Contains(contentStr, "testfam") || !strings.Contains(contentStr, "testactor") {
+				t.Errorf("rendered ops.md missing expected placeholders: %s", contentStr)
+			}
+		case "operator":
+			if !strings.Contains(contentStr, "testoperator") {
+				t.Errorf("rendered operator.md missing expected placeholders: %s", contentStr)
+			}
+		case "protocol":
+			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "#testmain") {
+				t.Errorf("rendered protocol.md missing expected placeholders: %s", contentStr)
+			}
+		}
 	}
 }
