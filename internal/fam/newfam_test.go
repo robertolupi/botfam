@@ -328,8 +328,9 @@ func TestNewfamMCPSelfDiscoverability(t *testing.T) {
 
 		var config struct {
 			McpServers map[string]struct {
-				Command string   `json:"command"`
-				Args    []string `json:"args"`
+				Command string            `json:"command"`
+				Args    []string          `json:"args"`
+				Env     map[string]string `json:"env"`
 			} `json:"mcpServers"`
 		}
 		if err := json.Unmarshal(data, &config); err != nil {
@@ -346,6 +347,9 @@ func TestNewfamMCPSelfDiscoverability(t *testing.T) {
 		}
 		if len(collab.Args) != 1 || collab.Args[0] != "serve" {
 			t.Errorf("collab MCP server args in %s are not ['serve']: %v", path, collab.Args)
+		}
+		if collab.Env == nil || collab.Env["PATH"] != os.Getenv("PATH") {
+			t.Errorf("collab MCP server env.PATH in %s is %q, expected %q", path, collab.Env["PATH"], os.Getenv("PATH"))
 		}
 	}
 }

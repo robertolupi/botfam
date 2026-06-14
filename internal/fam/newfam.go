@@ -279,7 +279,7 @@ func registerMCPServerGlobally(out io.Writer) error {
 			"command": execPath,
 			"args":    []interface{}{"serve"},
 			"env": map[string]interface{}{
-				"PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin",
+				"PATH": os.Getenv("PATH"),
 			},
 		}
 		mcpServers["collab"] = collabSrv
