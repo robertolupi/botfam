@@ -1040,3 +1040,80 @@ func TestMcpProjections(t *testing.T) {
 		t.Error("expected error for undeclared projection")
 	}
 }
+
+func TestMcpDefaultMemoryProjection(t *testing.T) {
+	s, root := newTestServer(t)
+	initGitRepo(t, root)
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	// Write fam.toml with NO projections.
+	famToml := "name = \"testfam\"\n"
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte(famToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Local wiki cache: memory pages and home.
+	wikiDir := filepath.Join(root, "wiki")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"memory-first-fact", "memory-second-fact", "Home"} {
+		if err := os.WriteFile(filepath.Join(wikiDir, name+".md"), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := mcplib.ReadResourceRequest{}
+
+	// 1. Markdown memory projection lists only memory-* pages.
+	req.Params.URI = "botfam:///memory"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("memory: %v", err)
+	}
+	txt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(txt, "memory-first-fact") || strings.Contains(txt, "Home") {
+		t.Errorf("projection should list memory facts only, got %q", txt)
+	}
+
+	// 2. Read discovery root to verify projection is advertised.
+	req.Params.URI = "botfam:///"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("root: %v", err)
+	}
+	rootTxt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(rootTxt, "botfam:///memory") {
+		t.Errorf("expected memory projection advertised in root, got %q", rootTxt)
+	}
+
+	// 3. Read index.json to verify projection is advertised.
+	req.Params.URI = "botfam:///index.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	var idx struct {
+		Resources []string `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &idx); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	found := false
+	for _, resURI := range idx.Resources {
+		if resURI == "botfam:///memory" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("memory projection not advertised in index.json: %v", idx.Resources)
+	}
+}

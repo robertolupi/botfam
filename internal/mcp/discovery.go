@@ -170,6 +170,19 @@ func buildDiscoveryData(workDir string) discoveryData {
 	d.tmpl.IntegrationBranch = fam.FamBranch(reg)
 	d.tmpl.ForgeURL = reg.Origin
 	d.projections = wiki.ParseProjections(reg.WikiProjections)
+	hasMemory := false
+	for _, proj := range d.projections {
+		if proj.Name == "memory" {
+			hasMemory = true
+			break
+		}
+	}
+	if !hasMemory {
+		d.projections = append(d.projections, wiki.Projection{
+			Name:  "memory",
+			Match: "memory-*",
+		})
+	}
 
 	d.health = discoveryHealth(workDir, d.tmpl)
 	return d
@@ -375,6 +388,15 @@ func renderRoot(d discoveryData) []byte {
 	b.WriteString("- `botfam:///skills` — human index of repository skills\n")
 	b.WriteString("- `botfam:///skills.json` — structured skills catalog\n")
 
+	b.WriteString("\n## Projections\n\n")
+	if len(d.projections) > 0 {
+		for _, proj := range d.projections {
+			fmt.Fprintf(&b, "- `botfam:///%s` — live wiki projection: %s\n", proj.Name, proj.Name)
+		}
+	} else {
+		b.WriteString("_No projections configured._\n")
+	}
+
 	b.WriteString("\n## Health\n\n")
 	allOK := true
 	for _, h := range d.health {
@@ -428,6 +450,9 @@ func renderIndexJSON(d discoveryData) ([]byte, error) {
 	}
 	for _, slug := range discoverySlugs {
 		idx.Resources = append(idx.Resources, "botfam:///docs/"+slug)
+	}
+	for _, proj := range d.projections {
+		idx.Resources = append(idx.Resources, "botfam:///"+proj.Name)
 	}
 	idx.Health = d.health
 	return json.MarshalIndent(idx, "", "  ")
