@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -45,7 +46,7 @@ func NewMintCmd() *cobra.Command {
 					return fmt.Errorf("--harness is required (or pass --token-file)")
 				}
 				var err error
-				if path, err = HarnessTokenPath(harness); err != nil {
+				if path, err = forge.HarnessTokenPath(harness); err != nil {
 					return err
 				}
 			}
@@ -76,19 +77,6 @@ func NewMintCmd() *cobra.Command {
 	c.Flags().StringVar(&scopesCSV, "scopes", defaultMintScopes, "comma-separated token scopes")
 	c.Flags().StringVar(&tokenFile, "token-file", "", "override the token output path (default ~/.botfam/token-<harness>)")
 	return c
-}
-
-// HarnessTokenPath returns the per-harness token path ~/.botfam/token-<harness>.
-// (The per-remote dimension — token-<harness>-<remote> — is a later addition.)
-func HarnessTokenPath(harness string) (string, error) {
-	if harness == "" {
-		return "", fmt.Errorf("harness is empty")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".botfam", "token-"+harness), nil
 }
 
 // mintToken POSTs to the Gitea/Forgejo token-creation API with basic auth and

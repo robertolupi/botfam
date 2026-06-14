@@ -51,20 +51,6 @@ func TestMintTokenError(t *testing.T) {
 	}
 }
 
-func TestHarnessTokenPath(t *testing.T) {
-	t.Setenv("HOME", "/home/test")
-	got, err := HarnessTokenPath("claude-code")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != filepath.Join("/home/test", ".botfam", "token-claude-code") {
-		t.Errorf("path = %q", got)
-	}
-	if _, err := HarnessTokenPath(""); err == nil {
-		t.Error("expected error for empty harness")
-	}
-}
-
 func TestWriteTokenFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".botfam", "token-claude-code")
 	if err := writeTokenFile(path, "secrettoken"); err != nil {
