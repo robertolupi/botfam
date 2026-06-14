@@ -222,53 +222,47 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			return nil, fmt.Errorf("failed to get user home dir: %w", err)
 		}
 
-		fam := resolveFamName(workDir)
-		if fam == "" {
-			fam = "botfam"
-		}
-
 		if famTOMLPath == "" {
 			famTOMLPath = resolveFamTOMLPath(workDir)
 		}
-
-		var tokenFile string
 		var harness string
 		if famTOMLPath != "" {
 			harness = readHarnessFromFamTOML(famTOMLPath, actor)
 		}
+
+		// Fail closed: the token is the canonical per-harness one. There is NO
+		// silent legacy (token-botfam-<actor>) or per-fam (token-<fam>-<actor>)
+		// fallback — those masking a missing token are exactly the #183 disease.
+		var tokenFile string
 		if harness != "" {
-			var err error
 			tokenFile, err = HarnessTokenPath(harness)
 			if err != nil {
 				return nil, err
 			}
-		} else {
-			tokenFile = filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", fam, actor))
 		}
 
-		if _, err := os.Stat(tokenFile); os.IsNotExist(err) {
-			legacyFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s", actor))
-			if _, err := os.Stat(legacyFile); err == nil {
-				tokenFile = legacyFile
-			} else {
-				if harness != "" {
-					perFamAgentFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", fam, actor))
-					if _, err := os.Stat(perFamAgentFile); err == nil {
-						tokenFile = perFamAgentFile
-					}
-				}
-				if _, err := os.Stat(tokenFile); os.IsNotExist(err) && os.Getenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK") == "1" {
-					testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
-					if _, err := os.Stat(testFile); err == nil {
-						tokenFile = testFile
-					}
-				}
+		// The only non-canonical path is the explicit opt-in test credential
+		// (BOTFAM_ALLOW_TEST_TOKEN_FALLBACK=1) for the local test forge — never a
+		// silent production fallback (#70).
+		needTest := tokenFile == ""
+		if !needTest {
+			if _, statErr := os.Stat(tokenFile); os.IsNotExist(statErr) {
+				needTest = true
+			}
+		}
+		if needTest && os.Getenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK") == "1" {
+			testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
+			if _, statErr := os.Stat(testFile); statErr == nil {
+				tokenFile = testFile
 			}
 		}
 
+		if tokenFile == "" {
+			return nil, fmt.Errorf("cannot resolve forge token: no [agent.%s] harness in %s — run `botfam setup`; report this to your operator (no legacy fallback)", actor, famTOMLPath)
+		}
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read token file %s: %w", tokenFile, err)
+			return nil, fmt.Errorf("forge token not found at %s: %w — mint it with `botfam mint --harness %s --user <forge-user>`; report this to your operator", tokenFile, err, harness)
 		}
 		token = strings.TrimSpace(string(b))
 	}
