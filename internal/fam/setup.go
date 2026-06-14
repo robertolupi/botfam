@@ -23,6 +23,12 @@ type Registry struct {
 	RepoPaths    []string
 	ObjectStores []string
 	CreatedAt    string
+
+	// WikiProjections declares curated wiki indexes as "name:glob" entries
+	// (e.g. "reviews:review-*"). Each becomes botfam:///<name>[.json], listing
+	// the wiki pages whose name matches the glob. Fam-specific: every fam
+	// declares its own set (or none) — see #120.
+	WikiProjections []string
 }
 
 // Setup is the thin args/io entry point retained for tests; it builds the
@@ -157,6 +163,8 @@ func ReadRegistry(path string) (Registry, error) {
 			reg.RepoPaths = parseArray(v)
 		case "object_stores":
 			reg.ObjectStores = parseArray(v)
+		case "wiki_projections":
+			reg.WikiProjections = parseArray(v)
 		}
 	}
 	return reg, sc.Err()
@@ -179,6 +187,9 @@ func WriteRegistry(path string, reg Registry) error {
 	}
 	writeArray(&b, "repo_paths", reg.RepoPaths)
 	writeArray(&b, "object_stores", reg.ObjectStores)
+	if len(reg.WikiProjections) > 0 {
+		writeArray(&b, "wiki_projections", reg.WikiProjections)
+	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
 		return err

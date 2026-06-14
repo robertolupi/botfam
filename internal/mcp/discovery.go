@@ -75,6 +75,38 @@ func renderWikiPage(p wiki.Page) []byte {
 	return []byte(b.String())
 }
 
+// renderProjectionMarkdown lists the wiki pages matching a fam-declared
+// projection.
+func renderProjectionMarkdown(name, match, source string, metas []wiki.PageMeta) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s (source: %s, match: `%s`)\n\n", name, source, match)
+	if len(metas) == 0 {
+		b.WriteString("_No matching pages._\n")
+	}
+	for _, m := range metas {
+		fmt.Fprintf(&b, "- `%s` → `%s`\n", m.Name, m.URI)
+	}
+	return []byte(b.String())
+}
+
+type projectionJSON struct {
+	Schema     string          `json:"schema"`
+	Projection string          `json:"projection"`
+	Match      string          `json:"match"`
+	Source     string          `json:"source"`
+	Pages      []wiki.PageMeta `json:"pages"`
+}
+
+func renderProjectionJSON(name, match, source string, metas []wiki.PageMeta) ([]byte, error) {
+	return json.MarshalIndent(projectionJSON{
+		Schema:     "botfam.projection.v1",
+		Projection: name,
+		Match:      match,
+		Source:     source,
+		Pages:      metas,
+	}, "", "  ")
+}
+
 // markdownResource wraps embedded/rendered markdown as MCP resource contents.
 func markdownResource(uri string, content []byte) []mcplib.ResourceContents {
 	return []mcplib.ResourceContents{mcplib.TextResourceContents{
@@ -102,8 +134,9 @@ type healthCheck struct {
 // generic embedded skeleton to build the root resource. The doc template data
 // is generic-by-default (placeholders) and only filled where resolvable.
 type discoveryData struct {
-	tmpl   docs.TemplateData
-	health []healthCheck
+	tmpl        docs.TemplateData
+	health      []healthCheck
+	projections []wiki.Projection
 }
 
 // buildDiscoveryData resolves the fam-specific runtime config for workDir. It
@@ -123,6 +156,7 @@ func buildDiscoveryData(workDir string) discoveryData {
 	d.tmpl.MainChannel, d.tmpl.CcrepChannel = fam.FamChannels(reg)
 	d.tmpl.IntegrationBranch = fam.FamBranch(reg)
 	d.tmpl.ForgeURL = reg.Origin
+	d.projections = wiki.ParseProjections(reg.WikiProjections)
 
 	d.health = discoveryHealth(workDir, d.tmpl)
 	return d
