@@ -55,6 +55,9 @@ func TestNewfam(t *testing.T) {
 	if reg.Name != "myproject" {
 		t.Errorf("expected registry name 'myproject', got %q", reg.Name)
 	}
+	if len(reg.WikiProjections) == 0 || reg.WikiProjections[0] != "memory:memory-*" {
+		t.Errorf("expected WikiProjections to contain 'memory:memory-*', got %v", reg.WikiProjections)
+	}
 
 	// Verify that roster contains all agents and the operator
 	expectedRoster := []string{"agy", "claude", "testoperator"}

@@ -109,6 +109,7 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 	reg.Roster = roster
 	reg.RepoPaths = unique(append(append([]string{repoRoot}, worktrees...), reg.RepoPaths...))
 	reg.ObjectStores = unique(append(reg.ObjectStores, stores...))
+	reg.WikiProjections = []string{"memory:memory-*"}
 
 	if err := WriteRegistry(regPath, reg); err != nil {
 		return err

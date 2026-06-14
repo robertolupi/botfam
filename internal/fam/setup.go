@@ -91,6 +91,7 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 		reg.Name = project
 		reg.RootSet = info.RootSet
 		reg.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+		reg.WikiProjections = []string{"memory:memory-*"}
 	}
 	reg.Roster = unique(append(reg.Roster, agents...))
 	reg.RepoPaths = unique(append(reg.RepoPaths, RepoPath(".")))
