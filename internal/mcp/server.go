@@ -99,10 +99,10 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	s.mu.Unlock()
 
 	pollers := []fam.Poller{fam.NewIRCPoller(ircLog, matchNick)}
-	// Add the forge source when a client can be built; IRC-only otherwise (e.g.
-	// no notification-scoped token). markRead stays off: the mailbox is the
-	// durable record, so cursor-based dedup is enough.
-	if fp, err := fam.ForgePollerFor(workDir, actor, false); err == nil {
+	// Add the forge source when one can be built; IRC-only otherwise (e.g. no
+	// repository declared, or no notification-scoped token). The forge source
+	// drains the repo's unread set (append-to-mailbox then mark-read).
+	if fp, err := fam.ForgePollerFor(workDir, actor); err == nil {
 		pollers = append(pollers, fp)
 	}
 	ing := fam.NewIngester(mboxPath, 30*time.Second, pollers...)

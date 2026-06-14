@@ -3,27 +3,58 @@ package fam
 import (
 	"errors"
 	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mailbox"
 )
 
+// fakeForge models the repo-scoped unread set as a draining queue: a successful
+// MarkNotificationRead removes the thread, so ListUnreadRepoNotifications returns
+// the next page on the following call. neverAck=true makes mark-read a no-op so
+// the set never shrinks (to exercise the drain cap).
 type fakeForge struct {
-	notifs []forge.Notification
-	marked []int64
-	err    error
+	repo      string
+	unread    []forge.Notification
+	marked    []int64
+	listCalls int
+	listErr   error
+	markErr   error
+	neverAck  bool
 }
 
-func (f *fakeForge) ListAllUnreadNotifications() ([]forge.Notification, error) {
-	if f.err != nil {
-		return nil, f.err
+func (f *fakeForge) ListUnreadRepoNotifications(repo string) ([]forge.Notification, error) {
+	f.listCalls++
+	if repo != f.repo {
+		// The poller must call the repo it was built with (server-side scoping).
+		return nil, errors.New("unexpected repo " + repo)
 	}
-	return f.notifs, nil
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	limit := forge.NotificationsPageLimit()
+	n := len(f.unread)
+	if n > limit {
+		n = limit
+	}
+	return append([]forge.Notification(nil), f.unread[:n]...), nil
 }
+
 func (f *fakeForge) MarkNotificationRead(id int64) error {
+	if f.markErr != nil {
+		return f.markErr
+	}
 	f.marked = append(f.marked, id)
+	if f.neverAck {
+		return nil
+	}
+	out := f.unread[:0]
+	for _, n := range f.unread {
+		if n.ID != id {
+			out = append(out, n)
+		}
+	}
+	f.unread = out
 	return nil
 }
 
@@ -35,6 +66,26 @@ func notif(id int64, repo, typ, url string) forge.Notification {
 	n.Subject.Title = "t"
 	n.Subject.HTMLURL = url
 	return n
+}
+
+func repoNotifs(repo string, ids ...int64) []forge.Notification {
+	var ns []forge.Notification
+	for _, id := range ids {
+		ns = append(ns, notif(id, repo, "Issue", "http://gitea:3000/"+repo+"/issues/"+itoa(int(id))))
+	}
+	return ns
+}
+
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var b []byte
+	for i > 0 {
+		b = append([]byte{byte('0' + i%10)}, b...)
+		i /= 10
+	}
+	return string(b)
 }
 
 func forgeEvents(t *testing.T, mboxPath string) []mailbox.Event {
@@ -52,123 +103,118 @@ func forgeEvents(t *testing.T, mboxPath string) []mailbox.Event {
 	return out
 }
 
-func TestForgePollerRepoScopedAndEdgeTriggered(t *testing.T) {
-	fc := &fakeForge{notifs: []forge.Notification{
-		notif(1, "botfam/botfam", "Pull", "http://gitea:3000/botfam/botfam/pulls/230"),
-		notif(2, "deepcuts/deepcuts", "Issue", "http://gitea:3000/deepcuts/deepcuts/issues/9"),
-		notif(3, "botfam/botfam", "Issue", "http://gitea:3000/botfam/botfam/issues/240"),
-	}}
-	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
-	p := NewForgePoller(fc, "botfam/botfam", false)
-
+func drainOnce(t *testing.T, fc *fakeForge) (mboxPath string) {
+	t.Helper()
+	mboxPath = filepath.Join(t.TempDir(), "claude.mailbox")
 	w, err := mailbox.OpenWriter(mboxPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cur mailbox.Cursors
-	if err := p.Poll(w, &cur); err != nil {
-		t.Fatal(err)
-	}
+	p := NewForgePoller(fc, fc.repo)
+	err = p.Poll(w, &mailbox.Cursors{})
 	w.Close()
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	return mboxPath
+}
+
+func TestForgePollerDrainsRepo(t *testing.T) {
+	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", 3, 1, 2)}
+	mboxPath := drainOnce(t, fc)
 
 	evs := forgeEvents(t, mboxPath)
-	if len(evs) != 2 {
-		t.Fatalf("surfaced %d forge events, want 2 (deepcuts filtered out)", len(evs))
+	if len(evs) != 3 {
+		t.Fatalf("surfaced %d events, want 3", len(evs))
 	}
-	if evs[0].NotifID != 1 || evs[1].NotifID != 3 {
-		t.Errorf("surfaced notif ids = %d,%d, want 1,3", evs[0].NotifID, evs[1].NotifID)
+	// Ascending id within the drained page.
+	if evs[0].NotifID != 1 || evs[1].NotifID != 2 || evs[2].NotifID != 3 {
+		t.Errorf("surfaced ids %d,%d,%d, want 1,2,3", evs[0].NotifID, evs[1].NotifID, evs[2].NotifID)
 	}
-	if evs[0].Number != 230 {
-		t.Errorf("number = %d, want 230 (parsed from URL)", evs[0].Number)
+	if evs[0].Number != 1 {
+		t.Errorf("number = %d, want 1 (parsed from URL)", evs[0].Number)
 	}
-	// Cursor advanced past every unread id seen, including the filtered deepcuts
-	// one, so it is never rescanned.
-	if cur.ForgeLastNotificationID != 3 {
-		t.Errorf("cursor = %d, want 3", cur.ForgeLastNotificationID)
+	if len(fc.marked) != 3 {
+		t.Errorf("marked %d threads read, want 3", len(fc.marked))
 	}
-
-	// Second poll over the same set is edge-triggered: nothing new.
-	w2, _ := mailbox.OpenWriter(mboxPath)
-	before := len(forgeEvents(t, mboxPath))
-	if err := p.Poll(w2, &cur); err != nil {
-		t.Fatal(err)
-	}
-	w2.Close()
-	if after := len(forgeEvents(t, mboxPath)); after != before {
-		t.Errorf("edge-trigger re-surfaced notifications: %d -> %d", before, after)
+	if len(fc.unread) != 0 {
+		t.Errorf("unread set not drained: %d remain", len(fc.unread))
 	}
 }
 
-// TestForgePollerNoSkipBeyondOnePage guards the #251 review fix: with more unread
-// same-repo notifications than a single API page, none may be skipped. The fake
-// satisfies the full-enumeration contract (ListAllUnreadNotifications), so every
-// id > cursor must surface and the cursor must land on the global max.
-func TestForgePollerNoSkipBeyondOnePage(t *testing.T) {
-	var notifs []forge.Notification
-	for id := int64(1); id <= 120; id++ { // > 2 pages of 50
-		notifs = append(notifs, notif(id, "botfam/botfam", "Issue",
-			"http://gitea:3000/botfam/botfam/issues/"+strconv.FormatInt(id, 10)))
+func TestForgePollerDrainsAcrossPages(t *testing.T) {
+	// 120 unread > 2 pages of 50: the drain must surface all of them, with no
+	// offset and no cursor — always re-fetching the (shrinking) first page.
+	var ids []int64
+	for id := int64(1); id <= 120; id++ {
+		ids = append(ids, id)
 	}
-	fc := &fakeForge{notifs: notifs}
-	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
-	p := NewForgePoller(fc, "botfam/botfam", false)
-
-	w, _ := mailbox.OpenWriter(mboxPath)
-	var cur mailbox.Cursors
-	if err := p.Poll(w, &cur); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
+	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", ids...)}
+	mboxPath := drainOnce(t, fc)
 
 	evs := forgeEvents(t, mboxPath)
 	if len(evs) != 120 {
-		t.Fatalf("surfaced %d events, want all 120 (no skip beyond page 1)", len(evs))
+		t.Fatalf("surfaced %d events, want all 120", len(evs))
 	}
-	if evs[0].NotifID != 1 || evs[len(evs)-1].NotifID != 120 {
-		t.Errorf("surfaced range %d..%d, want 1..120", evs[0].NotifID, evs[len(evs)-1].NotifID)
+	if len(fc.marked) != 120 {
+		t.Errorf("marked %d, want 120", len(fc.marked))
 	}
-	if cur.ForgeLastNotificationID != 120 {
-		t.Errorf("cursor = %d, want 120", cur.ForgeLastNotificationID)
+	if fc.listCalls != 3 { // 50, 50, 20
+		t.Errorf("list calls = %d, want 3 (two full pages + a short page)", fc.listCalls)
 	}
 }
 
-// TestForgePollerDoesNotAdvanceOnIncompleteScan guards the cap-boundary case
-// from the #251 re-review: if the client can't enumerate the full unread set
-// (e.g. it exceeded the page cap), Poll must surface the error and leave the
-// cursor untouched, so a later poll retries rather than skipping the tail.
-func TestForgePollerDoesNotAdvanceOnIncompleteScan(t *testing.T) {
-	fc := &fakeForge{err: errors.New("unread notifications exceed the page cap")}
+func TestForgePollerAtLeastOnceOnMarkError(t *testing.T) {
+	// Append happens before the upstream ack, so if mark-read fails the thread is
+	// already durably in the mailbox (re-surfaced later, never lost).
+	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", 5), markErr: errors.New("no write:notification scope")}
+	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
+	w, _ := mailbox.OpenWriter(mboxPath)
+	p := NewForgePoller(fc, fc.repo)
+	err := p.Poll(w, &mailbox.Cursors{})
+	w.Close()
+	if err == nil {
+		t.Fatal("expected Poll to surface the mark-read error")
+	}
+	if evs := forgeEvents(t, mboxPath); len(evs) != 1 || evs[0].NotifID != 5 {
+		t.Errorf("event not durably appended before the failed ack: %+v", evs)
+	}
+}
+
+func TestForgePollerListError(t *testing.T) {
+	fc := &fakeForge{repo: "botfam/botfam", listErr: errors.New("boom")}
 	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
 	w, _ := mailbox.OpenWriter(mboxPath)
 	defer w.Close()
-
-	p := NewForgePoller(fc, "botfam/botfam", false)
-	cur := mailbox.Cursors{ForgeLastNotificationID: 42}
-	if err := p.Poll(w, &cur); err == nil {
-		t.Fatal("expected Poll to surface the incomplete-scan error")
-	}
-	if cur.ForgeLastNotificationID != 42 {
-		t.Errorf("cursor advanced to %d on an incomplete scan, want 42 (unchanged)", cur.ForgeLastNotificationID)
+	p := NewForgePoller(fc, fc.repo)
+	if err := p.Poll(w, &mailbox.Cursors{}); err == nil {
+		t.Fatal("expected Poll to surface the list error")
 	}
 	if len(forgeEvents(t, mboxPath)) != 0 {
-		t.Error("surfaced events from an incomplete scan")
+		t.Error("surfaced events despite a list error")
 	}
 }
 
-func TestForgePollerMarkRead(t *testing.T) {
-	fc := &fakeForge{notifs: []forge.Notification{
-		notif(7, "botfam/botfam", "Pull", "http://gitea:3000/botfam/botfam/pulls/1"),
-	}}
+func TestForgePollerDrainCapErrors(t *testing.T) {
+	defer func(orig int) { maxForgeDrainPages = orig }(maxForgeDrainPages)
+	maxForgeDrainPages = 3
+
+	// A full page that never shrinks (ack is a no-op) must hit the cap and error
+	// rather than loop forever.
+	var ids []int64
+	for id := int64(1); id <= int64(forge.NotificationsPageLimit()); id++ {
+		ids = append(ids, id)
+	}
+	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", ids...), neverAck: true}
 	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
 	w, _ := mailbox.OpenWriter(mboxPath)
-	defer w.Close()
-
-	p := NewForgePoller(fc, "botfam/botfam", true)
-	var cur mailbox.Cursors
-	if err := p.Poll(w, &cur); err != nil {
-		t.Fatal(err)
+	p := NewForgePoller(fc, fc.repo)
+	err := p.Poll(w, &mailbox.Cursors{})
+	w.Close()
+	if err == nil {
+		t.Fatal("expected the drain cap to error when the unread set never shrinks")
 	}
-	if len(fc.marked) != 1 || fc.marked[0] != 7 {
-		t.Errorf("marked = %v, want [7]", fc.marked)
+	if fc.listCalls != 3 {
+		t.Errorf("list calls = %d, want 3 (the cap)", fc.listCalls)
 	}
 }

@@ -37,11 +37,11 @@ const (
 )
 
 // Cursors are the upstream resume positions a writer checkpoints into a meta
-// line so the ingester can resume tailing/polling after a restart without a
-// separate state file.
+// line so the ingester can resume tailing after a restart without a separate
+// state file. Only the IRC tail needs a resume offset; the forge source drains
+// its unread set (marking threads read) and so keeps no cursor.
 type Cursors struct {
-	IRCLogOffset            int64 `json:"irc_log_offset"`
-	ForgeLastNotificationID int64 `json:"forge_last_notification_id"`
+	IRCLogOffset int64 `json:"irc_log_offset"`
 }
 
 // Event is one mailbox line. It carries the common envelope (Source, Epoch, Seq,

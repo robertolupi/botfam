@@ -37,97 +37,28 @@ func TestListUnreadNotifications(t *testing.T) {
 	}
 }
 
-func TestListAllUnreadNotificationsPaginates(t *testing.T) {
-	var pages []int
+func TestListUnreadRepoNotifications(t *testing.T) {
 	c := &Client{
 		BaseURL: "http://forge.test", Token: "t",
 		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
-			page := r.URL.Query().Get("page")
-			pages = append(pages, len(pages)+1)
-			w.WriteHeader(http.StatusOK)
-			switch page {
-			case "1":
-				// A full page (limit=50) must trigger a follow-up fetch.
-				var b []byte
-				b = append(b, '[')
-				for i := 1; i <= 50; i++ {
-					if i > 1 {
-						b = append(b, ',')
-					}
-					b = append(b, []byte(`{"id":`+itoa(i)+`,"unread":true,"subject":{"type":"Issue"},"repository":{"full_name":"botfam/botfam"}}`)...)
-				}
-				b = append(b, ']')
-				_, _ = w.Write(b)
-			case "2":
-				// A short page ends pagination.
-				_, _ = w.Write([]byte(`[{"id":51,"unread":true,"subject":{"type":"Issue"},"repository":{"full_name":"botfam/botfam"}}]`))
-			default:
-				t.Errorf("unexpected extra page request: %s", page)
-				_, _ = w.Write([]byte(`[]`))
+			// Must hit the repo-scoped endpoint so Gitea filters server-side.
+			if r.URL.Path != "/api/v1/repos/botfam/botfam/notifications" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
 			}
+			if r.URL.Query().Get("status-types") != "unread" {
+				t.Errorf("expected status-types=unread, got %q", r.URL.RawQuery)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":7,"unread":true,"subject":{"title":"PR","type":"Pull","html_url":"http://h/botfam/botfam/pulls/9"},"repository":{"full_name":"botfam/botfam"}}]`))
 		}),
 	}
-	ns, err := c.ListAllUnreadNotifications()
+	ns, err := c.ListUnreadRepoNotifications("botfam/botfam")
 	if err != nil {
-		t.Fatalf("ListAllUnreadNotifications: %v", err)
+		t.Fatalf("ListUnreadRepoNotifications: %v", err)
 	}
-	if len(ns) != 51 {
-		t.Fatalf("got %d notifications across pages, want 51", len(ns))
+	if len(ns) != 1 || ns[0].ID != 7 || ns[0].Repository.FullName != "botfam/botfam" {
+		t.Errorf("unexpected notifications: %+v", ns)
 	}
-	if len(pages) != 2 {
-		t.Errorf("made %d page requests, want exactly 2 (stop on short page)", len(pages))
-	}
-	if ns[50].ID != 51 {
-		t.Errorf("last notification id = %d, want 51 (from page 2)", ns[50].ID)
-	}
-}
-
-func TestListAllUnreadNotificationsCapReturnsError(t *testing.T) {
-	defer func(orig int) { maxNotificationPages = orig }(maxNotificationPages)
-	maxNotificationPages = 2
-
-	calls := 0
-	c := &Client{
-		BaseURL: "http://forge.test", Token: "t",
-		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
-			calls++
-			// Every page is full (== limit), so a short page is never seen and the
-			// cap is exhausted: the scan is incomplete.
-			var b []byte
-			b = append(b, '[')
-			for i := 1; i <= 50; i++ {
-				if i > 1 {
-					b = append(b, ',')
-				}
-				b = append(b, []byte(`{"id":`+itoa(i)+`,"unread":true,"subject":{"type":"Issue"},"repository":{"full_name":"botfam/botfam"}}`)...)
-			}
-			b = append(b, ']')
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(b)
-		}),
-	}
-	ns, err := c.ListAllUnreadNotifications()
-	if err == nil {
-		t.Fatal("expected an error when the unread set exceeds the page cap, got nil")
-	}
-	if ns != nil {
-		t.Errorf("expected nil notifications on incomplete scan, got %d", len(ns))
-	}
-	if calls != 2 {
-		t.Errorf("made %d page requests, want exactly 2 (the cap)", calls)
-	}
-}
-
-func itoa(i int) string {
-	if i == 0 {
-		return "0"
-	}
-	var b []byte
-	for i > 0 {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
-	}
-	return string(b)
 }
 
 func TestGetSubject(t *testing.T) {

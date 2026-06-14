@@ -175,7 +175,7 @@ func TestCheckpointAndResumeSeq(t *testing.T) {
 	w.Append(Event{Source: SourceIRC, Text: "a"})
 	w.Append(Event{Source: SourceIRC, Text: "b"})
 	w.Append(Event{Source: SourceForge, Number: 1})
-	w.Checkpoint(Cursors{IRCLogOffset: 4096, ForgeLastNotificationID: 2025})
+	w.Checkpoint(Cursors{IRCLogOffset: 4096})
 	// One more event after the checkpoint, so resume must count past the meta.
 	w.Append(Event{Source: SourceForge, Number: 2})
 	w.Close()
@@ -186,8 +186,8 @@ func TestCheckpointAndResumeSeq(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer w2.Close()
-	if got := w2.Cursors(); got.IRCLogOffset != 4096 || got.ForgeLastNotificationID != 2025 {
-		t.Errorf("restored cursors = %+v, want {4096, 2025}", got)
+	if got := w2.Cursors(); got.IRCLogOffset != 4096 {
+		t.Errorf("restored cursors = %+v, want IRCLogOffset 4096", got)
 	}
 	irc, _ := w2.Append(Event{Source: SourceIRC, Text: "c"})
 	if irc.Seq != 3 {
@@ -206,9 +206,9 @@ func TestLastMeta(t *testing.T) {
 	}
 	w, _ := OpenWriter(path)
 	w.Append(Event{Source: SourceIRC, Text: "x"})
-	w.Checkpoint(Cursors{ForgeLastNotificationID: 100})
+	w.Checkpoint(Cursors{IRCLogOffset: 100})
 	w.Append(Event{Source: SourceIRC, Text: "y"})
-	w.Checkpoint(Cursors{ForgeLastNotificationID: 200})
+	w.Checkpoint(Cursors{IRCLogOffset: 200})
 	w.Append(Event{Source: SourceIRC, Text: "z"})
 	w.Close()
 
@@ -216,7 +216,7 @@ func TestLastMeta(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LastMeta = (ok=%v, err=%v)", ok, err)
 	}
-	if meta.UpstreamCursors == nil || meta.UpstreamCursors.ForgeLastNotificationID != 200 {
+	if meta.UpstreamCursors == nil || meta.UpstreamCursors.IRCLogOffset != 200 {
 		t.Errorf("LastMeta returned %+v, want the second checkpoint (200)", meta.UpstreamCursors)
 	}
 }
@@ -228,7 +228,7 @@ func TestLastMetaBackwardScanMultiChunk(t *testing.T) {
 
 	path := newMailbox(t)
 	w, _ := OpenWriter(path)
-	w.Checkpoint(Cursors{ForgeLastNotificationID: 1})
+	w.Checkpoint(Cursors{IRCLogOffset: 1})
 	// Many events (each longer than a chunk) after the meta, so the scan must
 	// walk back across several chunks to find it.
 	for i := 0; i < 50; i++ {
@@ -240,7 +240,7 @@ func TestLastMetaBackwardScanMultiChunk(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("LastMeta = (ok=%v, err=%v)", ok, err)
 	}
-	if meta.Source != SourceMeta || meta.UpstreamCursors.ForgeLastNotificationID != 1 {
+	if meta.Source != SourceMeta || meta.UpstreamCursors.IRCLogOffset != 1 {
 		t.Errorf("multi-chunk LastMeta returned %+v", meta)
 	}
 }
