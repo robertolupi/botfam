@@ -141,6 +141,11 @@ type discoveryData struct {
 	tmpl        docs.TemplateData
 	health      []healthCheck
 	projections []wiki.Projection
+	// resolvedVia records which tier of resolveDiscoveryWorkDir produced the
+	// work dir (collab_root|cwd|roots|pwd|cwd_fallback|default|work_dir). It is
+	// surfaced on the root + index so an agent sees how its home was found
+	// instead of reverse-engineering the mount topology (#137; seeds botfam:trace).
+	resolvedVia string
 }
 
 // buildDiscoveryData resolves the fam-specific runtime config for workDir. It
@@ -179,31 +184,38 @@ func buildDiscoveryData(workDir string) discoveryData {
 //  4. the launching shell's PWD
 //  5. server CWD as a last resort (surfaces <unresolved> + a health warning)
 func (s *server) resolveDiscoveryWorkDir(ctx context.Context) string {
+	dir, _ := s.resolveDiscoveryWorkDirVia(ctx)
+	return dir
+}
+
+// resolveDiscoveryWorkDirVia is resolveDiscoveryWorkDir plus the label of the
+// tier that produced the result, for the resolved_via observability field (#137).
+func (s *server) resolveDiscoveryWorkDirVia(ctx context.Context) (dir, via string) {
 	if r := os.Getenv("COLLAB_ROOT"); r != "" {
-		return r
+		return r, "collab_root"
 	}
 	// A real working dir is the caller's context (per-project mounts, the CLI,
 	// tests) — use it. Only "/" (a system-wide mount's CWD) is treated as "no
 	// context" so we fall through to client roots / PWD.
 	if cwd, err := os.Getwd(); err == nil && cwd != "/" {
-		return cwd
+		return cwd, "cwd"
 	}
 	if s.mcpSrv != nil {
 		if res, err := s.mcpSrv.RequestRoots(ctx, mcplib.ListRootsRequest{}); err == nil && res != nil {
 			for _, root := range res.Roots {
 				if p := fileURIToPath(root.URI); p != "" && famResolvable(p) {
-					return p
+					return p, "roots"
 				}
 			}
 		}
 	}
 	if p := os.Getenv("PWD"); p != "" && famResolvable(p) {
-		return p
+		return p, "pwd"
 	}
 	if cwd, err := os.Getwd(); err == nil {
-		return cwd
+		return cwd, "cwd_fallback"
 	}
-	return "."
+	return ".", "default"
 }
 
 // famResolvable reports whether dir sits inside a fam (a fam.toml is reachable).
@@ -285,6 +297,9 @@ func renderRoot(d discoveryData) []byte {
 	fmt.Fprintf(&b, "- **fam**: %s\n", orPlaceholder(t.Fam, "<unresolved>"))
 	fmt.Fprintf(&b, "- **actor**: %s\n", orPlaceholder(t.Actor, "<unresolved>"))
 	fmt.Fprintf(&b, "- **main channel**: %s\n", orPlaceholder(t.MainChannel, "<unresolved>"))
+	if d.resolvedVia != "" {
+		fmt.Fprintf(&b, "- **resolved via**: %s\n", d.resolvedVia)
+	}
 
 	b.WriteString("\n## Start here\n\n")
 	b.WriteString("- `botfam:///index.json` — this orientation as structured data\n")
@@ -332,8 +347,9 @@ type discoveryIndex struct {
 		Actor       string `json:"actor"`
 		MainChannel string `json:"main_channel"`
 	} `json:"fam"`
-	Resources []string      `json:"resources"`
-	Health    []healthCheck `json:"health"`
+	ResolvedVia string        `json:"resolved_via,omitempty"`
+	Resources   []string      `json:"resources"`
+	Health      []healthCheck `json:"health"`
 }
 
 func renderIndexJSON(d discoveryData) ([]byte, error) {
@@ -344,6 +360,7 @@ func renderIndexJSON(d discoveryData) ([]byte, error) {
 	idx.Fam.Name = d.tmpl.Fam
 	idx.Fam.Actor = d.tmpl.Actor
 	idx.Fam.MainChannel = d.tmpl.MainChannel
+	idx.ResolvedVia = d.resolvedVia
 	idx.Resources = []string{
 		"botfam:///",
 		"botfam:///index.json",

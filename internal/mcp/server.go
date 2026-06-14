@@ -116,13 +116,18 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	// caller's worktree (#132).
 	if name == "orient" {
 		wd := argString(args, "work_dir")
+		via := "work_dir"
 		if wd == "" {
 			wd = os.Getenv("PWD")
+			via = "pwd"
 		}
 		if wd == "" {
 			wd = "."
+			via = "default"
 		}
-		body, err := renderIndexJSON(buildDiscoveryData(wd))
+		d := buildDiscoveryData(wd)
+		d.resolvedVia = via
+		body, err := renderIndexJSON(d)
 		if err != nil {
 			return nil, err
 		}
@@ -483,7 +488,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 }
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
-	cwd := s.resolveDiscoveryWorkDir(ctx)
+	cwd, resolvedVia := s.resolveDiscoveryWorkDirVia(ctx)
 	localRepoRoot := fam.RepoPath(cwd)
 
 	u, err := url.Parse(req.Params.URI)
@@ -549,6 +554,7 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		dataWorkDir = targetRepoRoot
 	}
 	d := buildDiscoveryData(dataWorkDir)
+	d.resolvedVia = resolvedVia
 
 	path := filepath.Clean(u.Path)
 	if u.Path == "" || path == "." {

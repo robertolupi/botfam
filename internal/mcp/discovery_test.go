@@ -57,6 +57,31 @@ func TestOrientToolReturnsDiscoveryRoot(t *testing.T) {
 	}
 }
 
+// TestResolveDiscoveryWorkDirViaLabelsTier verifies the resolved_via label
+// tracks which tier of the resolution chain fired (#137).
+func TestResolveDiscoveryWorkDirViaLabelsTier(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("COLLAB_ROOT", root)
+	s := &server{}
+	dir, via := s.resolveDiscoveryWorkDirVia(context.Background())
+	if dir != root || via != "collab_root" {
+		t.Errorf("resolveDiscoveryWorkDirVia = (%q, %q), want (%q, %q)", dir, via, root, "collab_root")
+	}
+}
+
+// TestRenderIndexJSONIncludesResolvedVia verifies resolved_via is surfaced on
+// the structured index (#137).
+func TestRenderIndexJSONIncludesResolvedVia(t *testing.T) {
+	d := discoveryData{resolvedVia: "cwd"}
+	body, err := renderIndexJSON(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "\"resolved_via\": \"cwd\"") {
+		t.Errorf("index.json missing resolved_via: %s", body)
+	}
+}
+
 // TestBuildDiscoveryDataPrefersRegistryName verifies the human fam name from
 // fam.toml wins over the resolver's root-set id (#130).
 func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
