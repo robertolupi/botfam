@@ -23,10 +23,15 @@ type Notification struct {
 	} `json:"repository"`
 }
 
-// ListUnreadNotifications returns the agent's unread notification threads across
-// all repositories — every subject type, not just pull requests.
+// notificationsPageLimit is the per-page size for notification fetches.
+const notificationsPageLimit = 50
+
+// ListUnreadNotifications returns the first page of the agent's unread
+// notification threads across all repositories — every subject type, not just
+// pull requests. Sufficient for callers that only need "is anything unread?"
+// (e.g. forge-wait).
 func (c *Client) ListUnreadNotifications() ([]Notification, error) {
-	b, err := c.request("GET", "notifications?status-types=unread&page=1&limit=50", nil)
+	b, err := c.request("GET", fmt.Sprintf("notifications?status-types=unread&page=1&limit=%d", notificationsPageLimit), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -36,6 +41,28 @@ func (c *Client) ListUnreadNotifications() ([]Notification, error) {
 	}
 	return ns, nil
 }
+
+// ListUnreadRepoNotifications returns one page of unread notification threads
+// scoped to a single repo (owner/repo), via Gitea's repo-scoped notifications
+// endpoint. Server-side scoping means a Gitea account shared across fams never
+// returns another fam's threads, so the mailbox ingester needs no client-side
+// repo filter. The ingester drains this a page at a time (marking each thread
+// read), so a single page is all that's needed per call.
+func (c *Client) ListUnreadRepoNotifications(repo string) ([]Notification, error) {
+	b, err := c.request("GET", fmt.Sprintf("repos/%s/notifications?status-types=unread&page=1&limit=%d", repo, notificationsPageLimit), nil)
+	if err != nil {
+		return nil, err
+	}
+	var ns []Notification
+	if err := json.Unmarshal(b, &ns); err != nil {
+		return nil, fmt.Errorf("decode notifications: %w", err)
+	}
+	return ns, nil
+}
+
+// NotificationsPageLimit is the page size the repo-scoped fetch uses; the
+// ingester reads it to know when a page was full (more may remain).
+func NotificationsPageLimit() int { return notificationsPageLimit }
 
 // MarkNotificationRead marks a single notification thread read so it does not
 // wake the agent again. Requires the write:notification token scope.

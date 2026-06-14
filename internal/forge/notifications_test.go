@@ -37,6 +37,30 @@ func TestListUnreadNotifications(t *testing.T) {
 	}
 }
 
+func TestListUnreadRepoNotifications(t *testing.T) {
+	c := &Client{
+		BaseURL: "http://forge.test", Token: "t",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			// Must hit the repo-scoped endpoint so Gitea filters server-side.
+			if r.URL.Path != "/api/v1/repos/botfam/botfam/notifications" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			if r.URL.Query().Get("status-types") != "unread" {
+				t.Errorf("expected status-types=unread, got %q", r.URL.RawQuery)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":7,"unread":true,"subject":{"title":"PR","type":"Pull","html_url":"http://h/botfam/botfam/pulls/9"},"repository":{"full_name":"botfam/botfam"}}]`))
+		}),
+	}
+	ns, err := c.ListUnreadRepoNotifications("botfam/botfam")
+	if err != nil {
+		t.Fatalf("ListUnreadRepoNotifications: %v", err)
+	}
+	if len(ns) != 1 || ns[0].ID != 7 || ns[0].Repository.FullName != "botfam/botfam" {
+		t.Errorf("unexpected notifications: %+v", ns)
+	}
+}
+
 func TestGetSubject(t *testing.T) {
 	c := &Client{
 		BaseURL: "http://forge.test", Token: "t",

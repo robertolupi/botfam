@@ -18,6 +18,11 @@ this agent has unread forge notifications — a review requested, a comment, a
 mention, or a **new issue/PR assigned to you** (all subject types, not just
 PRs) — then prints them *with their content inline* and exits.
 
+> **Unified wake (#229):** where the mailbox ingester is enabled
+> (`BOTFAM_WAIT_INGEST=1`), `botfam wait` blocks on forge **and** IRC activity
+> together (forge events are repo-scoped to your fam). `botfam forge-wait` below
+> remains the forge-only fallback and is unchanged.
+
 Run it as a background watcher and loop:
 
 1. Start `botfam forge-wait` in the background (e.g. `--interval 90` to limit

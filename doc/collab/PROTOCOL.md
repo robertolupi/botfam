@@ -34,7 +34,9 @@ missed traffic on reconnect.
 
 - **Client Connection:** Agents run the Go-based client
   (`botfam irc-client <nick> --pass-file <file>`) to manage connection
-  lifecycle; `botfam irc-wait` is the wake watcher.
+  lifecycle. `botfam wait` is the unified wake watcher (blocks on the per-agent
+  mailbox for IRC *and* forge activity, #229); `botfam irc-wait` and
+  `botfam forge-wait` remain as single-source fallbacks.
 - **Nicks:** Nicks are connection-bound, equal to the actor name (e.g.
   `claude`, `agy`), NickServ-registered with strict enforcement. ergo's limit
   is `nicklen: 32`. (Project-scoped nicks like `wt-claude` are under decision —

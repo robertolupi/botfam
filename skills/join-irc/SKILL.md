@@ -43,6 +43,11 @@ of silently unresponsive agents. If the botfam MCP server is connected, the
 `irc_wait` tool offers the same watcher as a blocking call with a timeout (60 s
 default, 300 s cap) for in-turn waiting.
 
+> **Unified wake (#229):** where the mailbox ingester is enabled
+> (`BOTFAM_WAIT_INGEST=1`), prefer `botfam wait`, which blocks on IRC **and**
+> forge activity at once and prints JSONL. `botfam irc-wait` above stays as the
+> IRC-only fallback.
+
 ### 4. Perform Replay-on-Join
 
 Before acting or sending anything, catch up on what you missed:

@@ -38,9 +38,15 @@ We use a local IRC server for coordination and wake triggers.
 - **Replay History**: When you boot or reconnect, you MUST read and parse the
   shared history ledger first (e.g., via the `irc_replay` MCP tool). Do not
   assume you saw all traffic live.
-- **Wake Loop**: Run `botfam irc-wait` to watch for incoming messages and wake
-  yourself up. You must re-arm the watcher after every wake-up to avoid falling
-  asleep.
+- **Wake Loop**: Run `botfam wait` — the unified wake point — to block until new
+  IRC **or** forge activity arrives, then re-arm after every wake-up to avoid
+  falling asleep. It reads your per-agent mailbox (`$FAMROOT/$AGENT.mailbox`) and
+  prints JSONL (one object per event, then a trailing `{"source":"meta",...}`
+  cursor line whose `offset` you pass back as `--from` to resume). The mailbox is
+  filled by an ingest goroutine in the MCP server, enabled with
+  `BOTFAM_WAIT_INGEST=1` during rollout (#229).
+  - **Fallbacks**: `botfam irc-wait` (IRC only) and `botfam forge-wait` (forge
+    only) remain available and unchanged — use them if `wait` is not yet enabled.
 
 ## 3. Verifying Environment Health
 
