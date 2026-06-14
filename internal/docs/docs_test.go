@@ -8,7 +8,7 @@ import (
 )
 
 func TestReadEmbeddedDocs(t *testing.T) {
-	slugs := []string{"start", "protocol", "ops", "operator", "review", "worktrees", "markdown"}
+	slugs := []string{"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown"}
 	for _, slug := range slugs {
 		content, err := Read(slug)
 		if err != nil {
@@ -82,7 +82,7 @@ func TestTemplateRendering(t *testing.T) {
 		IntegrationBranch: "testbranch",
 	}
 
-	slugs := []string{"start", "protocol", "ops", "operator", "review", "worktrees", "markdown"}
+	slugs := []string{"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown"}
 	for _, slug := range slugs {
 		content, err := Render(slug, data)
 		if err != nil {
@@ -120,6 +120,10 @@ func TestTemplateRendering(t *testing.T) {
 		case "protocol":
 			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "#testmain") || !strings.Contains(contentStr, "testbranch") {
 				t.Errorf("rendered protocol.md missing expected placeholders: %s", contentStr)
+			}
+		case "bootstrap":
+			if !strings.Contains(contentStr, "testfam") {
+				t.Errorf("rendered bootstrap.md missing expected placeholders: %s", contentStr)
 			}
 		}
 	}

@@ -123,7 +123,7 @@ func markdownResource(uri string, content []byte) []mcplib.ResourceContents {
 // discoverySlugs is the ordered set of embedded generic docs served under
 // botfam:///docs/<slug>. It mirrors the corpus in internal/docs (#117).
 var discoverySlugs = []string{
-	"start", "protocol", "ops", "operator", "review", "worktrees", "markdown",
+	"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown",
 }
 
 // healthCheck is one entry in the discovery root's health report. A non-"ok"
