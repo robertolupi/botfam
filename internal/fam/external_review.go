@@ -68,6 +68,7 @@ type externalReviewOpts struct {
 	redact            bool
 	withDiffs         bool
 	interactionOnly   bool
+	allowZeroReviews  bool
 	ollama            []string
 	openaiM           []string
 	gemini            []string
@@ -118,6 +119,7 @@ func NewExternalReviewCmd() *cobra.Command {
 	f.BoolVar(&noRedact, "no-redact", false, "milestone sugar: disable redaction")
 	f.BoolVar(&opts.withDiffs, "with-diffs", false, "milestone sugar: append full raw diffs")
 	f.BoolVar(&opts.interactionOnly, "interaction-only", false, "milestone sugar: omit the technical diff summary")
+	f.BoolVar(&opts.allowZeroReviews, "allow-zero-reviews", false, "succeed even if no model review was produced (dry runs)")
 	return c
 }
 
@@ -135,6 +137,7 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 	openaiM := opts.openaiM
 	gemini := opts.gemini
 	materials := opts.materials
+	allowZeroReviews := opts.allowZeroReviews
 
 	if len(materials) == 0 && pr == "" && sessionFile == "" && milestoneName == "" {
 		return fmt.Errorf("no material file(s) and no --pr <index>, --session-file <path>, or --milestone <name> (see --help)")
@@ -221,7 +224,9 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 			contentStr = redactSecrets(contentStr)
 		}
 		material.WriteString(contentStr)
-		_ = os.WriteFile(filepath.Join(outDir, "session.md"), []byte(contentStr), 0o644)
+		if err := os.WriteFile(filepath.Join(outDir, "session.md"), []byte(contentStr), 0o644); err != nil {
+			return fmt.Errorf("failed to write session.md: %w", err)
+		}
 		fmt.Fprintf(out, "read session file material: %d bytes\n", len(contentStr))
 	} else if pr != "" {
 		m, err := assemblePRMaterial(pr)
@@ -229,7 +234,9 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 			return err
 		}
 		material.WriteString(m)
-		_ = os.WriteFile(filepath.Join(outDir, "pr-"+pr+".md"), []byte(m), 0o644)
+		if err := os.WriteFile(filepath.Join(outDir, "pr-"+pr+".md"), []byte(m), 0o644); err != nil {
+			return fmt.Errorf("failed to write pr-%s.md: %w", pr, err)
+		}
 		fmt.Fprintf(out, "assembled PR #%s material: %d bytes\n", pr, len(m))
 	} else {
 		for _, f := range materials {
@@ -297,9 +304,15 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 	for _, r := range ran {
 		fmt.Fprintf(&manifest, "  - %s\n", r)
 	}
-	_ = os.WriteFile(filepath.Join(outDir, "MANIFEST.txt"), []byte(manifest.String()), 0o644)
+	if err := os.WriteFile(filepath.Join(outDir, "MANIFEST.txt"), []byte(manifest.String()), 0o644); err != nil {
+		return fmt.Errorf("failed to write MANIFEST.txt: %w", err)
+	}
 
 	fmt.Fprintf(out, "\nwrote %d review(s) to: %s\n", len(ran), outDir)
+	if len(ran) == 0 && !allowZeroReviews {
+		return fmt.Errorf("no model reviews were produced (every provider was skipped or failed); "+
+			"check API keys and model availability, or pass --allow-zero-reviews for a dry run. output dir: %s", outDir)
+	}
 	fmt.Fprintln(out, "NEXT: spawn a consolidation subagent on this dir; do NOT read the raw reviews into the main context.")
 	return nil
 }
