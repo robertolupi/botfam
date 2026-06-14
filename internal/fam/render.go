@@ -20,10 +20,16 @@ type mcpServer struct {
 }
 
 // RenderClaudeMCP writes <worktree>/.mcp.json for a claude-code agent: the
-// botfam stdio server plus the forge (gitea-mcp-server) pointed at forgeURL with
-// the per-fam token file. This is the project-scoped renderer from
+// botfam stdio server plus the forge MCP pointed at forgeURL with the per-fam
+// token file. This is the project-scoped renderer from
 // wiki/proposal-unified-fam-config §4.5 — forgeURL/tokenPath come from the one
 // resolver, so the config cannot disagree with the health check (#183/#184).
+//
+// Both server commands are the absolute `~/bin/<binary>` paths that
+// tools/install.sh produces (botfam + the vendored gitea-mcp-server from the
+// third_party/gitea-mcp submodule), not bare PATH names — so a brew-installed
+// gitea-mcp-server (or a stale botfam) earlier on PATH cannot shadow the
+// vendored builds (the ambiguity that bit deep-cuts).
 func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
 	if forgeURL == "" {
 		return fmt.Errorf("cannot render .mcp.json: forge_url is empty (set it in fam.toml)")
@@ -31,10 +37,15 @@ func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
 	if tokenPath == "" {
 		return fmt.Errorf("cannot render .mcp.json: token path is empty")
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home dir: %w", err)
+	}
+	binDir := filepath.Join(home, "bin") // tools/install.sh install target
 	cfg := mcpConfig{MCPServers: map[string]mcpServer{
-		"botfam": {Command: "botfam", Args: []string{"serve"}},
+		"botfam": {Command: filepath.Join(binDir, "botfam"), Args: []string{"serve"}},
 		"forge": {
-			Command: "gitea-mcp-server",
+			Command: filepath.Join(binDir, "gitea-mcp-server"),
 			Args:    []string{"-t", "stdio", "-H", forgeURL},
 			Env:     map[string]string{"GITEA_ACCESS_TOKEN_FILE": tokenPath},
 		},

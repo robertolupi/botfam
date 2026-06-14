@@ -30,8 +30,14 @@ func TestRenderClaudeMCP(t *testing.T) {
 	if len(forge.Args) < 4 || forge.Args[3] != "http://gitea.home.rlupi.com:3000/" {
 		t.Errorf("forge args = %v", forge.Args)
 	}
-	if bf, ok := cfg.MCPServers["botfam"]; !ok || bf.Command != "botfam" {
-		t.Errorf("botfam server = %+v ok=%v", bf, ok)
+	home, _ := os.UserHomeDir()
+	wantForge := filepath.Join(home, "bin", "gitea-mcp-server")
+	if forge.Command != wantForge {
+		t.Errorf("forge command = %q, want vendored %q", forge.Command, wantForge)
+	}
+	wantBotfam := filepath.Join(home, "bin", "botfam")
+	if bf, ok := cfg.MCPServers["botfam"]; !ok || bf.Command != wantBotfam {
+		t.Errorf("botfam server = %+v ok=%v, want command %q", bf, ok, wantBotfam)
 	}
 }
 
