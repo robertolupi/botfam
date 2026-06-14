@@ -59,7 +59,7 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"Keep this file lightweight: substantive rules belong in PROTOCOL.md, never\n" +
 	"here. This file is generated from the same source as the other harness files.\n"
 
-type repoSkill struct {
+type RepoSkill struct {
 	Name        string
 	Description string
 	Path        string
@@ -150,7 +150,7 @@ func CheckAgentDocs(repoRoot string) ([]string, error) {
 }
 
 func RenderAgentDocs(repoRoot string) ([]byte, error) {
-	skills, err := readRepoSkills(repoRoot)
+	skills, err := ReadRepoSkills(repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func RenderAgentDocs(repoRoot string) ([]byte, error) {
 
 	var b bytes.Buffer
 	if err := tmpl.Execute(&b, struct {
-		Skills []repoSkill
+		Skills []RepoSkill
 	}{
 		Skills: skills,
 	}); err != nil {
@@ -177,7 +177,7 @@ func RenderAgentDocs(repoRoot string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func readRepoSkills(repoRoot string) ([]repoSkill, error) {
+func ReadRepoSkills(repoRoot string) ([]RepoSkill, error) {
 	skillsDir := filepath.Join(repoRoot, "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -187,7 +187,7 @@ func readRepoSkills(repoRoot string) ([]repoSkill, error) {
 		return nil, fmt.Errorf("read skills directory: %w", err)
 	}
 
-	var skills []repoSkill
+	var skills []RepoSkill
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -211,19 +211,19 @@ func readRepoSkills(repoRoot string) ([]repoSkill, error) {
 	return skills, nil
 }
 
-func readRepoSkill(path, rel string) (repoSkill, error) {
+func readRepoSkill(path, rel string) (RepoSkill, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return repoSkill{}, nil
+			return RepoSkill{}, nil
 		}
-		return repoSkill{}, fmt.Errorf("read %s: %w", rel, err)
+		return RepoSkill{}, fmt.Errorf("read %s: %w", rel, err)
 	}
 	name, desc, err := parseSkillFrontmatter(string(data))
 	if err != nil {
-		return repoSkill{}, fmt.Errorf("%s: %w", rel, err)
+		return RepoSkill{}, fmt.Errorf("%s: %w", rel, err)
 	}
-	return repoSkill{Name: name, Description: desc, Path: rel}, nil
+	return RepoSkill{Name: name, Description: desc, Path: rel}, nil
 }
 
 func parseSkillFrontmatter(s string) (string, string, error) {
