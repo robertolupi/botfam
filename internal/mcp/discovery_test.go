@@ -2,12 +2,14 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	"github.com/robertolupi/botfam/internal/docs"
 )
 
 func TestFileURIToPath(t *testing.T) {
@@ -184,5 +186,67 @@ func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
 	d := buildDiscoveryData(root)
 	if d.tmpl.Fam != "myfam" {
 		t.Errorf("Fam = %q, want %q (registry name must win over the resolver id)", d.tmpl.Fam, "myfam")
+	}
+}
+
+func TestIRCClientHealthCheck(t *testing.T) {
+	workDir := t.TempDir()
+	actor := "testactor"
+	ircDir := filepath.Join(workDir, "scratch", "irc", actor)
+	if err := os.MkdirAll(ircDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	fifo := filepath.Join(ircDir, "in")
+	if err := os.WriteFile(fifo, []byte(""), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Case 1: FIFO exists but no pidfile exists -> should be warn
+	t.Setenv("COLLAB_ROOT", workDir)
+	t.Setenv("COLLAB_ACTOR", actor)
+
+	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor})
+	var ircCheck *healthCheck
+	for i := range checks {
+		if checks[i].Check == "irc_client" {
+			ircCheck = &checks[i]
+		}
+	}
+	if ircCheck == nil {
+		t.Fatal("irc_client health check not found")
+	}
+	if ircCheck.Status != "warn" {
+		t.Errorf("expected status warn when no pidfile exists, got %q", ircCheck.Status)
+	}
+
+	// Case 2: PID file exists but contains invalid/dead PID -> should be warn
+	pidFile := filepath.Join(ircDir, "pid")
+	if err := os.WriteFile(pidFile, []byte("999999\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor})
+	for i := range checks {
+		if checks[i].Check == "irc_client" {
+			ircCheck = &checks[i]
+		}
+	}
+	if ircCheck.Status != "warn" {
+		t.Errorf("expected status warn when dead pidfile exists, got %q", ircCheck.Status)
+	}
+
+	// Case 3: PID file exists and contains our own PID (which is alive!) -> should be ok
+	myPid := os.Getpid()
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", myPid)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor})
+	for i := range checks {
+		if checks[i].Check == "irc_client" {
+			ircCheck = &checks[i]
+		}
+	}
+	if ircCheck.Status != "ok" {
+		t.Errorf("expected status ok when live pidfile exists, got %q", ircCheck.Status)
 	}
 }

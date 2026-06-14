@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
@@ -300,10 +301,22 @@ func discoveryHealth(workDir string, t docs.TemplateData) []healthCheck {
 		}
 	}
 
-	// IRC client: the live-input FIFO the client creates under scratch/irc/<actor>.
+	// IRC client: check that a live client backs the FIFO by verifying the pidfile.
 	if t.Actor != "" {
 		fifo := filepath.Join(workDir, "scratch", "irc", t.Actor, "in")
-		if fileExists(fifo) {
+		pidFile := filepath.Join(workDir, "scratch", "irc", t.Actor, "pid")
+		clientRunning := false
+		if fileExists(fifo) && fileExists(pidFile) {
+			if pidData, err := os.ReadFile(pidFile); err == nil {
+				var pid int
+				if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err == nil && pid > 0 {
+					if processExists(pid) {
+						clientRunning = true
+					}
+				}
+			}
+		}
+		if clientRunning {
 			checks = append(checks, healthCheck{"irc_client", "ok", ""})
 		} else {
 			checks = append(checks, healthCheck{"irc_client", "warn",
@@ -317,6 +330,17 @@ func discoveryHealth(workDir string, t docs.TemplateData) []healthCheck {
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
+}
+
+func processExists(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true
+	}
+	if err == syscall.ESRCH {
+		return false
+	}
+	return true
 }
 
 // renderRoot builds the human-readable botfam:/// orientation markdown.
