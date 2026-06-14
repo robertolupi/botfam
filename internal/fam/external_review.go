@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -311,6 +312,8 @@ func runReview(ctx context.Context, baseURL, apiKey, model, prompt string) (stri
 	} else {
 		opts = append(opts, option.WithAPIKey("none")) // ollama ignores it
 	}
+	httpClient := &http.Client{Timeout: 300 * time.Second}
+	opts = append(opts, option.WithHTTPClient(httpClient))
 	client := openai.NewClient(opts...)
 	resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(model),
