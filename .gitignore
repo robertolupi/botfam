@@ -1,5 +1,7 @@
 .gocache/
 .gomodcache/
+# Workspace-local caches used by managed harness verification.
+.cache/
 /botfam
 .claude/settings.local.json
 .mcp.json
