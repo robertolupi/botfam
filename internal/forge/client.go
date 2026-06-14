@@ -159,6 +159,20 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			if baseURL == "" {
 				baseURL = readConfigValueFromFamTOML(famTOMLPath, "forge_url", "forge-url")
 			}
+			if owner == "" || repo == "" {
+				repVal := readConfigValueFromFamTOML(famTOMLPath, "repository")
+				if repVal != "" {
+					parts := strings.Split(repVal, "/")
+					if len(parts) == 2 {
+						if owner == "" {
+							owner = parts[0]
+						}
+						if repo == "" {
+							repo = parts[1]
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -179,21 +193,27 @@ func NewClient(workDir string, actor string) (*Client, error) {
 	}
 
 	if baseURL == "" || owner == "" || repo == "" {
-		cmd := exec.Command("git", "config", "--get", fmt.Sprintf("remote.%s.url", remoteName))
-		cmd.Dir = workDir
-		var out bytes.Buffer
-		cmd.Stdout = &out
-		if err := cmd.Run(); err == nil {
-			gBase, gOwner, gRepo, parseErr := parseGitRemoteURL(out.String())
-			if parseErr == nil {
-				if baseURL == "" {
-					baseURL = gBase
-				}
-				if owner == "" {
-					owner = gOwner
-				}
-				if repo == "" {
-					repo = gRepo
+		for _, rName := range []string{remoteName, "gitea", "origin"} {
+			if rName == "" {
+				continue
+			}
+			cmd := exec.Command("git", "config", "--get", fmt.Sprintf("remote.%s.url", rName))
+			cmd.Dir = workDir
+			var out bytes.Buffer
+			cmd.Stdout = &out
+			if err := cmd.Run(); err == nil {
+				gBase, gOwner, gRepo, parseErr := parseGitRemoteURL(out.String())
+				if parseErr == nil {
+					if baseURL == "" {
+						baseURL = gBase
+					}
+					if owner == "" {
+						owner = gOwner
+					}
+					if repo == "" {
+						repo = gRepo
+					}
+					break
 				}
 			}
 		}
@@ -427,6 +447,23 @@ func resolveFamTOMLPath(workDir string) string {
 	if root := os.Getenv("COLLAB_ROOT"); root != "" {
 		return filepath.Join(root, "fam.toml")
 	}
+
+	// Prioritize new unified-fam-config path: parent of the git toplevel directory
+	cmdToplevel := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmdToplevel.Dir = workDir
+	var outToplevel bytes.Buffer
+	cmdToplevel.Stdout = &outToplevel
+	if err := cmdToplevel.Run(); err == nil {
+		gitRoot := strings.TrimSpace(outToplevel.String())
+		if gitRoot != "" {
+			famTOML := filepath.Join(filepath.Dir(gitRoot), "fam.toml")
+			if _, err := os.Stat(famTOML); err == nil {
+				return famTOML
+			}
+		}
+	}
+
+	// Fallback to old ~/.botfam registry path
 	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
 	cmd.Dir = workDir
 	var out bytes.Buffer

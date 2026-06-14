@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -230,5 +233,90 @@ func TestClient_RequestRespectsHTTPClientTimeout(t *testing.T) {
 	_, err := client.GetPR(1)
 	if err == nil {
 		t.Fatal("expected a timeout error from a stalled transport, got nil")
+	}
+}
+
+func TestNewClient_Resolution(t *testing.T) {
+	// Set up a temporary directory to act as a git worktree root
+	tempDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(tempDir); err == nil {
+		tempDir = eval
+	}
+
+	// Create a mock fam.toml in the parent directory to simulate unified-fam-config
+	// structure where famDir contains the agent worktree (tempDir)
+	famDir := filepath.Dir(tempDir)
+	famTOML := filepath.Join(famDir, "fam.toml")
+
+	// Clean up any existing fam.toml in parent temp directory after test
+	defer os.Remove(famTOML)
+
+	// Setenv COLLAB_ROOT empty so it falls back to git/fam.toml resolution
+	t.Setenv("COLLAB_ROOT", "")
+	t.Setenv("GITEA_URL", "")
+	t.Setenv("GITEA_OWNER", "")
+	t.Setenv("GITEA_REPO", "")
+	t.Setenv("GITEA_TOKEN", "mock-token") // use env token to bypass token file reading
+
+	// Write unified fam.toml
+	content := `name = "test-fam"
+forge_url = "http://unified-forge:3000"
+repository = "my-owner/my-repo"
+`
+	if err := os.WriteFile(famTOML, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// We need git-init in tempDir to make git rev-parse succeed
+	runCmd := func(dir string, name string, args ...string) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("failed to run %s %v: %v", name, args, err)
+		}
+	}
+	runCmd(tempDir, "git", "init")
+
+	// Call NewClient
+	client, err := NewClient(tempDir, "agy")
+	if err != nil {
+		t.Fatalf("NewClient failed: %v", err)
+	}
+
+	if client.BaseURL != "http://unified-forge:3000/" {
+		t.Errorf("expected BaseURL http://unified-forge:3000/, got %s", client.BaseURL)
+	}
+	if client.Owner != "my-owner" {
+		t.Errorf("expected Owner my-owner, got %s", client.Owner)
+	}
+	if client.Repo != "my-repo" {
+		t.Errorf("expected Repo my-repo, got %s", client.Repo)
+	}
+	if client.Token != "mock-token" {
+		t.Errorf("expected Token mock-token, got %s", client.Token)
+	}
+
+	// Test fallback to git remote when fam.toml doesn't have forge_url/repository
+	contentNoForge := `name = "test-fam"`
+	if err := os.WriteFile(famTOML, []byte(contentNoForge), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Configure a mock remote
+	runCmd(tempDir, "git", "remote", "add", "origin", "git@github.com:git-owner/git-repo.git")
+
+	clientFallback, err := NewClient(tempDir, "agy")
+	if err != nil {
+		t.Fatalf("NewClient with fallback failed: %v", err)
+	}
+
+	if clientFallback.BaseURL != "https://github.com/" {
+		t.Errorf("expected fallback BaseURL https://github.com/, got %s", clientFallback.BaseURL)
+	}
+	if clientFallback.Owner != "git-owner" {
+		t.Errorf("expected fallback Owner git-owner, got %s", clientFallback.Owner)
+	}
+	if clientFallback.Repo != "git-repo" {
+		t.Errorf("expected fallback Repo git-repo, got %s", clientFallback.Repo)
 	}
 }

@@ -164,4 +164,46 @@ func TestResolver(t *testing.T) {
 	if !strings.Contains(err.Error(), expectedErrSub) {
 		t.Errorf("expected error containing %q, got %q", expectedErrSub, err.Error())
 	}
+
+	// Case 4: Inside a git repository under unified layout (fam.toml in parent)
+	unifiedDir := filepath.Join(tempDir, "unified-fam")
+	if err := os.Mkdir(unifiedDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if eval, err := filepath.EvalSymlinks(unifiedDir); err == nil {
+		unifiedDir = eval
+	}
+	famTOMLContent := `name = "my-unified-fam"
+slug = "muf"
+roster = ["bob"]
+
+[agent.bob]
+harness = "test-harness"
+`
+	if err := os.WriteFile(filepath.Join(unifiedDir, "fam.toml"), []byte(famTOMLContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	wtBobDir := filepath.Join(unifiedDir, "bob")
+	if err := os.Mkdir(wtBobDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, wtBobDir)
+
+	rUnified := Resolver{
+		WorkDir: wtBobDir,
+		Env:     []string{},
+	}
+	infoUnified, err := rUnified.Resolve()
+	if err != nil {
+		t.Fatalf("resolve under unified layout failed: %v", err)
+	}
+	if infoUnified.Root != unifiedDir {
+		t.Errorf("expected unified root %q, got %q", unifiedDir, infoUnified.Root)
+	}
+	if infoUnified.Name != "my-unified-fam" {
+		t.Errorf("expected unified name %q, got %q", "my-unified-fam", infoUnified.Name)
+	}
+	if infoUnified.Actor != "bob" {
+		t.Errorf("expected unified actor %q, got %q", "bob", infoUnified.Actor)
+	}
 }

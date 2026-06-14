@@ -1117,3 +1117,53 @@ func TestMcpDefaultMemoryProjection(t *testing.T) {
 		t.Errorf("memory projection not advertised in index.json: %v", idx.Resources)
 	}
 }
+
+func TestCallToolWithDotWorkDirAtRoot(t *testing.T) {
+	oldCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldCWD)
+
+	s := &server{}
+
+	baseDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(baseDir); err == nil {
+		baseDir = eval
+	}
+
+	famTOML := `name = "myfam"
+slug = "myfam"
+roster = ["agy"]
+
+[agent.agy]
+harness = "antigravity"
+`
+	if err := os.WriteFile(filepath.Join(baseDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	wtDir := setupTestWorktree(t, baseDir, "agy", "agy")
+
+	// Create required log files
+	if err := os.MkdirAll(filepath.Join(wtDir, "scratch", "irc", "agy"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "scratch", "irc", "agy", "log"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("COLLAB_ROOT", "")
+	t.Setenv("COLLAB_ACTOR", "")
+	t.Setenv("BOTFAM_FAM", "")
+	t.Setenv("PWD", wtDir)
+
+	if err := os.Chdir("/"); err != nil {
+		t.Skipf("cannot chdir to /: %v", err)
+	}
+
+	_, err = s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": "."})
+	if err != nil {
+		t.Fatalf("callTool failed when CWD=/ with work_dir=\".\": %v", err)
+	}
+}
