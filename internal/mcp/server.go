@@ -256,7 +256,12 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			timeoutS = 300
 		}
 		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
-		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, actor, fromOffset, time.Duration(timeoutS*float64(time.Second)))
+		// The FIFO dir is keyed by the bare actor, but the agent's own messages
+		// appear under the fam-scoped nick (claude-botfam) in the log — match on
+		// the scoped nick or the wait wakes on its own traffic (#137; matches the
+		// `botfam irc-wait` CLI fix).
+		matchNick := fam.FamScopedNick(actor, fam.FamSlug(fam.LoadFamRegistry(absWorkDir)))
+		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
 		if err != nil {
 			return nil, err
 		}
