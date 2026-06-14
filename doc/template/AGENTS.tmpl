@@ -5,7 +5,7 @@ This worktree belongs to a botfam agent.
 1. **Your Name**: Resolved by running `botfam whoami` (or worktree basename).
 2. **MCP Onboarding**: Run `resources/read` on `botfam:///docs/start` immediately to orient yourself.
 3. **Core Protocol**: The full rules live at `botfam:///docs/protocol` (originally at `doc/collab/PROTOCOL.md`).
-4. **Environment Health**: Inspect the health warning blocks at `botfam:///` to ensure your token and client are correctly set up.
+4. **Environment Health**: Inspect the health warning blocks at `botfam:///` to ensure your token and client are correctly set up. If the root shows `<unresolved>` (e.g., in system-wide MCP setups), call the `orient` tool with your worktree path (as the `work_dir` argument) to bootstrap.
 
 ## Repo-local Skills
 
