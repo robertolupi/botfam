@@ -160,7 +160,7 @@ func NewClient(workDir string, actor string) (*Client, error) {
 				baseURL = readConfigValueFromFamTOML(famTOMLPath, "forge_url", "forge-url")
 			}
 			if owner == "" || repo == "" {
-				repVal := readConfigValueFromFamTOML(famTOMLPath, "repository", "repository")
+				repVal := readConfigValueFromFamTOML(famTOMLPath, "repository")
 				if repVal != "" {
 					parts := strings.Split(repVal, "/")
 					if len(parts) == 2 {
