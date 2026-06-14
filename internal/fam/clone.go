@@ -195,7 +195,9 @@ func parseAgentsSpec(spec string) (map[string]AgentConfig, error) {
 		if err := validateSetupName("agent", name); err != nil {
 			return nil, err
 		}
-		out[name] = AgentConfig{Name: name, Harness: harness}
+		// Default forge_user to the per-harness bot account convention so the
+		// scaffolded fam.toml is complete; the operator can override.
+		out[name] = AgentConfig{Name: name, Harness: harness, ForgeUser: name + "-bot"}
 	}
 	return out, nil
 }
