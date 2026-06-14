@@ -98,7 +98,14 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	s.ingestStarted = true
 	s.mu.Unlock()
 
-	ing := fam.NewIngester(mboxPath, 30*time.Second, fam.NewIRCPoller(ircLog, matchNick))
+	pollers := []fam.Poller{fam.NewIRCPoller(ircLog, matchNick)}
+	// Add the forge source when a client can be built; IRC-only otherwise (e.g.
+	// no notification-scoped token). markRead stays off: the mailbox is the
+	// durable record, so cursor-based dedup is enough.
+	if fp, err := fam.ForgePollerFor(workDir, actor, false); err == nil {
+		pollers = append(pollers, fp)
+	}
+	ing := fam.NewIngester(mboxPath, 30*time.Second, pollers...)
 	go func() { _ = ing.Run(s.ctx) }()
 }
 
