@@ -92,7 +92,7 @@ subsumes ccrep" framing.)*
 > custom Engine / Ledger / bang-line gate was duplication — deleted in #34 (per
 > #33). **Role tiers are native too** — different per-branch protection rules
 > (e.g. `main` stricter than `botfam-next`) give tiered approval without a line
-> of code. See [the roadmap](../dev/roadmap.md) Phase 2 and issue #33.
+> of code. See the Gitea milestones (Phase 2) and issue #33.
 
 ## 3. Forgejo vs Gitea
 
