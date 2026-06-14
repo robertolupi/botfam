@@ -91,6 +91,9 @@ else
   if [ ! -x "$helper" ]; then
     echo "[2/4] helper: WARNING ${helper} not found/executable — skipping (see #4)" >&2
   else
+    if [ "$SCOPE" = "--local" ]; then
+      git config "$SCOPE" credential.helper ""
+    fi
     key="credential.${SCHEME}://${FORGE_HOSTPORT}.helper"
     git config "$SCOPE" "$key" "$helper"
     echo "[2/4] helper: git config ${SCOPE} ${key} -> ${helper}"
