@@ -155,16 +155,30 @@ type discoveryData struct {
 func buildDiscoveryData(workDir string) discoveryData {
 	var d discoveryData
 
-	if info, err := (fam.Resolver{WorkDir: workDir}).Resolve(); err == nil {
-		d.tmpl.Actor = info.Actor
-		d.tmpl.Fam = info.Name
-	}
-	reg := fam.LoadFamRegistry(workDir)
-	// The registry's human fam name (e.g. "botfam") wins over the resolver's
-	// root-set id (e.g. "fam-09d3..."), which is only a stable fallback when no
-	// fam.toml is configured.
-	if slug := fam.FamSlug(reg); slug != "" {
-		d.tmpl.Fam = slug
+	var reg fam.Registry
+	var harness string
+	// Prefer the unified resolver: it reads the canonical <fam-dir>/fam.toml and
+	// validates the worktree basename against the roster (the wt- prefix is
+	// retired). It succeeds only in an [agent.<name>] worktree of a migrated fam.
+	if rf, err := fam.ResolveFam(workDir); err == nil {
+		d.tmpl.Actor = rf.Actor
+		harness = rf.Agent.Harness
+		reg = rf.Registry
+		d.tmpl.Fam = rf.Slug
+		if d.tmpl.Fam == "" {
+			d.tmpl.Fam = rf.Name
+		}
+	} else {
+		// Legacy / soft fallback: un-migrated fam, or a base/user worktree where
+		// the runtime resolver fails closed. Surface what we can for display.
+		if info, e := (fam.Resolver{WorkDir: workDir}).Resolve(); e == nil {
+			d.tmpl.Actor = info.Actor
+			d.tmpl.Fam = info.Name
+		}
+		reg = fam.LoadFamRegistry(workDir)
+		if slug := fam.FamSlug(reg); slug != "" {
+			d.tmpl.Fam = slug
+		}
 	}
 	d.tmpl.MainChannel, d.tmpl.CcrepChannel = fam.FamChannels(reg)
 	d.tmpl.IntegrationBranch = fam.FamBranch(reg)
@@ -184,7 +198,7 @@ func buildDiscoveryData(workDir string) discoveryData {
 		})
 	}
 
-	d.health = discoveryHealth(workDir, d.tmpl)
+	d.health = discoveryHealth(workDir, d.tmpl, harness)
 	return d
 }
 
@@ -286,30 +300,27 @@ func fileURIToPath(uri string) string {
 	return ""
 }
 
-func discoveryHealth(workDir string, t docs.TemplateData) []healthCheck {
+func discoveryHealth(workDir string, t docs.TemplateData, harness string) []healthCheck {
 	var checks []healthCheck
 
 	if t.Actor == "" {
 		checks = append(checks, healthCheck{"actor", "warn",
-			"could not resolve an actor: run from a named worktree (wt-<actor>) or set COLLAB_ACTOR"})
+			"could not resolve an actor: run from an [agent.<name>] worktree (or set COLLAB_ACTOR)"})
 	} else {
 		checks = append(checks, healthCheck{"actor", "ok", ""})
 	}
 
-	// Forge token: token-<fam>-<actor> or the legacy token-botfam-<actor>.
-	if t.Actor != "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			famName := t.Fam
-			if famName == "" {
-				famName = "botfam"
-			}
-			primary := filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", famName, t.Actor))
-			legacy := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s", t.Actor))
-			if fileExists(primary) || fileExists(legacy) {
+	// Forge token: the canonical per-harness token (~/.botfam/token-<harness>),
+	// the same path the forge client + MCP actually use (forge.HarnessTokenPath)
+	// — no legacy fallback, so this can't report ok on a token the MCP won't use
+	// (#183).
+	if t.Actor != "" && harness != "" {
+		if tokenPath, err := forge.HarnessTokenPath(harness); err == nil {
+			if fileExists(tokenPath) {
 				checks = append(checks, healthCheck{"forge_token", "ok", ""})
 			} else {
 				checks = append(checks, healthCheck{"forge_token", "warn",
-					fmt.Sprintf("no forge token: write your Gitea token to %s", primary)})
+					fmt.Sprintf("no forge token at %s: mint it with `botfam mint --harness %s --user <forge-user>`", tokenPath, harness)})
 			}
 		}
 	}
