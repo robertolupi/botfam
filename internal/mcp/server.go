@@ -22,6 +22,7 @@ import (
 
 	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/wiki"
 )
 
 // serverName/serverVersion identify this MCP server in its handshake and in
@@ -437,7 +438,6 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	for _, slug := range discoverySlugs {
 		add("botfam:///docs/"+slug, "botfam doc: "+slug, "text/markdown")
 	}
-
 	// Phase 2: tools & skills catalogs
 	add("botfam:///tools", "botfam tools catalog", "text/markdown")
 	add("botfam:///tools.json", "botfam tools catalog", "application/json")
@@ -446,6 +446,11 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 
 	// Resource template for individual skills
 	mcpSrv.AddResourceTemplate(mcplib.NewResourceTemplate("botfam:///skills/{name}", "botfam skill document"), s.handleReadResource)
+
+	// Live forge wiki (#119). Individual pages (botfam:///wiki/<page>) are
+	// discovered via the index rather than statically advertised.
+	add("botfam:///wiki", "botfam live wiki index", "text/markdown")
+	add("botfam:///wiki/index.json", "botfam live wiki index (json)", "application/json")
 }
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
@@ -584,6 +589,44 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 			return nil, fmt.Errorf("render doc %q: %w", slug, err)
 		}
 		return markdownResource(req.Params.URI, content), nil
+	case path == "/wiki" || path == "/wiki/index.json":
+		// Live forge wiki index (#119): forge API, else flagged-stale cache.
+		prov, err := wikiProvider(dataWorkDir, d.tmpl.Actor)
+		if err != nil {
+			return nil, err
+		}
+		metas, err := prov.Index()
+		if err != nil {
+			return nil, fmt.Errorf("wiki index: %w", err)
+		}
+		if path == "/wiki/index.json" {
+			body, err := renderWikiIndexJSON(metas, prov.Source())
+			if err != nil {
+				return nil, err
+			}
+			return []mcplib.ResourceContents{mcplib.TextResourceContents{
+				URI:      req.Params.URI,
+				MIMEType: "application/json",
+				Text:     string(body),
+			}}, nil
+		}
+		return markdownResource(req.Params.URI, renderWikiIndexMarkdown(metas, prov.Source())), nil
+	case strings.HasPrefix(path, "/wiki/"):
+		// A single live wiki page. Name is constrained to the forge wiki
+		// namespace; traversal/arbitrary reads are rejected by the provider.
+		name := strings.TrimPrefix(path, "/wiki/")
+		if !wiki.ValidPageName(name) {
+			return nil, fmt.Errorf("invalid wiki page %q", name)
+		}
+		prov, err := wikiProvider(dataWorkDir, d.tmpl.Actor)
+		if err != nil {
+			return nil, err
+		}
+		page, err := prov.Page(name)
+		if err != nil {
+			return nil, fmt.Errorf("wiki page %q: %w", name, err)
+		}
+		return markdownResource(req.Params.URI, renderWikiPage(page)), nil
 	default:
 		return nil, fmt.Errorf("unknown resource path %q", u.Path)
 	}
