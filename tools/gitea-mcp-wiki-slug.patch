@@ -1,0 +1,219 @@
+diff --git a/operation/wiki/wiki.go b/operation/wiki/wiki.go
+index a8edee5..2f40b0c 100644
+--- a/operation/wiki/wiki.go
++++ b/operation/wiki/wiki.go
+@@ -5,6 +5,7 @@ import (
+ 	"encoding/base64"
+ 	"fmt"
+ 	"net/url"
++	"strings"
+ 
+ 	"gitea.com/gitea/gitea-mcp/pkg/annotation"
+ 	"gitea.com/gitea/gitea-mcp/pkg/gitea"
+@@ -110,7 +111,7 @@ func listWikiPagesFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToo
+ 		return to.ErrorResult(fmt.Errorf("list wiki pages err: %v", err))
+ 	}
+ 
+-	return to.TextResult(result)
++	return to.TextResult(normalizeWikiResult(result))
+ }
+ 
+ func getWikiPageFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+@@ -130,11 +131,19 @@ func getWikiPageFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolR
+ 
+ 	var result any
+ 	_, err = gitea.DoJSON(ctx, "GET", fmt.Sprintf("repos/%s/%s/wiki/page/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName)), nil, nil, &result)
++	if err != nil && !strings.HasSuffix(pageName, ".-") {
++		var fallbackResult any
++		_, fallbackErr := gitea.DoJSON(ctx, "GET", fmt.Sprintf("repos/%s/%s/wiki/page/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName+".-")), nil, nil, &fallbackResult)
++		if fallbackErr == nil {
++			result = fallbackResult
++			err = nil
++		}
++	}
+ 	if err != nil {
+ 		return to.ErrorResult(fmt.Errorf("get wiki page err: %v", err))
+ 	}
+ 
+-	return to.TextResult(result)
++	return to.TextResult(normalizeWikiResult(result))
+ }
+ 
+ func getWikiRevisionsFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+@@ -154,6 +163,14 @@ func getWikiRevisionsFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.Call
+ 
+ 	var result any
+ 	_, err = gitea.DoJSON(ctx, "GET", fmt.Sprintf("repos/%s/%s/wiki/revisions/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName)), nil, nil, &result)
++	if err != nil && !strings.HasSuffix(pageName, ".-") {
++		var fallbackResult any
++		_, fallbackErr := gitea.DoJSON(ctx, "GET", fmt.Sprintf("repos/%s/%s/wiki/revisions/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName+".-")), nil, nil, &fallbackResult)
++		if fallbackErr == nil {
++			result = fallbackResult
++			err = nil
++		}
++	}
+ 	if err != nil {
+ 		return to.ErrorResult(fmt.Errorf("get wiki revisions err: %v", err))
+ 	}
+@@ -197,7 +214,7 @@ func createWikiPageFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
+ 		return to.ErrorResult(fmt.Errorf("create wiki page err: %v", err))
+ 	}
+ 
+-	return to.TextResult(result)
++	return to.TextResult(normalizeWikiResult(result))
+ }
+ 
+ func updateWikiPageFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+@@ -238,11 +255,19 @@ func updateWikiPageFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
+ 
+ 	var result any
+ 	_, err = gitea.DoJSON(ctx, "PATCH", fmt.Sprintf("repos/%s/%s/wiki/page/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName)), nil, requestBody, &result)
++	if err != nil && !strings.HasSuffix(pageName, ".-") {
++		var fallbackResult any
++		_, fallbackErr := gitea.DoJSON(ctx, "PATCH", fmt.Sprintf("repos/%s/%s/wiki/page/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName+".-")), nil, requestBody, &fallbackResult)
++		if fallbackErr == nil {
++			result = fallbackResult
++			err = nil
++		}
++	}
+ 	if err != nil {
+ 		return to.ErrorResult(fmt.Errorf("update wiki page err: %v", err))
+ 	}
+ 
+-	return to.TextResult(result)
++	return to.TextResult(normalizeWikiResult(result))
+ }
+ 
+ func deleteWikiPageFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+@@ -261,9 +286,41 @@ func deleteWikiPageFn(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallTo
+ 	}
+ 
+ 	_, err = gitea.DoJSON(ctx, "DELETE", fmt.Sprintf("repos/%s/%s/wiki/page/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName)), nil, nil, nil)
++	if err != nil && !strings.HasSuffix(pageName, ".-") {
++		_, fallbackErr := gitea.DoJSON(ctx, "DELETE", fmt.Sprintf("repos/%s/%s/wiki/page/%s", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(pageName+".-")), nil, nil, nil)
++		if fallbackErr == nil {
++			err = nil
++		}
++	}
+ 	if err != nil {
+ 		return to.ErrorResult(fmt.Errorf("delete wiki page err: %v", err))
+ 	}
+ 
+ 	return to.TextResult(map[string]string{"message": "Wiki page deleted successfully"})
+ }
++
++func normalizePage(p map[string]any) {
++	if subURL, ok := p["sub_url"].(string); ok && strings.HasSuffix(subURL, ".-") {
++		p["sub_url"] = strings.TrimSuffix(subURL, ".-")
++	}
++	if htmlURL, ok := p["html_url"].(string); ok && strings.HasSuffix(htmlURL, ".-") {
++		p["html_url"] = strings.TrimSuffix(htmlURL, ".-")
++	}
++}
++
++func normalizeWikiResult(res any) any {
++	if res == nil {
++		return res
++	}
++	switch v := res.(type) {
++	case map[string]any:
++		normalizePage(v)
++	case []any:
++		for _, item := range v {
++			if m, ok := item.(map[string]any); ok {
++				normalizePage(m)
++			}
++		}
++	}
++	return res
++}
+diff --git a/operation/wiki/wiki_test.go b/operation/wiki/wiki_test.go
+index 2c9d5d9..7413a98 100644
+--- a/operation/wiki/wiki_test.go
++++ b/operation/wiki/wiki_test.go
+@@ -73,3 +73,85 @@ func TestWikiWriteBase64Encoding(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestWikiNormalization(t *testing.T) {
++	t.Run("normalizeWikiResult", func(t *testing.T) {
++		input := []any{
++			map[string]any{
++				"sub_url":  "test-page.-",
++				"html_url": "http://gitea/wiki/test-page.-",
++				"title":    "test-page",
++			},
++			map[string]any{
++				"sub_url":  "clean-page",
++				"html_url": "http://gitea/wiki/clean-page",
++				"title":    "clean-page",
++			},
++		}
++		res := normalizeWikiResult(input)
++		slice, ok := res.([]any)
++		if !ok || len(slice) != 2 {
++			t.Fatalf("expected slice of length 2, got %T", res)
++		}
++		p1 := slice[0].(map[string]any)
++		if p1["sub_url"] != "test-page" {
++			t.Errorf("expected test-page, got %v", p1["sub_url"])
++		}
++		if p1["html_url"] != "http://gitea/wiki/test-page" {
++			t.Errorf("expected clean html_url, got %v", p1["html_url"])
++		}
++	})
++
++	t.Run("getWikiPageFn fallback", func(t *testing.T) {
++		requests := 0
++		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++			requests++
++			if requests == 1 {
++				w.WriteHeader(http.StatusNotFound)
++				return
++			}
++			w.Header().Set("Content-Type", "application/json")
++			w.WriteHeader(http.StatusOK)
++			_, _ = w.Write([]byte(`{"sub_url":"test-page.-","title":"test-page"}`))
++		}))
++		defer srv.Close()
++
++		origHost := flag.Host
++		flag.Host = srv.URL
++		defer func() { flag.Host = origHost }()
++
++		ctx := context.WithValue(context.Background(), mcpContext.TokenContextKey, "test-token")
++
++		args := map[string]any{
++			"owner":    "org",
++			"repo":     "repo",
++			"pageName": "test-page",
++		}
++
++		req := mcp.CallToolRequest{}
++		req.Params.Arguments = args
++
++		result, err := getWikiPageFn(ctx, req)
++		if err != nil {
++			t.Fatalf("getWikiPageFn error: %v", err)
++		}
++		if result.IsError {
++			t.Fatalf("getWikiPageFn returned error result")
++		}
++
++		if requests != 2 {
++			t.Errorf("expected 2 requests, got %d", requests)
++		}
++
++		var resp map[string]any
++		content := result.Content[0].(mcp.TextContent).Text
++		if err := json.Unmarshal([]byte(content), &resp); err != nil {
++			t.Fatalf("failed to unmarshal result text: %v", err)
++		}
++
++		if resp["sub_url"] != "test-page" {
++			t.Errorf("expected sub_url 'test-page', got %v", resp["sub_url"])
++		}
++	})
++}
++
