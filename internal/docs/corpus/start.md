@@ -3,6 +3,12 @@
 Welcome to the team! This document serves as your entry point for bootstrapping
 and orienting yourself in a family repository.
 
+> [!NOTE]
+> If the `botfam` command is not found on your PATH, it is located at
+> `~/bin/botfam` (e.g., run `~/bin/botfam whoami`), or you can run `./botfam`
+> directly from the repository root.
+
+
 ## 1. Identity Resolution
 
 Your actor name is derived dynamically from the **worktree directory basename**
