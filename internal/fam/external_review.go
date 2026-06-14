@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openai/openai-go/v2"
@@ -260,8 +262,42 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 	}
 
 	fmt.Fprintf(out, "running reviews into %s ...\n", outDir)
-	var ran []string
 	ctx := context.Background()
+
+	// Each review result; collected concurrently then reported deterministically.
+	type reviewResult struct {
+		provider  string
+		model     string
+		outFile   string
+		reviewErr error // model call failed — non-fatal, reported as a skipped review
+		writeErr  error // writing the review file failed — treated as a command error
+	}
+
+	// runOne performs one model review and records its outcome under mu. Output
+	// is not written from goroutines (that would race the writer, cf. #75); the
+	// caller prints results after all goroutines finish.
+	var mu sync.Mutex
+	var results []reviewResult
+	runOne := func(p erProvider, key, model string) {
+		res := reviewResult{provider: p.name, model: model}
+		text, err := runReview(ctx, p.baseURL, key, model, combined)
+		if err != nil {
+			res.reviewErr = err
+		} else {
+			res.outFile = filepath.Join(outDir, fmt.Sprintf("review-%s-%s.md", p.name, slugify(model)))
+			if werr := os.WriteFile(res.outFile, []byte(text), 0o644); werr != nil {
+				res.writeErr = werr
+			}
+		}
+		mu.Lock()
+		results = append(results, res)
+		mu.Unlock()
+	}
+
+	// Remote providers (openai, gemini) are parallelized per-model; local ollama
+	// runs its models sequentially (a single GPU host can't serve concurrent
+	// requests well) but still concurrently with the remotes (issue #54).
+	var wg sync.WaitGroup
 	for _, p := range providers {
 		if len(p.models) == 0 {
 			continue
@@ -274,20 +310,55 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 				continue
 			}
 		}
-		for _, model := range p.models {
-			fmt.Fprintf(out, "  %s: %s ...\n", p.name, model)
-			text, err := runReview(ctx, p.baseURL, key, model, combined)
-			if err != nil {
-				fmt.Fprintf(out, "    FAILED (%s:%s): %v\n", p.name, model, err)
-				continue
+		fmt.Fprintf(out, "  %s: dispatching %d model(s)\n", p.name, len(p.models))
+		if p.keyEnv == "" {
+			// Local provider (ollama): serialize its own models in one goroutine.
+			p, key := p, key
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for _, model := range p.models {
+					runOne(p, key, model)
+				}
+			}()
+		} else {
+			for _, model := range p.models {
+				p, key, model := p, key, model
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					runOne(p, key, model)
+				}()
 			}
-			outFile := filepath.Join(outDir, fmt.Sprintf("review-%s-%s.md", p.name, slugify(model)))
-			if err := os.WriteFile(outFile, []byte(text), 0o644); err != nil {
-				return err
-			}
-			ran = append(ran, p.name+":"+model)
-			fmt.Fprintf(out, "    -> %s\n", outFile)
 		}
+	}
+	wg.Wait()
+
+	// Report deterministically (results arrive in nondeterministic order).
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].provider != results[j].provider {
+			return results[i].provider < results[j].provider
+		}
+		return results[i].model < results[j].model
+	})
+	var ran []string
+	var firstWriteErr error
+	for _, r := range results {
+		switch {
+		case r.writeErr != nil:
+			fmt.Fprintf(out, "    WRITE FAILED (%s:%s): %v\n", r.provider, r.model, r.writeErr)
+			if firstWriteErr == nil {
+				firstWriteErr = fmt.Errorf("failed to write review for %s:%s: %w", r.provider, r.model, r.writeErr)
+			}
+		case r.reviewErr != nil:
+			fmt.Fprintf(out, "    FAILED (%s:%s): %v\n", r.provider, r.model, r.reviewErr)
+		default:
+			ran = append(ran, r.provider+":"+r.model)
+			fmt.Fprintf(out, "    %s:%s -> %s\n", r.provider, r.model, r.outFile)
+		}
+	}
+	if firstWriteErr != nil {
+		return firstWriteErr
 	}
 
 	var manifest strings.Builder
