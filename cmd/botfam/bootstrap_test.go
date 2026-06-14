@@ -49,9 +49,9 @@ func TestNewfamCmdCreatesWorktreesAndHarnessConfig(t *testing.T) {
 			t.Fatalf("%s branch = %q, want %q", wt, got, "agent/"+agent)
 		}
 		assertFileContains(t, filepath.Join(wt, ".claude", "settings.json"), `"Bash(botfam:*)"`)
-		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "doc/collab/PROTOCOL.md")
-		assertFileContains(t, filepath.Join(wt, "CLAUDE.md"), "doc/collab/PROTOCOL.md")
-		assertFileContains(t, filepath.Join(wt, "GEMINI.md"), "doc/collab/PROTOCOL.md")
+		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "botfam:///docs/protocol")
+		assertFileContains(t, filepath.Join(wt, "CLAUDE.md"), "botfam:///docs/protocol")
+		assertFileContains(t, filepath.Join(wt, "GEMINI.md"), "botfam:///docs/protocol")
 		assertFileContains(t, filepath.Join(wt, "doc/collab/PROTOCOL.md"), "botfam Coordination Protocol")
 	}
 

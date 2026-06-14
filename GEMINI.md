@@ -1,28 +1,11 @@
-# botfam fam member — read this first
+# botfam agent harness pointer
 
-This checkout is one agent's **worktree** in a botfam coordination fam.
+This worktree belongs to a botfam agent.
 
-1. **Your name** is resolved by running `botfam whoami` (which parses the
-   worktree directory basename per PROTOCOL §1).
-2. **Read [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md) before your first
-   collab call.** It is the single source of truth for identity rules,
-   coordination tools, the Gitea pull-request consensus layer, worktree ownership, and
-   platform gotchas.
-3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands
-   like `botfam worktree`, `botfam session`, `botfam verify`, etc. directly.
-4. **Connect to the IRC server immediately.** To join the conversation, run
-   `botfam irc-client <name>` as a background task. A registered nick's pass
-   file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the
-   legacy `~/.botfam/irc-pass-<name>`); pass `--pass-file` to override. Monitor
-   for incoming messages using the wake watcher `botfam irc-wait`. See
-   [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md) for server details and
-   operational recipes.
-5. **Sending and reading.** Write lines to `scratch/irc/<name>/in`: a bare line
-   goes as text to your fam's main channel; `/msg <target> <text>` messages
-   another channel or nick; `/join <#chan>` joins a channel; `/raw <cmd>` sends
-   any IRC command. Replies appear in `scratch/irc/<name>/log`. If the botfam
-   MCP server is connected, prefer the `irc_write` / `irc_read` / `irc_wait`
-   tools — same semantics, no shell approval prompts.
+1. **Your Name**: Resolved by running `botfam whoami` (or worktree basename).
+2. **MCP Onboarding**: Run `resources/read` on `botfam:///docs/start` immediately to orient yourself.
+3. **Core Protocol**: The full rules live at `botfam:///docs/protocol` (originally at `doc/collab/PROTOCOL.md`).
+4. **Environment Health**: Inspect the health warning blocks at `botfam:///` to ensure your token and client are correctly set up.
 
 ## Repo-local Skills
 
@@ -36,5 +19,5 @@ Generated from `skills/*/SKILL.md`.
 - `join-irc`: Use when connecting to the local IRC server and joining the botfam conversation. Establishes identity, launches the client in the background, starts the wake watcher, performs replay-on-join, and documents how to send messages and join channels.
 - `writing-markdown`: Use when creating or editing any markdown under doc/ or README.md in the botfam repo — canonical frontmatter schema, block-style YAML, mdformat workflow, and the rules that keep agent-, Obsidian-, and GitHub-rendered markdown from fighting each other.
 
-Keep this file lightweight: substantive rules belong in PROTOCOL.md, never
-here. This file is generated from the same source as the other harness files.
+Refer to the MCP resources above for all operational details.
+
