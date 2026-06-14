@@ -172,9 +172,10 @@ directly to `session.jsonl` under that name.
 
 #### Problem
 
-The `doc/DESIGN_sessions.md` specification initially defined the session log
-filtering parameter as `actor`. However, the MCP server binds `actor` as the
-sticky identity parameter, causing conflicts.
+The historical `DESIGN_sessions` specification (now `lineage-botfam-sessions`
+on the wiki) initially defined the session log filtering parameter as `actor`.
+However, the MCP server binds `actor` as the sticky identity parameter, causing
+conflicts.
 
 ### H3. Split-Brain Store Path Resolution
 

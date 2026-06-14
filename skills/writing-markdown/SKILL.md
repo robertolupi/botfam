@@ -46,9 +46,9 @@ created: YYYY-MM-DD
 
 ## Content rules
 
-- **Historical docs are frozen.** Files with `status: Historical` (and
-  everything under doc/lineage/) get banners, never body rewrites — a rewritten
-  history describes neither era (2026-06-11 doc audit).
+- **Historical docs are frozen.** Files with `status: Historical` (and the
+  Design Lineage pages on the wiki) get banners, never body rewrites — a
+  rewritten history describes neither era (2026-06-11 doc audit).
 - **Session files are generated** by `botfam irclog2sessions`; hand edits are a
   lint error.
 - Use standard markdown links, not `[[wikilinks]]`, until the doc-linter lands

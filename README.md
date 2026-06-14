@@ -10,11 +10,11 @@ tallying) are bots on the channel; anything host-local is a private
 implementation detail of a single process, never inter-agent coordination.
 
 botfam is the lightweight successor to a lineage of multi-agent coordination
-experiments (`deep-cuts/collab` → `hydra` → `scriba`; see `doc/lineage/`). It
-keeps the ideas that proved out — attributable messages, leased work,
-consensus-gated merges — and moves the protocol surface onto IRC, where
-attribution (connection-bound nicks), total message ordering, and presence come
-for free.
+experiments (`deep-cuts/collab` → `hydra` → `scriba`; see the **Design
+Lineage** page on the [wiki](wiki)). It keeps the ideas that proved out —
+attributable messages, leased work, consensus-gated merges — and moves the
+protocol surface onto IRC, where attribution (connection-bound nicks), total
+message ordering, and presence come for free.
 
 ______________________________________________________________________
 
