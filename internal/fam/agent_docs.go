@@ -23,7 +23,7 @@ const agentDocsTemplateText = "# botfam agent harness pointer\n" +
 	"1. **Your Name**: Resolved by running `botfam whoami` (or worktree basename).\n" +
 	"2. **MCP Onboarding**: Run `resources/read` on `botfam:///docs/start` immediately to orient yourself.\n" +
 	"3. **Core Protocol**: The full rules live at `botfam:///docs/protocol` (originally at `doc/collab/PROTOCOL.md`).\n" +
-	"4. **Environment Health**: Inspect the health warning blocks at `botfam:///` to ensure your token and client are correctly set up.\n" +
+	"4. **Environment Health**: Inspect the health warning blocks at `botfam:///` to ensure your token and client are correctly set up. If the root shows `<unresolved>` (e.g., in system-wide MCP setups), call the `orient` tool with your worktree path (as the `work_dir` argument) to bootstrap.\n" +
 	"\n" +
 	"## Repo-local Skills\n" +
 	"\n" +
