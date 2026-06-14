@@ -177,3 +177,17 @@ func TestVerifyCleansUpWorktree(t *testing.T) {
 		t.Errorf("expected only the main worktree to remain, got:\n%s", out)
 	}
 }
+
+func TestVerifyRaceFlag(t *testing.T) {
+	dir := t.TempDir()
+	sha := initGoRepo(t, dir, goodMain, goodTest)
+
+	// Test running with --race flag
+	out, err := runVerifyIn(t, dir, sha, "--race")
+	if err != nil {
+		t.Fatalf("verify with --race should pass, got error: %v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(out, "go test -race") {
+		t.Errorf("expected go test -race in output, got:\n%s", out)
+	}
+}
