@@ -4,7 +4,9 @@
 .claude/settings.local.json
 .mcp.json
 scratch/
-wiki/
+# The top-level synced wiki clone only — anchored so it does not also ignore
+# the internal/wiki Go package.
+/wiki/
 doc/collab/history.jsonl
 .DS_Store
 .obsidian/

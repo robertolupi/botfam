@@ -632,3 +632,57 @@ func TestMcpResources(t *testing.T) {
 		}
 	}
 }
+
+// TestMcpWikiCacheFallback exercises the #119 wiki provider via the local-cache
+// tier: with no forge client resolvable (no token), botfam:///wiki/* is served
+// from the local wiki/ clone and flagged stale.
+func TestMcpWikiCacheFallback(t *testing.T) {
+	s, root := newTestServer(t)
+	initGitRepo(t, root) // no remote → forge.NewClient won't resolve → cache tier
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	wikiDir := filepath.Join(root, "wiki")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wikiDir, "Home.md"), []byte("# Home\ncached body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := mcplib.ReadResourceRequest{}
+
+	// A page comes from the cache and is flagged stale.
+	req.Params.URI = "botfam:///wiki/Home"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("wiki/Home: %v", err)
+	}
+	txt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(txt, "cached body") || !strings.Contains(txt, "STALE") {
+		t.Errorf("expected cached, stale page, got %q", txt)
+	}
+
+	// The JSON index carries the wiki schema.
+	req.Params.URI = "botfam:///wiki/index.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("wiki/index.json: %v", err)
+	}
+	if !strings.Contains(res[0].(mcplib.TextResourceContents).Text, "botfam.wiki.index.v1") {
+		t.Errorf("missing wiki index schema: %q", res[0].(mcplib.TextResourceContents).Text)
+	}
+
+	// A traversal page name must error.
+	req.Params.URI = "botfam:///wiki/not%2Fa%2Fpage"
+	if _, err := s.handleReadResource(context.Background(), req); err == nil {
+		t.Error("expected error for invalid wiki page name")
+	}
+}

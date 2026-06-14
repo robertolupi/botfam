@@ -11,7 +11,69 @@ import (
 
 	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/robertolupi/botfam/internal/wiki"
 )
+
+// wikiProvider resolves the live wiki provider for workDir: the forge API when
+// a client (forge URL + token) is resolvable, else a flagged-stale local
+// wiki/ cache, else a clear diagnostic.
+func wikiProvider(workDir, actor string) (wiki.Provider, error) {
+	var client *forge.Client
+	if c, err := forge.NewClient(workDir, actor); err == nil {
+		client = c
+	}
+	return wiki.Resolve(client, filepath.Join(workDir, "wiki"))
+}
+
+// renderWikiIndexMarkdown lists wiki pages as a compact markdown index.
+func renderWikiIndexMarkdown(metas []wiki.PageMeta, source string) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Wiki index (source: %s)\n\n", source)
+	if len(metas) == 0 {
+		b.WriteString("_No pages._\n")
+	}
+	for _, m := range metas {
+		fmt.Fprintf(&b, "- `%s` → `%s`\n", m.Name, m.URI)
+	}
+	return []byte(b.String())
+}
+
+type wikiIndexJSON struct {
+	Schema string          `json:"schema"`
+	Source string          `json:"source"`
+	Pages  []wiki.PageMeta `json:"pages"`
+}
+
+func renderWikiIndexJSON(metas []wiki.PageMeta, source string) ([]byte, error) {
+	return json.MarshalIndent(wikiIndexJSON{
+		Schema: "botfam.wiki.index.v1",
+		Source: source,
+		Pages:  metas,
+	}, "", "  ")
+}
+
+// renderWikiPage renders a fetched page as markdown with a provenance footer.
+func renderWikiPage(p wiki.Page) []byte {
+	var b strings.Builder
+	b.Write([]byte(p.Content))
+	if !strings.HasSuffix(p.Content, "\n") {
+		b.WriteString("\n")
+	}
+	b.WriteString("\n---\n")
+	fmt.Fprintf(&b, "_source: %s", p.Source)
+	if p.SHA != "" {
+		fmt.Fprintf(&b, " · sha: %s", p.SHA)
+	}
+	if p.Updated != "" {
+		fmt.Fprintf(&b, " · updated: %s", p.Updated)
+	}
+	if p.Stale {
+		b.WriteString(" · ⚠️ STALE (local cache; the forge may be ahead)")
+	}
+	b.WriteString("_\n")
+	return []byte(b.String())
+}
 
 // markdownResource wraps embedded/rendered markdown as MCP resource contents.
 func markdownResource(uri string, content []byte) []mcplib.ResourceContents {
