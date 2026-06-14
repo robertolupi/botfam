@@ -5,12 +5,12 @@ This guide is for the human operator managing the coordination environment.
 ## 1. Where to Work
 
 - **Work in your own worktree**: Always use a dedicated worktree for your
-  changes (e.g. `wt-{{.OperatorName}}`).
+  changes (e.g. `wt-{{.Actor}}`).
 - **Never work in the main checkout**: The main checkout is the shared merge
   target and should only be modified by a claimed executor.
 - **Read-only worktrees**: Treat other actors' worktrees as read-only.
-- **Identity Config**: Run `botfam worktree init {{.OperatorName}}` in your
-  worktree to set up the correct per-worktree identity config.
+- **Identity Config**: Run `botfam worktree init {{.Actor}}` in your worktree
+  to set up the correct per-worktree identity config.
 
 ## 2. landing Changes
 

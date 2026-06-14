@@ -11,13 +11,14 @@ var Files embed.FS
 
 // TemplateData holds the runtime context variables to interpolate into the generic documents.
 type TemplateData struct {
-	Actor         string
-	Fam           string
-	MainChannel   string
-	CcrepChannel  string
-	OperatorEmail string
-	OperatorName  string
-	ForgeURL      string
+	Actor             string
+	Fam               string
+	MainChannel       string
+	CcrepChannel      string
+	OperatorEmail     string
+	OperatorName      string
+	ForgeURL          string
+	IntegrationBranch string
 }
 
 // fillDefaults populates empty fields in TemplateData with their generic placeholder text.
@@ -42,6 +43,9 @@ func fillDefaults(data TemplateData) TemplateData {
 	}
 	if data.ForgeURL == "" {
 		data.ForgeURL = "<forge-url>"
+	}
+	if data.IntegrationBranch == "" {
+		data.IntegrationBranch = "<integration-branch>"
 	}
 	return data
 }

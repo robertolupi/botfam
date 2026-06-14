@@ -232,3 +232,42 @@ func TestRegistrySlugRoundTrip(t *testing.T) {
 		t.Errorf("FamSlug fallback = %q, want deep-cuts", FamSlug(got))
 	}
 }
+
+func TestRegistryBranchRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "fam.toml")
+
+	// Branch present: persists and parses back.
+	if err := WriteRegistry(path, Registry{Name: "deep-cuts", Branch: "dc-next"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadRegistry(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Branch != "dc-next" {
+		t.Errorf("Branch = %q, want dc-next", got.Branch)
+	}
+	if FamBranch(got) != "dc-next" {
+		t.Errorf("FamBranch = %q, want dc-next", FamBranch(got))
+	}
+
+	// No branch: key is omitted on write and FamBranch falls back.
+	if err := WriteRegistry(path, Registry{Name: "deep-cuts"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "branch") {
+		t.Errorf("branch-less registry serialized a branch key:\n%s", data)
+	}
+	got, err = ReadRegistry(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if FamBranch(got) != "deep-cuts-next" {
+		t.Errorf("FamBranch fallback = %q, want deep-cuts-next", FamBranch(got))
+	}
+}

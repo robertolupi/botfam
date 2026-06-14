@@ -41,6 +41,20 @@ func FamSlug(reg Registry) string {
 	return reg.Name
 }
 
+// FamBranch returns the integration branch for this family: the explicit
+// fam.toml branch when set, else the default derived integration branch
+// name (<slug>-next).
+func FamBranch(reg Registry) string {
+	if reg.Branch != "" {
+		return reg.Branch
+	}
+	slug := FamSlug(reg)
+	if slug != "" {
+		return slug + "-next"
+	}
+	return "botfam-next"
+}
+
 // FamChannels returns the fam's main and ccrep IRC channels. Explicit
 // fam.toml channels win (first entry is main, second is ccrep); missing
 // entries derive from the fam slug (#<slug> and #<slug>-ccrep); with no

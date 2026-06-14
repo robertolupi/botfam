@@ -72,13 +72,14 @@ func TestEmbeddedCorpusIsGeneric(t *testing.T) {
 
 func TestTemplateRendering(t *testing.T) {
 	data := TemplateData{
-		Actor:         "testactor",
-		Fam:           "testfam",
-		MainChannel:   "#testmain",
-		CcrepChannel:  "#testccrep",
-		OperatorEmail: "operator@test.com",
-		OperatorName:  "testoperator",
-		ForgeURL:      "http://testforge:3000",
+		Actor:             "testactor",
+		Fam:               "testfam",
+		MainChannel:       "#testmain",
+		CcrepChannel:      "#testccrep",
+		OperatorEmail:     "operator@test.com",
+		OperatorName:      "testoperator",
+		ForgeURL:          "http://testforge:3000",
+		IntegrationBranch: "testbranch",
 	}
 
 	slugs := []string{"start", "protocol", "ops", "operator", "review", "worktrees", "markdown"}
@@ -113,11 +114,11 @@ func TestTemplateRendering(t *testing.T) {
 				t.Errorf("rendered ops.md missing expected placeholders: %s", contentStr)
 			}
 		case "operator":
-			if !strings.Contains(contentStr, "testoperator") {
+			if !strings.Contains(contentStr, "testactor") {
 				t.Errorf("rendered operator.md missing expected placeholders: %s", contentStr)
 			}
 		case "protocol":
-			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "#testmain") {
+			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "#testmain") || !strings.Contains(contentStr, "testbranch") {
 				t.Errorf("rendered protocol.md missing expected placeholders: %s", contentStr)
 			}
 		}

@@ -15,6 +15,7 @@ import (
 type Registry struct {
 	Name         string
 	Slug         string
+	Branch       string
 	RootSet      []string
 	Origin       string
 	Roster       []string
@@ -140,6 +141,8 @@ func ReadRegistry(path string) (Registry, error) {
 			reg.Name = parseString(v)
 		case "slug":
 			reg.Slug = parseString(v)
+		case "branch":
+			reg.Branch = parseString(v)
 		case "origin":
 			reg.Origin = parseString(v)
 		case "created_at":
@@ -164,6 +167,9 @@ func WriteRegistry(path string, reg Registry) error {
 	fmt.Fprintf(&b, "name = %q\n", reg.Name)
 	if reg.Slug != "" {
 		fmt.Fprintf(&b, "slug = %q\n", reg.Slug)
+	}
+	if reg.Branch != "" {
+		fmt.Fprintf(&b, "branch = %q\n", reg.Branch)
 	}
 	fmt.Fprintf(&b, "created_at = %q\n", reg.CreatedAt)
 	writeArray(&b, "root_set", reg.RootSet)

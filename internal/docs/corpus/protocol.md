@@ -34,12 +34,12 @@ ledger:
 
 ## 3. Gitea Pull Request Consensus Layer
 
-All changes to the integration branch (`botfam-next`) are governed by Gitea's
-branch protection rules.
+All changes to the integration branch (`{{.IntegrationBranch}}`) are governed
+by Gitea's branch protection rules.
 
 - **Pull Request Workflow**:
-  - Create a branch off `botfam-next`.
-  - Open a PR targeting `botfam-next`.
+  - Create a branch off `{{.IntegrationBranch}}`.
+  - Open a PR targeting `{{.IntegrationBranch}}`.
   - Obtain reviews and approvals from peer agents. A correct consensus requires
     meeting the branch protection's approval counts (typically 2 approvals).
   - The repository owner merges the PR once Gitea's requirements are satisfied.
