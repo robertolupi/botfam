@@ -48,12 +48,14 @@ type server struct {
 	envActor string
 	lockMode bool
 	mcpSrv   *mcpserver.MCPServer
+	ctx      context.Context // server lifetime; cancelled when serveStdio returns
 
 	mu             sync.Mutex
 	actor          string
 	cachedRoots    *mcplib.ListRootsResult
 	cachedRootsErr error
 	rootsCached    bool
+	ingestStarted  bool // mailbox ingest goroutine launched (guarded by mu)
 }
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
@@ -65,7 +67,39 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
-	return serveStdio(context.Background(), mcpSrv, in, out)
+
+	// A cancellable server-lifetime context so any background work (the mailbox
+	// ingest goroutine) stops cleanly when the stdio session ends.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.ctx = ctx
+	return serveStdio(ctx, mcpSrv, in, out)
+}
+
+// maybeStartIngest lazily launches the per-agent mailbox ingest goroutine the
+// first time a real (actor, workDir) resolves. It is gated behind the
+// BOTFAM_WAIT_INGEST env var while the unified-wait path is being proven
+// (#229 M3): unset, the server behaves exactly as before. The goroutine runs for
+// the server's lifetime and holds an advisory flock, so across multiple harnesses
+// of one agent exactly one instance writes the mailbox while the rest stand by.
+func (s *server) maybeStartIngest(workDir, actor string) {
+	if actor == "" || os.Getenv("BOTFAM_WAIT_INGEST") == "" {
+		return
+	}
+	mboxPath, ircLog, matchNick, err := fam.IngestParams(workDir)
+	if err != nil {
+		return // not resolvable yet; a later tool call retries
+	}
+	s.mu.Lock()
+	if s.ingestStarted {
+		s.mu.Unlock()
+		return
+	}
+	s.ingestStarted = true
+	s.mu.Unlock()
+
+	ing := fam.NewIngester(mboxPath, 30*time.Second, fam.NewIRCPoller(ircLog, matchNick))
+	go func() { _ = ing.Run(s.ctx) }()
 }
 
 func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
@@ -181,6 +215,10 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		}
 		actor = ""
 	}
+
+	// Lazily start the mailbox ingester now that an actor + workDir are resolved
+	// (no-op unless BOTFAM_WAIT_INGEST is set; fires at most once per server).
+	s.maybeStartIngest(workDir, actor)
 
 	if name == "worktree_init" {
 		targetActor := argString(args, "target_actor")
