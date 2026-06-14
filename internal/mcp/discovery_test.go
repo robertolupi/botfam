@@ -206,7 +206,7 @@ func TestIRCClientHealthCheck(t *testing.T) {
 	t.Setenv("COLLAB_ROOT", workDir)
 	t.Setenv("COLLAB_ACTOR", actor)
 
-	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor})
+	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")
 	var ircCheck *healthCheck
 	for i := range checks {
 		if checks[i].Check == "irc_client" {
@@ -225,7 +225,7 @@ func TestIRCClientHealthCheck(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte("999999\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor})
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")
 	for i := range checks {
 		if checks[i].Check == "irc_client" {
 			ircCheck = &checks[i]
@@ -240,7 +240,7 @@ func TestIRCClientHealthCheck(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", myPid)), 0644); err != nil {
 		t.Fatal(err)
 	}
-	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor})
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")
 	for i := range checks {
 		if checks[i].Check == "irc_client" {
 			ircCheck = &checks[i]
