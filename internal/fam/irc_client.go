@@ -29,20 +29,22 @@ func NewIrcClientCmd() *cobra.Command {
 	server := "localhost:6667"
 	channel := mainChannel + "," + ccrepChannel
 	var workDir, passFile string
+	var rawNick bool
 	c := &cobra.Command{
-		Use:           "irc-client <nick>",
+		Use:           "irc-client <actor>",
 		Short:         "Run the FIFO-driven IRC client",
 		Args:          cobra.MinimumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runIrcClient(args[0], server, channel, workDir, passFile, cmd.OutOrStdout())
+			return runIrcClient(args[0], server, channel, workDir, passFile, rawNick, cmd.OutOrStdout())
 		},
 	}
 	c.Flags().StringVar(&server, "server", server, "IRC server host:port")
 	c.Flags().StringVar(&channel, "channel", channel, "comma-separated channels to join")
-	c.Flags().StringVar(&workDir, "dir", "", "FIFO/log working dir (default scratch/irc/<nick>)")
-	c.Flags().StringVar(&passFile, "pass-file", "", "NickServ pass file (default ~/.botfam/irc-pass-<fam>-<nick>)")
+	c.Flags().StringVar(&workDir, "dir", "", "FIFO/log working dir (default scratch/irc/<actor>)")
+	c.Flags().StringVar(&passFile, "pass-file", "", "NickServ pass file (default ~/.botfam/irc-pass-<actor>-<fam>)")
+	c.Flags().BoolVar(&rawNick, "raw-nick", false, "use <actor> verbatim as the IRC nick instead of the fam-scoped <actor>-<fam>")
 	return c
 }
 
@@ -71,12 +73,21 @@ func (e *emitter) emit(line string) {
 	}
 }
 
-func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer) error {
+func runIrcClient(actor, server, channel, workDir, passFile string, rawNick bool, out io.Writer) error {
 	famReg := LoadFamRegistry(".")
 	mainChannel, _ := FamChannels(famReg)
 
+	// The on-server identity is fam-scoped (claude-botfam, agy-dc) so agents
+	// from different fams that share an actor name — and even the same wt-<actor>
+	// dir — never collide on a shared IRC server (#137). --raw-nick opts out.
+	// The bare actor still keys the FIFO dir (scratch/irc/<actor>) and pass-file.
+	ircNick := actor
+	if !rawNick {
+		ircNick = FamScopedNick(actor, FamSlug(famReg))
+	}
+
 	if passFile == "" {
-		passFile = DefaultPassFile(FamSlug(famReg), nick)
+		passFile = DefaultPassFile(FamSlug(famReg), actor)
 	}
 
 	channelList, primaryChannel := ParseChannels(channel, mainChannel)
@@ -100,7 +111,7 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 	}
 
 	if workDir == "" {
-		workDir = filepath.Join("scratch", "irc", nick)
+		workDir = filepath.Join("scratch", "irc", actor)
 	}
 
 	// Create directories
@@ -140,7 +151,7 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 	em := &emitter{logFile: logFile, out: out}
 	emitHelper := em.emit
 
-	emitHelper(fmt.Sprintf("* connecting to %s as %s, channel %s", server, nick, channel))
+	emitHelper(fmt.Sprintf("* connecting to %s as %s, channel %s", server, ircNick, channel))
 	emitHelper(fmt.Sprintf("* send: write lines to %s", fifoPath))
 
 	// Connect to IRC server
@@ -162,12 +173,12 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 			password = fields[len(fields)-1]
 		}
 		if password != "" {
-			_, _ = fmt.Fprintf(conn, "PASS %s:%s\r\n", nick, password)
+			_, _ = fmt.Fprintf(conn, "PASS %s:%s\r\n", ircNick, password)
 		}
 	}
 
-	_, _ = fmt.Fprintf(conn, "NICK %s\r\n", nick)
-	_, _ = fmt.Fprintf(conn, "USER %s 0 * :%s\r\n", nick, nick)
+	_, _ = fmt.Fprintf(conn, "NICK %s\r\n", ircNick)
+	_, _ = fmt.Fprintf(conn, "USER %s 0 * :%s\r\n", ircNick, ircNick)
 	_, _ = fmt.Fprintf(conn, "JOIN %s\r\n", strings.Join(channelList, ","))
 
 	privRe := regexp.MustCompile(`^:([^!\s]+)\S*\s+PRIVMSG\s+(\S+)\s+:(.*)$`)
@@ -184,9 +195,9 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 				return err
 			}
 			if isJoined(target) {
-				emitHelper(fmt.Sprintf("%s <%s> %s", target, nick, body))
+				emitHelper(fmt.Sprintf("%s <%s> %s", target, ircNick, body))
 			} else {
-				emitHelper(fmt.Sprintf("(pm->%s) <%s> %s", target, nick, body))
+				emitHelper(fmt.Sprintf("(pm->%s) <%s> %s", target, ircNick, body))
 			}
 			return nil
 		}
@@ -205,9 +216,9 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 				return err
 			}
 			if isJoined(target) {
-				emitHelper(fmt.Sprintf("%s <%s> %s", target, nick, chunk))
+				emitHelper(fmt.Sprintf("%s <%s> %s", target, ircNick, chunk))
 			} else {
-				emitHelper(fmt.Sprintf("(pm->%s) <%s> %s", target, nick, chunk))
+				emitHelper(fmt.Sprintf("(pm->%s) <%s> %s", target, ircNick, chunk))
 			}
 			remaining = strings.TrimSpace(remaining[len(chunk):])
 			time.Sleep(100 * time.Millisecond) // flood control
@@ -295,7 +306,7 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 				if !strings.HasPrefix(replyTarget, "#") {
 					replyTarget = src
 				}
-				replyBody := fmt.Sprintf("[%s] version: %s", nick, GetVersion())
+				replyBody := fmt.Sprintf("[%s] version: %s", ircNick, GetVersion())
 				_ = sendPrivmsg(replyTarget, replyBody)
 			}
 			continue
@@ -306,8 +317,8 @@ func runIrcClient(nick, server, channel, workDir, passFile string, out io.Writer
 			evType := m[2]
 			target := m[3]
 			emitHelper(fmt.Sprintf("* %s %s %s", src, evType, target))
-			if evType == "JOIN" && src == nick {
-				announcement := fmt.Sprintf("[%s] version %s joined.", nick, GetVersion())
+			if evType == "JOIN" && src == ircNick {
+				announcement := fmt.Sprintf("[%s] version %s joined.", ircNick, GetVersion())
 				_ = sendPrivmsg(target, announcement)
 			}
 			continue

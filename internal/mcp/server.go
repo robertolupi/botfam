@@ -116,13 +116,18 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	// caller's worktree (#132).
 	if name == "orient" {
 		wd := argString(args, "work_dir")
+		via := "work_dir"
 		if wd == "" {
 			wd = os.Getenv("PWD")
+			via = "pwd"
 		}
 		if wd == "" {
 			wd = "."
+			via = "default"
 		}
-		body, err := renderIndexJSON(buildDiscoveryData(wd))
+		d := buildDiscoveryData(wd)
+		d.resolvedVia = via
+		body, err := renderIndexJSON(d)
 		if err != nil {
 			return nil, err
 		}
@@ -251,7 +256,12 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			timeoutS = 300
 		}
 		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
-		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, actor, fromOffset, time.Duration(timeoutS*float64(time.Second)))
+		// The FIFO dir is keyed by the bare actor, but the agent's own messages
+		// appear under the fam-scoped nick (claude-botfam) in the log — match on
+		// the scoped nick or the wait wakes on its own traffic (#137; matches the
+		// `botfam irc-wait` CLI fix).
+		matchNick := fam.FamScopedNick(actor, fam.FamSlug(fam.LoadFamRegistry(absWorkDir)))
+		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
 		if err != nil {
 			return nil, err
 		}
@@ -483,7 +493,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 }
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
-	cwd := s.resolveDiscoveryWorkDir(ctx)
+	cwd, resolvedVia := s.resolveDiscoveryWorkDirVia(ctx)
 	localRepoRoot := fam.RepoPath(cwd)
 
 	u, err := url.Parse(req.Params.URI)
@@ -549,6 +559,7 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		dataWorkDir = targetRepoRoot
 	}
 	d := buildDiscoveryData(dataWorkDir)
+	d.resolvedVia = resolvedVia
 
 	path := filepath.Clean(u.Path)
 	if u.Path == "" || path == "." {

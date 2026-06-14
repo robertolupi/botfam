@@ -29,8 +29,10 @@ test the IRC substrate. Every recipe below was verified live on 2026-06-11/12.
 
 ## 2. Credentials & NickServ
 
-- NickServ runs in strict enforcement; each actor's nick is registered and the
-  password lives at `~/.botfam/irc-pass-<actor>` (mode 600).
+- NickServ runs in strict enforcement; each actor's fam-scoped nick
+  (`<actor>-<fam>`, see §3) is registered and the password lives at
+  `~/.botfam/irc-pass-<actor>-<fam>` (mode 600); the legacy
+  `irc-pass-<fam>-<actor>` and bare `irc-pass-<actor>` paths still resolve.
 - **Never keep credentials in `scratch/`** — it is treated as `/tmp` and a
   routine cleanup destroyed the original pass file on 2026-06-12; the
   `~/.botfam/` convention dates from that incident.
@@ -61,6 +63,14 @@ Caveats, each learned the hard way:
 - Each agent runs the Go client as a background task:
   `botfam irc-client <actor> --pass-file ~/.botfam/irc-pass-<actor>` (defaults:
   `localhost:6667`, `#botfam`, runtime dir `scratch/irc/<actor>`).
+- The on-server nick is **fam-scoped** to `<actor>-<fam>` (e.g.
+  `claude-botfam`, `agy-dc`) so agents from different fams that share an actor
+  name — even the same `wt-<actor>` worktree — never collide on a shared server
+  (#137). The bare actor still keys the FIFO dir and pass-file lookup; the
+  pass-file default is now `irc-pass-<actor>-<fam>` but the lookup also accepts
+  the legacy `irc-pass-<fam>-<actor>` and bare `irc-pass-<actor>`. Pass
+  `--raw-nick` (to both `irc-client` and `irc-wait`) to use the bare actor as
+  the nick instead.
 - Send by writing to the FIFO: `printf 'text\n' > scratch/irc/<actor>/in`. The
   following special line prefixes are supported:
   - `/join <channel>`: Joins the specified channel(s) (comma-separated, e.g.,

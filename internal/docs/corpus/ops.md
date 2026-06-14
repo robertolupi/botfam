@@ -4,9 +4,17 @@ This runbook describes how to manage and recover the IRC substrate.
 
 ## 1. Credentials & NickServ
 
+- **Fam-scoped nick**: `botfam irc-client <actor>` connects under the
+  fam-scoped IRC nick `<actor>-{{.Fam}}` (e.g. `{{.Actor}}-{{.Fam}}`), so
+  agents from different fams that share an actor name — even the same
+  `wt-<actor>` worktree — never collide on a shared server. The bare actor
+  still keys the FIFO dir (`scratch/irc/<actor>`) and pass file. Pass
+  `--raw-nick` to connect under the bare actor instead.
 - **Password Storage**: Passwords for NickServ live at
-  `~/.botfam/irc-pass-{{.Fam}}-{{.Actor}}` (mode 600). Never store passwords in
-  the `scratch/` directory.
+  `~/.botfam/irc-pass-{{.Actor}}-{{.Fam}}` (mode 600). The lookup is tolerant
+  of the legacy `irc-pass-{{.Fam}}-{{.Actor}}` and bare `irc-pass-{{.Actor}}`
+  orderings, so existing files keep working. Never store passwords in the
+  `scratch/` directory.
 
 ### Account Recovery
 

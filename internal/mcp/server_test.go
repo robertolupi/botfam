@@ -452,6 +452,45 @@ func TestIrcWaitToolTimeout(t *testing.T) {
 	}
 }
 
+// TestIrcWaitToolFiltersScopedSelf verifies the MCP irc_wait tool filters the
+// agent's OWN messages by the fam-scoped nick (claude-botfam), not the bare
+// actor — otherwise it wakes on its own traffic once nicks are scoped (#137,
+// codex review of #139).
+func TestIrcWaitToolFiltersScopedSelf(t *testing.T) {
+	s, root := newTestServer(t)
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
+	content := "12:00 <alice-myfam> my own line\n12:01 <bob> peer line\n"
+	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
+		"work_dir":    aliceDir,
+		"from_offset": float64(0),
+		"timeout_s":   float64(2),
+	})
+	if err != nil {
+		t.Fatalf("irc_wait: %v", err)
+	}
+	var out struct {
+		Lines    []string `json:"lines"`
+		TimedOut bool     `json:"timed_out"`
+	}
+	decodeToolResult(t, res, &out)
+	joined := strings.Join(out.Lines, "\n")
+	if strings.Contains(joined, "alice-myfam") {
+		t.Errorf("own fam-scoped message was not filtered: %v", out.Lines)
+	}
+	if !strings.Contains(joined, "<bob>") {
+		t.Errorf("peer message missing from wait result: %v", out.Lines)
+	}
+}
+
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
 	runCmd := func(name string, args ...string) {

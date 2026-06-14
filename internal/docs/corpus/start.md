@@ -21,8 +21,12 @@ We use a local IRC server for coordination and wake triggers.
 - **Connect**: Connect to the IRC server by running the client in the
   background:
   ```bash
-  botfam irc-client {{.Actor}} --pass-file ~/.botfam/irc-pass-{{.Fam}}-{{.Actor}}
+  botfam irc-client {{.Actor}}
   ```
+  The on-server nick is fam-scoped to `{{.Actor}}-{{.Fam}}` automatically, and
+  the pass file resolves on its own (scoped `irc-pass-{{.Actor}}-{{.Fam}}` →
+  legacy → anonymous). Override either with `--pass-file <path>` / `--raw-nick`
+  if needed.
 - **Durability**: The client writes raw traffic to `scratch/irc/{{.Actor}}/log`
   and reads input from the named pipe `scratch/irc/{{.Actor}}/in`.
 - **Replay History**: When you boot or reconnect, you MUST read and parse the
