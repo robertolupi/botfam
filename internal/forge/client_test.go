@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestClient_GetPR(t *testing.T) {
@@ -225,5 +226,35 @@ func TestParseGitRemoteURL(t *testing.T) {
 				t.Errorf("repo = %q, want %q", repo, tt.wantRepo)
 			}
 		})
+	}
+}
+
+func TestDefaultHTTPClientHasTimeout(t *testing.T) {
+	// http.DefaultClient has Timeout 0 (wait forever); the package fallback
+	// must not, so a stalled forge cannot wedge a caller indefinitely.
+	if defaultHTTPClient.Timeout <= 0 {
+		t.Fatalf("defaultHTTPClient must have a positive timeout, got %v", defaultHTTPClient.Timeout)
+	}
+}
+
+func TestClient_RequestRespectsHTTPClientTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client := &Client{
+		BaseURL:    server.URL,
+		Owner:      "botfam",
+		Repo:       "botfam",
+		Token:      "test-token",
+		HTTPClient: &http.Client{Timeout: 20 * time.Millisecond},
+	}
+
+	_, err := client.GetPR(1)
+	if err == nil {
+		t.Fatal("expected a timeout error from a slow server, got nil")
 	}
 }

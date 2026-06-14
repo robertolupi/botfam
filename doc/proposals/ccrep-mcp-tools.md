@@ -3,7 +3,8 @@ authors:
   - claude
   - rlupi
 kind: proposal
-status: Draft
+status: Superseded
+superseded-by: doc/collab/PROTOCOL.md
 created: 2026-06-13
 proposal-id: ccrep-mcp-tools-v1
 executor: claude
@@ -14,10 +15,9 @@ deadline: none
 # Proposal: ccrep verb set + CLI/MCP alignment (cobra)
 
 > [!NOTE]
-> **Status**: Draft (2026-06-13). Implements Step 1 of
-> [post-pivot-cleanup.md](post-pivot-cleanup.md) ("Consensus → MCP-over-IRC")
-> and establishes the CLI↔MCP alignment pattern the other domains will copy.
-> This doc is the reviewable contract; implementation lands as its own merge.
+> **Status**: Superseded (2026-06-13) by the Gitea PR consensus model
+> ([PROTOCOL.md](../collab/PROTOCOL.md) §3). The CLI / MCP design was retired
+> with the deletion of the ccrep substrate.
 
 - **Participants:**
   - Roberto Lupi (Operator) — direction, decisions, CLI ergonomics

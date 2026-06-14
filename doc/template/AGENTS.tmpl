@@ -28,10 +28,13 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
 
 Generated from `skills/*/SKILL.md`.
 
-{{- if .Skills }} {{ range .Skills }}
-
-- `{{ .Name }}`: {{ .Description }} {{- end }} {{- else }}
-- No repo-local skills found. {{- end }}
+{{- if .Skills }}
+{{ range .Skills }}
+- `{{ .Name }}`: {{ .Description }}
+{{- end }}
+{{- else }}
+- No repo-local skills found.
+{{- end }}
 
 Keep this file lightweight: substantive rules belong in PROTOCOL.md, never
 here. This file is generated from the same source as the other harness files.
