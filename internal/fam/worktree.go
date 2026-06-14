@@ -3,6 +3,7 @@ package fam
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -329,6 +330,34 @@ func worktreeSync(args []string, out io.Writer) error {
 	lastCommit, err := gitOne(absPath, "log", "--oneline", "-1")
 	if err == nil {
 		fmt.Fprintf(out, "HEAD is now at: %s\n", lastCommit)
+	}
+
+	// Sync the Gitea wiki if present (issue #82)
+	wikiDir := filepath.Join(absPath, "wiki")
+	if info, err := os.Stat(filepath.Join(wikiDir, ".git")); err == nil && info.IsDir() {
+		fmt.Fprintln(out, "Syncing local wiki clone...")
+		wikiDirty, _ := gitLines(wikiDir, "status", "--porcelain")
+		wikiStashed := false
+		if len(wikiDirty) > 0 {
+			fmt.Fprintln(out, "  Wiki has local changes. Stashing...")
+			if _, err := gitOutput(wikiDir, "stash", "push", "-u", "-m", "botfam wiki sync auto-stash"); err == nil {
+				wikiStashed = true
+			}
+		}
+
+		fmt.Fprintln(out, "  Fetching and pulling latest wiki changes...")
+		if pullOut, err := gitOutput(wikiDir, "pull", "--rebase"); err != nil {
+			fmt.Fprintf(out, "  warning: wiki pull failed: %v\n%s", err, string(pullOut))
+		} else {
+			fmt.Fprint(out, string(pullOut))
+		}
+
+		if wikiStashed {
+			fmt.Fprintln(out, "  Popping stashed wiki changes...")
+			if popOut, err := gitOutput(wikiDir, "stash", "pop"); err != nil {
+				fmt.Fprintf(out, "  warning: wiki stash pop failed: %v\n%s", err, string(popOut))
+			}
+		}
 	}
 
 	return nil

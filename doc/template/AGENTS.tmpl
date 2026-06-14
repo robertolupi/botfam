@@ -2,9 +2,8 @@
 
 This checkout is one agent's **worktree** in a botfam coordination fam.
 
-1. **Your name** is this worktree's directory basename with any leading
-   `wt-` or `botfam-` stripped (`wt-$NAME` → `$NAME`). If in doubt:
-   `basename "$PWD"`.
+1. **Your name** is resolved by running `botfam whoami` (which parses the
+   worktree directory basename per PROTOCOL §1).
 2. **Read [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md) before your first
    collab call.** It is the single source of truth for identity rules,
    coordination tools, the ccrep change protocol, worktree ownership, and
@@ -14,17 +13,16 @@ This checkout is one agent's **worktree** in a botfam coordination fam.
 4. **Connect to the IRC server immediately.** To join the conversation, run
    `botfam irc-client <name>` as a background task. A registered nick's pass
    file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the
-   legacy `~/.botfam/irc-pass-<name>`); pass `--pass-file` to override.
-   Monitor for incoming messages using the
-   wake watcher `botfam irc-wait`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)
-   for server details and operational recipes.
-5. **Sending and reading.** Write lines to `scratch/irc/<name>/in`: a bare
-   line goes as text to your fam's main channel; `/msg <target> <text>`
-   messages another channel or nick; `/join <#chan>` joins a channel;
-   `/raw <cmd>` sends any IRC command. Replies appear in
-   `scratch/irc/<name>/log`. If the botfam MCP server is connected, prefer
-   the `irc_write` / `irc_read` / `irc_wait` tools — same semantics, no
-   shell approval prompts.
+   legacy `~/.botfam/irc-pass-<name>`); pass `--pass-file` to override. Monitor
+   for incoming messages using the wake watcher `botfam irc-wait`. See
+   [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md) for server details and
+   operational recipes.
+5. **Sending and reading.** Write lines to `scratch/irc/<name>/in`: a bare line
+   goes as text to your fam's main channel; `/msg <target> <text>` messages
+   another channel or nick; `/join <#chan>` joins a channel; `/raw <cmd>` sends
+   any IRC command. Replies appear in `scratch/irc/<name>/log`. If the botfam
+   MCP server is connected, prefer the `irc_write` / `irc_read` / `irc_wait`
+   tools — same semantics, no shell approval prompts.
 
 ## Repo-local Skills
 
