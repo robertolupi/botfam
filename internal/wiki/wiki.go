@@ -111,9 +111,13 @@ func (p ForgeProvider) Index() ([]PageMeta, error) {
 	}
 	metas := make([]PageMeta, 0, len(pages))
 	for _, ap := range pages {
+		name := ap.SubURL
+		if name == "" {
+			name = ap.Title
+		}
 		metas = append(metas, PageMeta{
-			Name:    ap.Title,
-			URI:     "botfam:///wiki/" + ap.Title,
+			Name:    name,
+			URI:     "botfam:///wiki/" + name,
 			SHA:     ap.LastCommit.SHA,
 			Updated: ap.LastCommit.Commit.Author.Date,
 			Source:  "gitea",

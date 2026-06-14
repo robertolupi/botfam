@@ -82,14 +82,28 @@ func TestForgeProviderIndex(t *testing.T) {
 		if r.URL.Path != "/api/v1/repos/o/r/wiki/pages" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
-		w.Write([]byte(`[{"title":"Home","last_commit":{"sha":"s1"}},{"title":"Proposals","last_commit":{"sha":"s2"}}]`))
+		w.Write([]byte(`[` +
+			`{"title":"Home","sub_url":"Home","last_commit":{"sha":"s1"}},` +
+			`{"title":"Proposals","sub_url":"Proposals","last_commit":{"sha":"s2"}},` +
+			`{"title":"lineage botfam bottown","sub_url":"lineage-botfam-bottown","last_commit":{"sha":"s3"}}` +
+			`]`,
+		))
 	})}
 	metas, err := p.Index()
 	if err != nil {
 		t.Fatalf("Index: %v", err)
 	}
-	if len(metas) != 2 || metas[0].Name != "Home" || metas[0].URI != "botfam:///wiki/Home" || metas[1].SHA != "s2" {
-		t.Errorf("unexpected index: %+v", metas)
+	if len(metas) != 3 {
+		t.Fatalf("len(metas) = %d, want 3", len(metas))
+	}
+	if metas[0].Name != "Home" || metas[0].URI != "botfam:///wiki/Home" {
+		t.Errorf("metas[0] = %+v, want Name=Home, URI=botfam:///wiki/Home", metas[0])
+	}
+	if metas[1].SHA != "s2" || metas[1].Name != "Proposals" {
+		t.Errorf("metas[1] = %+v, want Name=Proposals, SHA=s2", metas[1])
+	}
+	if metas[2].Name != "lineage-botfam-bottown" || metas[2].URI != "botfam:///wiki/lineage-botfam-bottown" {
+		t.Errorf("metas[2] = %+v, want Name=lineage-botfam-bottown, URI=botfam:///wiki/lineage-botfam-bottown", metas[2])
 	}
 }
 
