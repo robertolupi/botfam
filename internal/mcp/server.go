@@ -56,7 +56,6 @@ type server struct {
 	rootsCached    bool
 }
 
-
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	s := &server{
 		envActor: os.Getenv("COLLAB_ACTOR"),
@@ -794,13 +793,7 @@ func (s *server) requestRootsWithCache(ctx context.Context) (*mcplib.ListRootsRe
 
 	sess := mcpserver.ClientSessionFromContext(ctx)
 	if sess == nil {
-		err := fmt.Errorf("no active client session")
-		s.mu.Lock()
-		s.cachedRoots = nil
-		s.cachedRootsErr = err
-		s.rootsCached = true
-		s.mu.Unlock()
-		return nil, err
+		return nil, fmt.Errorf("no active client session")
 	}
 
 	if _, ok := sess.(mcpserver.SessionWithRoots); !ok {
@@ -814,13 +807,15 @@ func (s *server) requestRootsWithCache(ctx context.Context) (*mcplib.ListRootsRe
 	}
 
 	res, err := s.mcpSrv.RequestRoots(ctx, mcplib.ListRootsRequest{})
+	if err != nil {
+		return nil, err
+	}
 
 	s.mu.Lock()
 	s.cachedRoots = res
-	s.cachedRootsErr = err
+	s.cachedRootsErr = nil
 	s.rootsCached = true
 	s.mu.Unlock()
 
-	return res, err
+	return res, nil
 }
-
