@@ -283,7 +283,6 @@ func famResolvable(dir string) bool {
 	return fam.FamSlug(fam.LoadFamRegistry(dir)) != ""
 }
 
-
 // fileURIToPath turns a file:// root URI into a local path, or "" if not a
 // file URI.
 func fileURIToPath(uri string) string {
