@@ -133,7 +133,7 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 			}
 			fmt.Fprintf(out, "Rendered %s/.mcp.json (claude-code)\n", n)
 		case "antigravity", "codex":
-			if err := RegisterMCPServerGlobally(opts.forgeURL, out); err != nil {
+			if err := RegisterMCPServerGlobally(opts.forgeURL, slug, out); err != nil {
 				fmt.Fprintf(out, "Warning: global MCP registration for %s failed: %v\n", n, err)
 			}
 		default:
