@@ -320,3 +320,57 @@ repository = "my-owner/my-repo"
 		t.Errorf("expected fallback Repo git-repo, got %s", clientFallback.Repo)
 	}
 }
+
+// TestNewClient_AgentWorktreeViaResolveFam covers the new primary path (#231):
+// a declared [agent.<name>] worktree resolves forge_url, repository, and the
+// per-harness token in one shot through famconfig.ResolveFam.
+func TestNewClient_AgentWorktreeViaResolveFam(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("COLLAB_ROOT", "")
+	t.Setenv("GITEA_URL", "")
+	t.Setenv("GITEA_OWNER", "")
+	t.Setenv("GITEA_REPO", "")
+	t.Setenv("GITEA_TOKEN", "")
+
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+	famTOML := `name = "test-fam"
+forge_url = "http://agent-forge:3000"
+repository = "agent-owner/agent-repo"
+
+[agent.claude]
+harness = "claude-code"
+`
+	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(famDir, "claude")
+	if err := exec.Command("git", "init", wt).Run(); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	// Per-harness token at ~/.botfam/token-claude-code (HOME overridden above).
+	botfamDir := filepath.Join(home, ".botfam")
+	if err := os.MkdirAll(botfamDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(botfamDir, "token-claude-code"), []byte("agent-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := NewClient(wt, "claude")
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if client.BaseURL != "http://agent-forge:3000/" {
+		t.Errorf("BaseURL = %q, want http://agent-forge:3000/", client.BaseURL)
+	}
+	if client.Owner != "agent-owner" || client.Repo != "agent-repo" {
+		t.Errorf("Owner/Repo = %q/%q, want agent-owner/agent-repo", client.Owner, client.Repo)
+	}
+	if client.Token != "agent-token" {
+		t.Errorf("Token = %q, want agent-token (per-harness token via ResolveFam)", client.Token)
+	}
+}
