@@ -454,6 +454,7 @@ func renderIndexJSON(d discoveryData) ([]byte, error) {
 	idx.Resources = []string{
 		"botfam:///",
 		"botfam:///index.json",
+		"botfam:///problem",
 		"botfam:///tools",
 		"botfam:///tools.json",
 		"botfam:///skills",

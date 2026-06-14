@@ -154,11 +154,18 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	if err != nil {
 		return nil, err
 	}
-	// Membership: a migrated fam proves it via its <fam-dir>/fam.toml roster — if
-	// ResolveFam accepts this worktree as a declared [agent.<name>], that IS
-	// membership. The legacy content-hash object-store check (which doesn't know
-	// about freshly-cloned fams) only applies when there's no fam.toml.
+	// Fail-closed serve gate (#191, proposal-unified-fam-config §4.6): if this is
+	// a migrated fam (a fam.toml exists at the fam dir) but ResolveFam refuses the
+	// worktree — the base/main checkout, a [user.<name>] human checkout, or an
+	// unknown agent — quarantine it. Every tool except orient (handled above) is
+	// refused and pointed at botfam:///problem, where the agent is told to report
+	// to its operator rather than self-fix. An un-migrated fam (no fam.toml) is not
+	// gated: it falls back to the legacy content-hash membership check, which is
+	// also what proves membership for a fam ResolveFam doesn't yet understand.
 	if _, rfErr := fam.ResolveFam(workDir); rfErr != nil {
+		if famTomlPresent(workDir) {
+			return nil, quarantineError(rfErr)
+		}
 		if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
 			return nil, err
 		}
@@ -531,6 +538,8 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	// One discovery root, plus its structured form.
 	add("botfam:///", "botfam discovery root", "text/markdown")
 	add("botfam:///index.json", "botfam discovery index", "application/json")
+	add("botfam:///problem", "botfam quarantine: report this problem", "text/markdown")
+	add("botfam:///problem.json", "botfam quarantine: report this problem", "application/json")
 	// The embedded generic docs corpus (#117). Served from the binary, so
 	// these work in a repo with no local doc/ checked in.
 	for _, slug := range discoverySlugs {
@@ -645,6 +654,11 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 			MIMEType: "application/json",
 			Text:     string(body),
 		}}, nil
+	case path == "/problem" || path == "/problem.json":
+		// Quarantine diagnosis (#191 §4.6): the ResolveFam result for this fam's
+		// work dir, rendered as a "report to your operator" surface. Healthy
+		// worktrees get a "no problem" body so the resource is never misleading.
+		return problemResource(req.Params.URI, dataWorkDir, path == "/problem.json")
 	case path == "/tools":
 		return markdownResource(req.Params.URI, renderToolsMarkdown(s)), nil
 	case path == "/tools.json":
