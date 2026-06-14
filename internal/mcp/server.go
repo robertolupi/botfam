@@ -533,6 +533,8 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 
 	// Resource template for individual skills
 	mcpSrv.AddResourceTemplate(mcplib.NewResourceTemplate("botfam:///skills/{name}", "botfam skill document"), s.handleReadResource)
+	// Resource template for individual wiki pages
+	mcpSrv.AddResourceTemplate(mcplib.NewResourceTemplate("botfam:///wiki/{name}", "botfam wiki page"), s.handleReadResource)
 
 	// Live forge wiki (#119). Individual pages (botfam:///wiki/<page>) are
 	// discovered via the index rather than statically advertised.
