@@ -59,6 +59,8 @@ func buildDiscoveryData(workDir string) discoveryData {
 		d.tmpl.Fam = fam.FamSlug(reg)
 	}
 	d.tmpl.MainChannel, d.tmpl.CcrepChannel = fam.FamChannels(reg)
+	d.tmpl.IntegrationBranch = fam.FamBranch(reg)
+	d.tmpl.ForgeURL = reg.Origin
 
 	d.health = discoveryHealth(workDir, d.tmpl)
 	return d
