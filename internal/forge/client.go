@@ -1,10 +1,7 @@
 package forge
 
 import (
-	"bufio"
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +10,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
+
+// splitOwnerRepo splits a fam.toml "owner/repo" value, reporting ok only for a
+// well-formed two-part value.
+func splitOwnerRepo(repository string) (owner, repo string, ok bool) {
+	parts := strings.Split(repository, "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return parts[0], parts[1], true
+	}
+	return "", "", false
+}
 
 // defaultHTTPClient is the shared fallback used by every Client that does not
 // supply its own HTTPClient. Unlike http.DefaultClient it has a finite timeout
@@ -152,42 +160,46 @@ func NewClient(workDir string, actor string) (*Client, error) {
 	repo := os.Getenv("GITEA_REPO")
 	token := os.Getenv("GITEA_TOKEN")
 
-	var famTOMLPath string
-	if baseURL == "" || owner == "" || repo == "" {
-		famTOMLPath = resolveFamTOMLPath(workDir)
-		if famTOMLPath != "" {
-			if baseURL == "" {
-				baseURL = readConfigValueFromFamTOML(famTOMLPath, "forge_url", "forge-url")
+	// Resolve fam identity through the single canonical resolver (#231). A
+	// declared [agent.<name>] worktree yields forge_url, repository, and the
+	// per-harness token path in one shot (env vars set above still win).
+	// ResolveFam fails closed outside an agent worktree, so for non-agent /
+	// legacy checkouts (and tools) we read fam.toml directly via the same leaf
+	// locator, then fall through to the git remote below.
+	var reg famconfig.Registry
+	var haveReg bool
+	if rf, err := famconfig.ResolveFam(workDir); err == nil {
+		reg, haveReg = rf.Registry, true
+		if token == "" && rf.TokenPath != "" {
+			if b, rerr := os.ReadFile(rf.TokenPath); rerr == nil {
+				token = strings.TrimSpace(string(b))
 			}
-			if owner == "" || repo == "" {
-				repVal := readConfigValueFromFamTOML(famTOMLPath, "repository")
-				if repVal != "" {
-					parts := strings.Split(repVal, "/")
-					if len(parts) == 2 {
-						if owner == "" {
-							owner = parts[0]
-						}
-						if repo == "" {
-							repo = parts[1]
-						}
-					}
+		}
+	} else if p := famconfig.FindFamTOMLPath(workDir, nil); p != "" {
+		if r, rerr := famconfig.ReadRegistry(p); rerr == nil {
+			reg, haveReg = r, true
+		}
+	}
+	if haveReg {
+		if baseURL == "" {
+			baseURL = reg.ForgeURL
+		}
+		if owner == "" || repo == "" {
+			if o, r, ok := splitOwnerRepo(reg.Repository); ok {
+				if owner == "" {
+					owner = o
+				}
+				if repo == "" {
+					repo = r
 				}
 			}
 		}
 	}
 
+	// remoteName is the git remote consulted as a last-resort fallback below.
+	// Overridable via BOTFAM_FORGE_REMOTE; defaults to "gitea". (The old
+	// undocumented fam.toml forge_remote key is dropped — it was set nowhere.)
 	remoteName := os.Getenv("BOTFAM_FORGE_REMOTE")
-	if remoteName == "" && famTOMLPath != "" {
-		remoteName = readConfigValueFromFamTOML(famTOMLPath, "forge_remote", "forge-remote")
-	}
-	if remoteName == "" {
-		if famTOMLPath == "" {
-			famTOMLPath = resolveFamTOMLPath(workDir)
-		}
-		if famTOMLPath != "" {
-			remoteName = readConfigValueFromFamTOML(famTOMLPath, "forge_remote", "forge-remote")
-		}
-	}
 	if remoteName == "" {
 		remoteName = "gitea"
 	}
@@ -242,12 +254,11 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			return nil, fmt.Errorf("failed to get user home dir: %w", err)
 		}
 
-		if famTOMLPath == "" {
-			famTOMLPath = resolveFamTOMLPath(workDir)
-		}
 		var harness string
-		if famTOMLPath != "" {
-			harness = readHarnessFromFamTOML(famTOMLPath, actor)
+		if haveReg {
+			if a, ok := reg.Agents[actor]; ok {
+				harness = a.Harness
+			}
 		}
 
 		// Fail closed: the token is the canonical per-harness one. There is NO
@@ -278,7 +289,7 @@ func NewClient(workDir string, actor string) (*Client, error) {
 		}
 
 		if tokenFile == "" {
-			return nil, fmt.Errorf("cannot resolve forge token: no [agent.%s] harness in %s — run `botfam setup`; report this to your operator (no legacy fallback)", actor, famTOMLPath)
+			return nil, fmt.Errorf("cannot resolve forge token: no [agent.%s] harness in fam.toml — run `botfam setup`; report this to your operator (no legacy fallback)", actor)
 		}
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {
@@ -442,134 +453,6 @@ func worktreeRoot(workDir string) string {
 		return ""
 	}
 	return strings.TrimSpace(out.String())
-}
-func resolveFamTOMLPath(workDir string) string {
-	if root := os.Getenv("COLLAB_ROOT"); root != "" {
-		return filepath.Join(root, "fam.toml")
-	}
-
-	// Prioritize new unified-fam-config path: parent of the git toplevel directory
-	cmdToplevel := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmdToplevel.Dir = workDir
-	var outToplevel bytes.Buffer
-	cmdToplevel.Stdout = &outToplevel
-	if err := cmdToplevel.Run(); err == nil {
-		gitRoot := strings.TrimSpace(outToplevel.String())
-		if gitRoot != "" {
-			famTOML := filepath.Join(filepath.Dir(gitRoot), "fam.toml")
-			if _, err := os.Stat(famTOML); err == nil {
-				return famTOML
-			}
-		}
-	}
-
-	// Fallback to old ~/.botfam registry path
-	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
-	cmd.Dir = workDir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return ""
-	}
-	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	for i, l := range lines {
-		lines[i] = strings.TrimSpace(l)
-	}
-	sort.Strings(lines)
-	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
-	id := hex.EncodeToString(sum[:])[:12]
-	name := "fam-" + id
-	if suffix := os.Getenv("BOTFAM_FAM"); suffix != "" {
-		var cleaned []rune
-		for _, char := range suffix {
-			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '_' || char == '-' {
-				cleaned = append(cleaned, char)
-			}
-		}
-		name += "-" + string(cleaned)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".botfam", name, "fam.toml")
-}
-
-func readConfigValueFromFamTOML(path string, keys ...string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		for _, wantKey := range keys {
-			if k == wantKey {
-				v = strings.TrimSpace(v)
-				if strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
-					return v[1 : len(v)-1]
-				}
-				if strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'") {
-					return v[1 : len(v)-1]
-				}
-				return v
-			}
-		}
-	}
-	return ""
-}
-
-func readHarnessFromFamTOML(path string, actor string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	inAgentBlock := false
-	targetHeader := fmt.Sprintf("[agent.%s]", actor)
-	targetHeaderQuoted := fmt.Sprintf("[agent.%q]", actor)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "[") {
-			if line == targetHeader || line == targetHeaderQuoted {
-				inAgentBlock = true
-			} else {
-				inAgentBlock = false
-			}
-			continue
-		}
-		if inAgentBlock {
-			k, v, ok := strings.Cut(line, "=")
-			if !ok {
-				continue
-			}
-			k = strings.TrimSpace(k)
-			if k == "harness" {
-				v = strings.TrimSpace(v)
-				if strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
-					return v[1 : len(v)-1]
-				}
-				if strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'") {
-					return v[1 : len(v)-1]
-				}
-				return v
-			}
-		}
-	}
-	return ""
 }
 
 type Milestone struct {
