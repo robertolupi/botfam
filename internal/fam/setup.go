@@ -9,54 +9,17 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
 
-// AgentConfig is a single `[agent.<name>]` or `[user.<name>]` entry in fam.toml:
-// how botfam configures that worktree. The map key (and Name) is the worktree
-// directory basename (the `wt-` prefix is retired). Email is optional and
-// defaults to the host git email plus-addressed with Name. IsUser marks a
-// `[user.<name>]` (human) entry, which gets a git identity but no harness/runtime.
-// See wiki/proposal-unified-fam-config §4.2.
-type AgentConfig struct {
-	Name      string `toml:"-"` // filled from the table key
-	Harness   string `toml:"harness,omitempty"`
-	ForgeUser string `toml:"forge_user,omitempty"`
-	Email     string `toml:"email,omitempty"`
-	IsUser    bool   `toml:"-"` // true for [user.<name>] entries
-}
+// AgentConfig and Registry now live in the dependency-free leaf
+// internal/famconfig (#231); these aliases keep the fam.AgentConfig /
+// fam.Registry API for existing callers. See famconfig for field docs.
+type AgentConfig = famconfig.AgentConfig
 
-type Registry struct {
-	Name         string   `toml:"name"`
-	Slug         string   `toml:"slug,omitempty"`
-	Branch       string   `toml:"branch,omitempty"`
-	RootSet      []string `toml:"root_set,omitempty"`
-	Origin       string   `toml:"origin,omitempty"`
-	Roster       []string `toml:"roster,omitempty"`
-	Channels     []string `toml:"channels,omitempty"`
-	RepoPaths    []string `toml:"repo_paths,omitempty"`
-	ObjectStores []string `toml:"object_stores,omitempty"`
-	CreatedAt    string   `toml:"created_at,omitempty"`
-
-	// ForgeURL is the HTTP(S) forge API base (e.g. http://gitea.home.rlupi.com:3000/).
-	// Repository is the org/repo on the forge. Both are explicit in fam.toml so
-	// nothing has to guess them from a (possibly SSH) git remote — see #184.
-	ForgeURL   string `toml:"forge_url,omitempty"`
-	Repository string `toml:"repository,omitempty"`
-
-	// Agents and Users hold the `[agent.<name>]` / `[user.<name>]` tables, keyed
-	// by worktree-directory name. Agents may run the botfam runtime; Users are
-	// human checkouts (git identity only). See wiki/proposal-unified-fam-config.
-	Agents map[string]AgentConfig `toml:"agent,omitempty"`
-	Users  map[string]AgentConfig `toml:"user,omitempty"`
-
-	// WikiProjections declares curated wiki indexes as "name:glob" entries
-	// (e.g. "reviews:review-*"). Each becomes botfam:///<name>[.json], listing
-	// the wiki pages whose name matches the glob. Fam-specific: every fam
-	// declares its own set (or none) — see #120.
-	WikiProjections []string `toml:"wiki_projections,omitempty"`
-}
+type Registry = famconfig.Registry
 
 // Setup is the thin args/io entry point retained for tests; it builds the
 // Cobra command and runs it against args.
@@ -154,40 +117,11 @@ func EnsureMembership(root string, explicit bool, workDir string) error {
 	return fmt.Errorf("repo object store is not registered for fam root %s; refusing unverified membership", root)
 }
 
-func ReadRegistry(path string) (Registry, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Registry{}, err
-	}
-	var reg Registry
-	if err := toml.Unmarshal(data, &reg); err != nil {
-		return Registry{}, fmt.Errorf("parse %s: %w", path, err)
-	}
-	// TOML map keys aren't injected into the struct value, so backfill the
-	// canonical Name (and IsUser for users) from the table key.
-	for k, ac := range reg.Agents {
-		ac.Name = k
-		reg.Agents[k] = ac
-	}
-	for k, ac := range reg.Users {
-		ac.Name = k
-		ac.IsUser = true
-		reg.Users[k] = ac
-	}
-	return reg, nil
-}
+// ReadRegistry / WriteRegistry delegate to famconfig (#231), kept as fam-package
+// wrappers so existing callers don't change.
+func ReadRegistry(path string) (Registry, error) { return famconfig.ReadRegistry(path) }
 
-func WriteRegistry(path string, reg Registry) error {
-	data, err := toml.Marshal(reg)
-	if err != nil {
-		return fmt.Errorf("marshal fam.toml: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
+func WriteRegistry(path string, reg Registry) error { return famconfig.WriteRegistry(path, reg) }
 
 func createProjectSymlink(project, target string) error {
 	home, err := os.UserHomeDir()

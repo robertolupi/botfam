@@ -1,19 +1,10 @@
 package forge
 
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-)
+import "github.com/robertolupi/botfam/internal/famconfig"
 
-// HarnessTokenPath returns the per-harness token path ~/.botfam/token-<harness>.
+// HarnessTokenPath is a forwarding alias to famconfig.HarnessTokenPath, kept so
+// existing forge.HarnessTokenPath callers keep working after the canonical
+// implementation moved to the dependency-free leaf (#231).
 func HarnessTokenPath(harness string) (string, error) {
-	if harness == "" {
-		return "", fmt.Errorf("harness is empty")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("failed to get user home directory: %w", err)
-	}
-	return filepath.Join(home, ".botfam", "token-"+harness), nil
+	return famconfig.HarnessTokenPath(harness)
 }
