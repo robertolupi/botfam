@@ -413,6 +413,70 @@ func TestIrcReadToolMissingLog(t *testing.T) {
 	}
 }
 
+func TestIrcReplayTool(t *testing.T) {
+	s, root := newTestServer(t)
+	// Create mock fam.toml in root
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\nroster = [\"alice\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+
+	// Create a history file
+	historyDir := mkdir(t, filepath.Join(root, "myfam-collab"))
+	historyFile := filepath.Join(historyDir, "history.jsonl")
+
+	writeEntry := func(sender, evType, target, body string) {
+		entry := fam.HistoryEntry{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Sender:    sender,
+			Type:      evType,
+			Target:    target,
+			Body:      body,
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.OpenFile(historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		_, _ = f.Write(append(data, '\n'))
+	}
+
+	writeEntry("bob", "PRIVMSG", "#botfam", "peer msg")
+	writeEntry("alice-myfam", "PRIVMSG", "#botfam", "my own msg")
+
+	// Call the irc_replay tool using the server
+	res, err := s.callTool(context.Background(), "irc_replay", map[string]any{
+		"work_dir": aliceDir,
+		"since":    "lines:10",
+		"channels": "#botfam",
+	})
+	if err != nil {
+		t.Fatalf("irc_replay tool call failed: %v", err)
+	}
+
+	var out struct {
+		Lines      []string `json:"lines"`
+		NextOffset int64    `json:"next_offset"`
+	}
+	decodeToolResult(t, res, &out)
+
+	if len(out.Lines) != 1 {
+		t.Errorf("expected 1 line, got %d: %v", len(out.Lines), out.Lines)
+	}
+	if !strings.Contains(out.Lines[0], "peer msg") {
+		t.Errorf("expected line to contain 'peer msg', got %q", out.Lines[0])
+	}
+	if strings.Contains(out.Lines[0], "alice-myfam") {
+		t.Errorf("expected own message to be filtered out, got %q", out.Lines[0])
+	}
+}
+
 func TestIrcWaitToolTimeout(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()

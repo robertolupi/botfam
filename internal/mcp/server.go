@@ -93,6 +93,13 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("irc_replay",
+		mcplib.WithDescription("Replay durable shared channel history logs."),
+		mcplib.WithString("since"),
+		mcplib.WithString("channels"),
+		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
+	))
 	add(mcplib.NewTool("worktree_init",
 		mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
 		mcplib.WithString("target_actor", mcplib.Required()),
@@ -269,6 +276,52 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			lines = []string{}
 		}
 		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset, "timed_out": timedOut})
+	}
+
+	if name == "irc_replay" {
+		absWorkDir, err := filepath.Abs(workDir)
+		if err != nil {
+			return nil, err
+		}
+
+		historyPath, err := fam.DefaultHistoryPath(absWorkDir)
+		if err != nil {
+			return nil, err
+		}
+
+		since := argString(args, "since")
+		channelsStr := argString(args, "channels")
+
+		// Parse filter channels
+		var filterChans []string
+		if channelsStr != "" {
+			for _, ch := range strings.Split(channelsStr, ",") {
+				ch = strings.TrimSpace(ch)
+				if ch != "" {
+					filterChans = append(filterChans, ch)
+				}
+			}
+		} else {
+			// default to main + ccrep channels
+			reg := fam.LoadFamRegistry(absWorkDir)
+			mainChan, ccrepChan := fam.FamChannels(reg)
+			if mainChan != "" {
+				filterChans = append(filterChans, mainChan)
+			}
+			if ccrepChan != "" {
+				filterChans = append(filterChans, ccrepChan)
+			}
+		}
+
+		matchNick := fam.FamScopedNick(actor, fam.FamSlug(fam.LoadFamRegistry(absWorkDir)))
+		lines, nextOffset, err := fam.ReplayHistory(historyPath, actor, matchNick, since, filterChans)
+		if err != nil {
+			return nil, err
+		}
+		if lines == nil {
+			lines = []string{}
+		}
+		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
 	}
 
 	return nil, fmt.Errorf("unknown tool %q", name)
