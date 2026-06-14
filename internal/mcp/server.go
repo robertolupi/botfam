@@ -143,7 +143,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 
 	workDir := argString(args, "work_dir")
 	if workDir == "" {
-		workDir = "."
+		workDir = s.resolveDiscoveryWorkDir(ctx)
 	}
 	info, err := (fam.Resolver{WorkDir: workDir, Env: os.Environ()}).Resolve()
 	if err != nil {
