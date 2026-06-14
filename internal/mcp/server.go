@@ -58,7 +58,7 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 		envActor: os.Getenv("COLLAB_ACTOR"),
 		lockMode: lockActorEnabled(),
 	}
-	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false))
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots())
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
@@ -102,9 +102,33 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithDescription("Safely bring the worktree up to date with main (auto-stash, merge main, pop stash)."),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("orient",
+		mcplib.WithDescription("Return this fam's discovery root (fam, actor, health, channels) as botfam.discovery.v1 JSON, resolved from work_dir. Use this when botfam:/// shows <unresolved> (e.g. a system-wide MCP mount). Defaults work_dir to $PWD."),
+		mcplib.WithString("work_dir"),
+	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
+	// orient is a read-only identity/orientation probe: it bypasses the
+	// membership/identity preamble and resolves the discovery root for the
+	// given work_dir (defaulting to $PWD). This is the authoritative path on
+	// system-wide mounts where the param-less botfam:/// resource can't see the
+	// caller's worktree (#132).
+	if name == "orient" {
+		wd := argString(args, "work_dir")
+		if wd == "" {
+			wd = os.Getenv("PWD")
+		}
+		if wd == "" {
+			wd = "."
+		}
+		body, err := renderIndexJSON(buildDiscoveryData(wd))
+		if err != nil {
+			return nil, err
+		}
+		return mcplib.NewToolResultText(string(body)), nil
+	}
+
 	workDir := argString(args, "work_dir")
 	if workDir == "" {
 		workDir = "."
@@ -459,10 +483,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 }
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
+	cwd := s.resolveDiscoveryWorkDir(ctx)
 	localRepoRoot := fam.RepoPath(cwd)
 
 	u, err := url.Parse(req.Params.URI)
