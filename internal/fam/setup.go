@@ -91,21 +91,6 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	if err := WriteRegistry(regPath, reg); err != nil {
 		return err
 	}
-	for _, agent := range agents {
-		for _, sub := range []string{"new", "processing", "cur", "expired"} {
-			if err := os.MkdirAll(filepath.Join(info.Root, agent, sub), 0o755); err != nil {
-				return err
-			}
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(info.Root, "tmp"), 0o755); err != nil {
-		return err
-	}
-	for _, sub := range []string{"open", "claimed", "done"} {
-		if err := os.MkdirAll(filepath.Join(info.Root, "tasks", sub), 0o755); err != nil {
-			return err
-		}
-	}
 	if err := createProjectSymlink(project, info.Root); err != nil {
 		return err
 	}
