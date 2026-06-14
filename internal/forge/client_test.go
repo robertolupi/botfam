@@ -8,25 +8,39 @@ import (
 	"time"
 )
 
-func TestClient_GetPR(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/1" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if r.Header.Get("Authorization") != "token test-token" {
-			t.Errorf("unexpected auth: %s", r.Header.Get("Authorization"))
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"number": 1, "state": "open", "head": {"sha": "head-sha"}}`))
-	}))
-	defer server.Close()
+// roundTripFunc adapts a function to http.RoundTripper.
+type roundTripFunc func(*http.Request) (*http.Response, error)
 
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// fakeClient returns an *http.Client whose transport serves handler against an
+// in-memory httptest.ResponseRecorder. Unlike httptest.NewServer it binds no TCP
+// listener, so forge unit tests run in sandboxes that deny local bind (#73).
+func fakeClient(handler http.HandlerFunc) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		return rec.Result(), nil
+	})}
+}
+
+func TestClient_GetPR(t *testing.T) {
 	client := &Client{
-		BaseURL: server.URL,
+		BaseURL: "http://forge.test",
 		Owner:   "botfam",
 		Repo:    "botfam",
 		Token:   "test-token",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/1" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			if r.Header.Get("Authorization") != "token test-token" {
+				t.Errorf("unexpected auth: %s", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"number": 1, "state": "open", "head": {"sha": "head-sha"}}`))
+		}),
 	}
 
 	pr, err := client.GetPR(1)
@@ -42,21 +56,19 @@ func TestClient_GetPR(t *testing.T) {
 }
 
 func TestClient_GetPRReviews(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/1/reviews" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`[{"id": 123, "state": "APPROVED", "stale": false, "user": {"login": "agy-bot"}}]`))
-	}))
-	defer server.Close()
-
 	client := &Client{
-		BaseURL: server.URL,
+		BaseURL: "http://forge.test",
 		Owner:   "botfam",
 		Repo:    "botfam",
 		Token:   "test-token",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/1/reviews" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id": 123, "state": "APPROVED", "stale": false, "user": {"login": "agy-bot"}}]`))
+		}),
 	}
 
 	reviews, err := client.GetPRReviews(1)
@@ -72,28 +84,24 @@ func TestClient_GetPRReviews(t *testing.T) {
 }
 
 func TestClient_PostPRReview(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/1/reviews" {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("failed to decode body: %v", err)
-		}
-		if payload["commit_id"] != "test-sha" || payload["event"] != "APPROVED" || payload["body"] != "looks good" {
-			t.Errorf("unexpected payload: %v", payload)
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
 	client := &Client{
-		BaseURL: server.URL,
+		BaseURL: "http://forge.test",
 		Owner:   "botfam",
 		Repo:    "botfam",
 		Token:   "test-token",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" || r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/1/reviews" {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("failed to decode body: %v", err)
+			}
+			if payload["commit_id"] != "test-sha" || payload["event"] != "APPROVED" || payload["body"] != "looks good" {
+				t.Errorf("unexpected payload: %v", payload)
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
 	}
 
 	err := client.PostPRReview(1, "test-sha", "APPROVED", "looks good")
@@ -103,28 +111,24 @@ func TestClient_PostPRReview(t *testing.T) {
 }
 
 func TestClient_PostCommitStatus(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || r.URL.Path != "/api/v1/repos/botfam/botfam/statuses/test-sha" {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Errorf("failed to decode body: %v", err)
-		}
-		if payload["state"] != "success" || payload["context"] != "test-context" || payload["description"] != "desc" {
-			t.Errorf("unexpected payload: %v", payload)
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
 	client := &Client{
-		BaseURL: server.URL,
+		BaseURL: "http://forge.test",
 		Owner:   "botfam",
 		Repo:    "botfam",
 		Token:   "test-token",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "POST" || r.URL.Path != "/api/v1/repos/botfam/botfam/statuses/test-sha" {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Errorf("failed to decode body: %v", err)
+			}
+			if payload["state"] != "success" || payload["context"] != "test-context" || payload["description"] != "desc" {
+				t.Errorf("unexpected payload: %v", payload)
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
 	}
 
 	err := client.PostCommitStatus("test-sha", "success", "test-context", "desc")
@@ -207,23 +211,24 @@ func TestDefaultHTTPClientHasTimeout(t *testing.T) {
 }
 
 func TestClient_RequestRespectsHTTPClientTimeout(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(200 * time.Millisecond)
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	defer server.Close()
-
+	// A transport that blocks until the request context is cancelled lets us
+	// assert Client.Timeout fires — without binding a TCP listener.
 	client := &Client{
-		BaseURL:    server.URL,
-		Owner:      "botfam",
-		Repo:       "botfam",
-		Token:      "test-token",
-		HTTPClient: &http.Client{Timeout: 20 * time.Millisecond},
+		BaseURL: "http://forge.test",
+		Owner:   "botfam",
+		Repo:    "botfam",
+		Token:   "test-token",
+		HTTPClient: &http.Client{
+			Timeout: 20 * time.Millisecond,
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			}),
+		},
 	}
 
 	_, err := client.GetPR(1)
 	if err == nil {
-		t.Fatal("expected a timeout error from a slow server, got nil")
+		t.Fatal("expected a timeout error from a stalled transport, got nil")
 	}
 }
