@@ -82,6 +82,42 @@ func TestListAllUnreadNotificationsPaginates(t *testing.T) {
 	}
 }
 
+func TestListAllUnreadNotificationsCapReturnsError(t *testing.T) {
+	defer func(orig int) { maxNotificationPages = orig }(maxNotificationPages)
+	maxNotificationPages = 2
+
+	calls := 0
+	c := &Client{
+		BaseURL: "http://forge.test", Token: "t",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			// Every page is full (== limit), so a short page is never seen and the
+			// cap is exhausted: the scan is incomplete.
+			var b []byte
+			b = append(b, '[')
+			for i := 1; i <= 50; i++ {
+				if i > 1 {
+					b = append(b, ',')
+				}
+				b = append(b, []byte(`{"id":`+itoa(i)+`,"unread":true,"subject":{"type":"Issue"},"repository":{"full_name":"botfam/botfam"}}`)...)
+			}
+			b = append(b, ']')
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(b)
+		}),
+	}
+	ns, err := c.ListAllUnreadNotifications()
+	if err == nil {
+		t.Fatal("expected an error when the unread set exceeds the page cap, got nil")
+	}
+	if ns != nil {
+		t.Errorf("expected nil notifications on incomplete scan, got %d", len(ns))
+	}
+	if calls != 2 {
+		t.Errorf("made %d page requests, want exactly 2 (the cap)", calls)
+	}
+}
+
 func itoa(i int) string {
 	if i == 0 {
 		return "0"

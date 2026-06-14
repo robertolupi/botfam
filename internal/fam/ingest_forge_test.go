@@ -1,6 +1,7 @@
 package fam
 
 import (
+	"errors"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -12,9 +13,15 @@ import (
 type fakeForge struct {
 	notifs []forge.Notification
 	marked []int64
+	err    error
 }
 
-func (f *fakeForge) ListAllUnreadNotifications() ([]forge.Notification, error) { return f.notifs, nil }
+func (f *fakeForge) ListAllUnreadNotifications() ([]forge.Notification, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.notifs, nil
+}
 func (f *fakeForge) MarkNotificationRead(id int64) error {
 	f.marked = append(f.marked, id)
 	return nil
@@ -122,6 +129,29 @@ func TestForgePollerNoSkipBeyondOnePage(t *testing.T) {
 	}
 	if cur.ForgeLastNotificationID != 120 {
 		t.Errorf("cursor = %d, want 120", cur.ForgeLastNotificationID)
+	}
+}
+
+// TestForgePollerDoesNotAdvanceOnIncompleteScan guards the cap-boundary case
+// from the #251 re-review: if the client can't enumerate the full unread set
+// (e.g. it exceeded the page cap), Poll must surface the error and leave the
+// cursor untouched, so a later poll retries rather than skipping the tail.
+func TestForgePollerDoesNotAdvanceOnIncompleteScan(t *testing.T) {
+	fc := &fakeForge{err: errors.New("unread notifications exceed the page cap")}
+	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
+	w, _ := mailbox.OpenWriter(mboxPath)
+	defer w.Close()
+
+	p := NewForgePoller(fc, "botfam/botfam", false)
+	cur := mailbox.Cursors{ForgeLastNotificationID: 42}
+	if err := p.Poll(w, &cur); err == nil {
+		t.Fatal("expected Poll to surface the incomplete-scan error")
+	}
+	if cur.ForgeLastNotificationID != 42 {
+		t.Errorf("cursor advanced to %d on an incomplete scan, want 42 (unchanged)", cur.ForgeLastNotificationID)
+	}
+	if len(forgeEvents(t, mboxPath)) != 0 {
+		t.Error("surfaced events from an incomplete scan")
 	}
 }
 

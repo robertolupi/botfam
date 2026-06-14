@@ -24,11 +24,11 @@ type Notification struct {
 }
 
 // notificationsPageLimit is the per-page size; maxNotificationPages caps total
-// pagination so a runaway unread set cannot loop forever.
-const (
-	notificationsPageLimit = 50
-	maxNotificationPages    = 100
-)
+// pagination so a runaway unread set cannot loop forever. maxNotificationPages
+// is a var so tests can shrink it.
+const notificationsPageLimit = 50
+
+var maxNotificationPages = 100
 
 // ListUnreadNotifications returns the first page of the agent's unread
 // notification threads across all repositories — every subject type, not just
@@ -66,10 +66,15 @@ func (c *Client) ListAllUnreadNotifications() ([]Notification, error) {
 		}
 		all = append(all, ns...)
 		if len(ns) < notificationsPageLimit {
-			break
+			return all, nil // a short page proves the unread set is fully enumerated
 		}
 	}
-	return all, nil
+	// The page cap was exhausted while the last page was still full: the unread
+	// set exceeds maxNotificationPages*limit and we have NOT enumerated all of it.
+	// Returning the partial set would let a cursor advance past the unenumerated
+	// tail (the #251 skip, at the cap boundary), so fail loudly instead.
+	return nil, fmt.Errorf("forge: unread notifications exceed %d pages (>%d); refusing to report a partial unread set",
+		maxNotificationPages, maxNotificationPages*notificationsPageLimit)
 }
 
 // MarkNotificationRead marks a single notification thread read so it does not
