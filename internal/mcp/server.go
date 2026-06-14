@@ -47,6 +47,7 @@ var identityOptionalTools = map[string]bool{
 type server struct {
 	envActor string
 	lockMode bool
+	mcpSrv   *mcpserver.MCPServer
 
 	mu    sync.Mutex
 	actor string
@@ -58,6 +59,7 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 		lockMode: lockActorEnabled(),
 	}
 	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false))
+	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
 	return serveStdio(context.Background(), mcpSrv, in, out)
@@ -436,6 +438,15 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	for _, slug := range discoverySlugs {
 		add("botfam:///docs/"+slug, "botfam doc: "+slug, "text/markdown")
 	}
+	// Phase 2: tools & skills catalogs
+	add("botfam:///tools", "botfam tools catalog", "text/markdown")
+	add("botfam:///tools.json", "botfam tools catalog", "application/json")
+	add("botfam:///skills", "botfam skills catalog", "text/markdown")
+	add("botfam:///skills.json", "botfam skills catalog", "application/json")
+
+	// Resource template for individual skills
+	mcpSrv.AddResourceTemplate(mcplib.NewResourceTemplate("botfam:///skills/{name}", "botfam skill document"), s.handleReadResource)
+
 	// Live forge wiki (#119). Individual pages (botfam:///wiki/<page>) are
 	// discovered via the index rather than statically advertised.
 	add("botfam:///wiki", "botfam live wiki index", "text/markdown")
@@ -536,6 +547,41 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 			MIMEType: "application/json",
 			Text:     string(body),
 		}}, nil
+	case path == "/tools":
+		return markdownResource(req.Params.URI, renderToolsMarkdown(s)), nil
+	case path == "/tools.json":
+		body, err := s.renderToolsJSON()
+		if err != nil {
+			return nil, err
+		}
+		return []mcplib.ResourceContents{mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "application/json",
+			Text:     string(body),
+		}}, nil
+	case path == "/skills":
+		body, err := renderSkillsMarkdown(dataWorkDir)
+		if err != nil {
+			return nil, err
+		}
+		return markdownResource(req.Params.URI, body), nil
+	case path == "/skills.json":
+		body, err := renderSkillsJSON(dataWorkDir)
+		if err != nil {
+			return nil, err
+		}
+		return []mcplib.ResourceContents{mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "application/json",
+			Text:     string(body),
+		}}, nil
+	case strings.HasPrefix(path, "/skills/"):
+		skillName := strings.TrimPrefix(path, "/skills/")
+		body, err := readSkillMarkdown(dataWorkDir, skillName)
+		if err != nil {
+			return nil, err
+		}
+		return markdownResource(req.Params.URI, body), nil
 	case strings.HasPrefix(path, "/docs/"):
 		// Embedded generic corpus (#117): served from the binary, never the
 		// local checkout. Unknown slugs fail closed with the known set.
