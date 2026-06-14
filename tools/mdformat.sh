@@ -24,7 +24,16 @@
 #        (no arguments: formats doc/ and README.md)
 set -eu
 cd "$(dirname "$0")/.."
-[ "$#" -gt 0 ] || set -- doc/ README.md
+has_paths=false
+for arg in "$@"; do
+  case "$arg" in
+    -*) ;;
+    *) has_paths=true ;;
+  esac
+done
+if [ "$has_paths" = false ]; then
+  set -- "$@" doc/ README.md
+fi
 
 # Drop files mdformat must never touch (generated harness docs, Go
 # templates), keeping flags and everything else. A flag-only invocation is
