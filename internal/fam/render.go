@@ -60,6 +60,11 @@ func RenderGitIdentity(worktree, name, email string) error {
 		host, _ := gitOne(worktree, "config", "user.email")
 		email = plusAddress(strings.TrimSpace(host), name)
 	}
+	// Per-worktree config requires the worktreeConfig extension; without it
+	// `git config --worktree` fails on a linked worktree (matches worktree.go).
+	if _, err := gitOutput(worktree, "config", "extensions.worktreeConfig", "true"); err != nil {
+		return fmt.Errorf("enable worktreeConfig: %w", err)
+	}
 	if _, err := gitOutput(worktree, "config", "--worktree", "user.name", name); err != nil {
 		return fmt.Errorf("set user.name: %w", err)
 	}
