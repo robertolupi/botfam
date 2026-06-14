@@ -2,27 +2,26 @@ package forge
 
 import (
 	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
 func TestListUnreadNotifications(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/notifications" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		if r.URL.Query().Get("status-types") != "unread" {
-			t.Errorf("expected status-types=unread, got %q", r.URL.RawQuery)
-		}
-		if r.Header.Get("Authorization") != "token t" {
-			t.Errorf("unexpected auth: %s", r.Header.Get("Authorization"))
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`[{"id":5,"unread":true,"subject":{"title":"Look at this","type":"Issue","html_url":"http://h/botfam/botfam/issues/1"},"repository":{"full_name":"botfam/botfam"}}]`))
-	}))
-	defer server.Close()
-
-	c := &Client{BaseURL: server.URL, Token: "t"}
+	c := &Client{
+		BaseURL: "http://forge.test", Token: "t",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/notifications" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			if r.URL.Query().Get("status-types") != "unread" {
+				t.Errorf("expected status-types=unread, got %q", r.URL.RawQuery)
+			}
+			if r.Header.Get("Authorization") != "token t" {
+				t.Errorf("unexpected auth: %s", r.Header.Get("Authorization"))
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":5,"unread":true,"subject":{"title":"Look at this","type":"Issue","html_url":"http://h/botfam/botfam/issues/1"},"repository":{"full_name":"botfam/botfam"}}]`))
+		}),
+	}
 	ns, err := c.ListUnreadNotifications()
 	if err != nil {
 		t.Fatalf("ListUnreadNotifications: %v", err)
@@ -39,16 +38,16 @@ func TestListUnreadNotifications(t *testing.T) {
 }
 
 func TestGetSubject(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/repos/botfam/botfam/issues/11" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"title":"T","body":"hello body","state":"open","html_url":"http://h/x"}`))
-	}))
-	defer server.Close()
-
-	c := &Client{BaseURL: server.URL, Token: "t"}
+	c := &Client{
+		BaseURL: "http://forge.test", Token: "t",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v1/repos/botfam/botfam/issues/11" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"title":"T","body":"hello body","state":"open","html_url":"http://h/x"}`))
+		}),
+	}
 	// Subject URL carries a DIFFERENT host (mimics a ROOT_URL mismatch); GetSubject
 	// must re-base the path onto c.BaseURL.
 	sc, err := c.GetSubject("http://wrong-host:9999/api/v1/repos/botfam/botfam/issues/11")
@@ -61,18 +60,18 @@ func TestGetSubject(t *testing.T) {
 }
 
 func TestMarkNotificationRead(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "PATCH" || r.URL.Path != "/api/v1/notifications/threads/5" {
-			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
-		}
-		if r.URL.Query().Get("to-status") != "read" {
-			t.Errorf("expected to-status=read, got %q", r.URL.RawQuery)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	c := &Client{BaseURL: server.URL, Token: "t"}
+	c := &Client{
+		BaseURL: "http://forge.test", Token: "t",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "PATCH" || r.URL.Path != "/api/v1/notifications/threads/5" {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+			if r.URL.Query().Get("to-status") != "read" {
+				t.Errorf("expected to-status=read, got %q", r.URL.RawQuery)
+			}
+			w.WriteHeader(http.StatusOK)
+		}),
+	}
 	if err := c.MarkNotificationRead(5); err != nil {
 		t.Fatalf("MarkNotificationRead: %v", err)
 	}

@@ -55,6 +55,9 @@ func TestNewfam(t *testing.T) {
 	if reg.Name != "myproject" {
 		t.Errorf("expected registry name 'myproject', got %q", reg.Name)
 	}
+	if len(reg.WikiProjections) == 0 || reg.WikiProjections[0] != "memory:memory-*" {
+		t.Errorf("expected WikiProjections to contain 'memory:memory-*', got %v", reg.WikiProjections)
+	}
 
 	// Verify that roster contains all agents and the operator
 	expectedRoster := []string{"agy", "claude", "testoperator"}
@@ -246,5 +249,110 @@ func TestWriteClaudeSettingsPreservesFields(t *testing.T) {
 	// Total length should be our 14 allowed commands
 	if len(allow) != 14 {
 		t.Errorf("expected permissions.allow length to be 14, got %d", len(allow))
+	}
+}
+
+func TestNewfamMCPSelfDiscoverability(t *testing.T) {
+	tempDir := t.TempDir()
+	mainDir := filepath.Join(tempDir, "main")
+	if err := os.Mkdir(mainDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	initGitRepo(t, mainDir)
+
+	// Set environment variables for the test
+	collabRoot := filepath.Join(tempDir, "collab")
+	t.Setenv("COLLAB_ROOT", collabRoot)
+	t.Setenv("USER", "testoperator")
+	t.Setenv("HOME", tempDir)
+
+	// Create mock home .botfam directory to hold symlinks
+	if err := os.MkdirAll(filepath.Join(tempDir, ".botfam"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create parent directory for antigravity config so it is not skipped
+	if err := os.MkdirAll(filepath.Join(tempDir, ".gemini", "antigravity"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change directory to main repo root
+	origDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(mainDir); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(origDir) }()
+
+	// Run NewfamCmd
+	var out bytes.Buffer
+	args := []string{"testfam", "--agents", "agy,claude"}
+	if err := NewfamCmd(args, &out); err != nil {
+		t.Fatalf("NewfamCmd failed: %v\nOutput:\n%s", err, out.String())
+	}
+
+	// 1. Verify that the harness pointers are slim
+	wtDir := filepath.Join(tempDir, "wt-agy")
+	pointerPath := filepath.Join(wtDir, "AGENTS.md")
+	content, err := os.ReadFile(pointerPath)
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md pointer: %v", err)
+	}
+	if bytes.Contains(content, []byte("botfam Coordination Protocol (IRC-First)")) {
+		t.Errorf("pointer file should be slimmed down, but contains full protocol text")
+	}
+	if !bytes.Contains(content, []byte("botfam:///docs/protocol")) {
+		t.Errorf("pointer file missing link to botfam:///docs/protocol")
+	}
+
+	// 2. Verify global config files are written and contain collab MCP server
+	configPaths := []string{
+		filepath.Join(tempDir, ".gemini", "antigravity", "mcp_config.json"),
+		filepath.Join(tempDir, ".claude.json"),
+	}
+
+	execPath, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	execPath, err = filepath.Abs(execPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range configPaths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("failed to read global config at %s: %v", path, err)
+		}
+
+		var config struct {
+			McpServers map[string]struct {
+				Command string            `json:"command"`
+				Args    []string          `json:"args"`
+				Env     map[string]string `json:"env"`
+			} `json:"mcpServers"`
+		}
+		if err := json.Unmarshal(data, &config); err != nil {
+			t.Fatalf("failed to parse global config at %s: %v", path, err)
+		}
+
+		collab, ok := config.McpServers["collab"]
+		if !ok {
+			t.Errorf("collab MCP server not registered in %s", path)
+			continue
+		}
+		if collab.Command != execPath {
+			t.Errorf("collab MCP server command in %s is %q, expected %q", path, collab.Command, execPath)
+		}
+		if len(collab.Args) != 1 || collab.Args[0] != "serve" {
+			t.Errorf("collab MCP server args in %s are not ['serve']: %v", path, collab.Args)
+		}
+		if collab.Env == nil || collab.Env["PATH"] != os.Getenv("PATH") {
+			t.Errorf("collab MCP server env.PATH in %s is %q, expected %q", path, collab.Env["PATH"], os.Getenv("PATH"))
+		}
 	}
 }

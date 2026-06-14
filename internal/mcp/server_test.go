@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/robertolupi/botfam/internal/fam"
 )
@@ -411,6 +413,70 @@ func TestIrcReadToolMissingLog(t *testing.T) {
 	}
 }
 
+func TestIrcReplayTool(t *testing.T) {
+	s, root := newTestServer(t)
+	// Create mock fam.toml in root
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\nroster = [\"alice\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+
+	// Create a history file
+	historyDir := mkdir(t, filepath.Join(root, "myfam-collab"))
+	historyFile := filepath.Join(historyDir, "history.jsonl")
+
+	writeEntry := func(sender, evType, target, body string) {
+		entry := fam.HistoryEntry{
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Sender:    sender,
+			Type:      evType,
+			Target:    target,
+			Body:      body,
+		}
+		data, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, err := os.OpenFile(historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		_, _ = f.Write(append(data, '\n'))
+	}
+
+	writeEntry("bob", "PRIVMSG", "#botfam", "peer msg")
+	writeEntry("alice-myfam", "PRIVMSG", "#botfam", "my own msg")
+
+	// Call the irc_replay tool using the server
+	res, err := s.callTool(context.Background(), "irc_replay", map[string]any{
+		"work_dir": aliceDir,
+		"since":    "lines:10",
+		"channels": "#botfam",
+	})
+	if err != nil {
+		t.Fatalf("irc_replay tool call failed: %v", err)
+	}
+
+	var out struct {
+		Lines      []string `json:"lines"`
+		NextOffset int64    `json:"next_offset"`
+	}
+	decodeToolResult(t, res, &out)
+
+	if len(out.Lines) != 1 {
+		t.Errorf("expected 1 line, got %d: %v", len(out.Lines), out.Lines)
+	}
+	if !strings.Contains(out.Lines[0], "peer msg") {
+		t.Errorf("expected line to contain 'peer msg', got %q", out.Lines[0])
+	}
+	if strings.Contains(out.Lines[0], "alice-myfam") {
+		t.Errorf("expected own message to be filtered out, got %q", out.Lines[0])
+	}
+}
+
 func TestIrcWaitToolTimeout(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
@@ -447,6 +513,45 @@ func TestIrcWaitToolTimeout(t *testing.T) {
 	}
 	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
 		t.Errorf("next_offset = %d, want snapshot size %d", out.NextOffset, len("12:00 <bob> static\n"))
+	}
+}
+
+// TestIrcWaitToolFiltersScopedSelf verifies the MCP irc_wait tool filters the
+// agent's OWN messages by the fam-scoped nick (claude-botfam), not the bare
+// actor — otherwise it wakes on its own traffic once nicks are scoped (#137,
+// codex review of #139).
+func TestIrcWaitToolFiltersScopedSelf(t *testing.T) {
+	s, root := newTestServer(t)
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
+	content := "12:00 <alice-myfam> my own line\n12:01 <bob> peer line\n"
+	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
+		"work_dir":    aliceDir,
+		"from_offset": float64(0),
+		"timeout_s":   float64(2),
+	})
+	if err != nil {
+		t.Fatalf("irc_wait: %v", err)
+	}
+	var out struct {
+		Lines    []string `json:"lines"`
+		TimedOut bool     `json:"timed_out"`
+	}
+	decodeToolResult(t, res, &out)
+	joined := strings.Join(out.Lines, "\n")
+	if strings.Contains(joined, "alice-myfam") {
+		t.Errorf("own fam-scoped message was not filtered: %v", out.Lines)
+	}
+	if !strings.Contains(joined, "<bob>") {
+		t.Errorf("peer message missing from wait result: %v", out.Lines)
 	}
 }
 
@@ -550,22 +655,15 @@ func TestMcpResources(t *testing.T) {
 		_ = os.Chdir(oldCwd)
 	})
 
-	// Create a dummy PROTOCOL.md under the temp root's doc/collab/
-	collabDir := filepath.Join(root, "doc", "collab")
-	if err := os.MkdirAll(collabDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	dummyContent := "dummy protocol content"
-	if err := os.WriteFile(filepath.Join(collabDir, "PROTOCOL.md"), []byte(dummyContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// NOTE: no local doc/ is created. #117's contract is that docs/* are served
+	// from the embedded corpus, so discovery must work in a docless repo.
 
-	// 1. Test empty authority (local family docs)
+	// 1. docs/protocol is served from the embedded corpus (not a local file).
 	req := mcplib.ReadResourceRequest{}
 	req.Params.URI = "botfam:///docs/protocol"
 	res, err := s.handleReadResource(context.Background(), req)
 	if err != nil {
-		t.Fatalf("failed to read empty authority resource: %v", err)
+		t.Fatalf("failed to read embedded protocol: %v", err)
 	}
 	if len(res) == 0 {
 		t.Fatal("no resource contents returned")
@@ -574,31 +672,60 @@ func TestMcpResources(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected text resource contents, got %T", res[0])
 	}
-	if tr.Text != dummyContent {
-		t.Errorf("expected text %q, got %q", dummyContent, tr.Text)
+	if !strings.Contains(tr.Text, "Coordination Protocol") {
+		t.Errorf("expected embedded protocol content, got %q", tr.Text)
+	}
+	// The corpus is a Go template; serving it must execute the template
+	// (e.g. {{.IntegrationBranch}}), never leak raw template syntax.
+	if strings.Contains(tr.Text, "{{") {
+		t.Errorf("served doc contains unrendered template syntax: %q", tr.Text)
 	}
 
-	// 2. Test named authority matching local family
+	// 2. The discovery root and its JSON index.
+	req.Params.URI = "botfam:///"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read discovery root: %v", err)
+	}
+	if rootText := res[0].(mcplib.TextResourceContents).Text; !strings.Contains(rootText, "Start here") {
+		t.Errorf("root resource missing orientation, got %q", rootText)
+	}
+
+	req.Params.URI = "botfam:///index.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read index.json: %v", err)
+	}
+	var idx struct {
+		Schema    string   `json:"schema"`
+		Resources []string `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &idx); err != nil {
+		t.Fatalf("index.json is not valid JSON: %v", err)
+	}
+	if idx.Schema != "botfam.discovery.v1" {
+		t.Errorf("index schema = %q, want botfam.discovery.v1", idx.Schema)
+	}
+	if len(idx.Resources) == 0 {
+		t.Error("index.json advertises no resources")
+	}
+
+	// 3. Named authority matching the local family still resolves.
 	resolved, err := (fam.Resolver{WorkDir: root}).Resolve()
 	if err == nil && resolved.Name != "" {
 		req.Params.URI = fmt.Sprintf("botfam://%s/docs/protocol", resolved.Name)
-		res, err = s.handleReadResource(context.Background(), req)
-		if err != nil {
+		if _, err := s.handleReadResource(context.Background(), req); err != nil {
 			t.Fatalf("failed to read local named authority resource: %v", err)
-		}
-		tr = res[0].(mcplib.TextResourceContents)
-		if tr.Text != dummyContent {
-			t.Errorf("expected text %q, got %q", dummyContent, tr.Text)
 		}
 	}
 
-	// 3. Negative cases: unknown path, unsupported scheme, and an unknown
-	// named authority must all error rather than read an unintended file.
+	// 4. Negative cases: unknown slug, traversal, unsupported scheme, and an
+	// unknown named authority must all error.
 	negatives := []struct {
 		name string
 		uri  string
 	}{
-		{"unknown path", "botfam:///docs/nonexistent"},
+		{"unknown slug", "botfam:///docs/nonexistent"},
 		{"traversal attempt", "botfam:///../../etc/passwd"},
 		{"unsupported scheme", "file:///docs/protocol"},
 		{"unknown authority", "botfam://definitely-not-a-real-fam/docs/protocol"},
@@ -608,5 +735,385 @@ func TestMcpResources(t *testing.T) {
 		if _, err := s.handleReadResource(context.Background(), req); err == nil {
 			t.Errorf("%s: expected error for URI %q, got nil", tc.name, tc.uri)
 		}
+	}
+}
+
+func TestMcpCatalogsAndCLI(t *testing.T) {
+	// Setup a temporary workspace with skills
+	root := t.TempDir()
+
+	// Create mock skills in the temp root
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "zeta"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	zetaContent := "---\nname: zeta-skill\ndescription: Handle zeta work.\n---\n# Zeta skill contents\n"
+	if err := os.WriteFile(filepath.Join(skillsDir, "zeta", "SKILL.md"), []byte(zetaContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change cwd to temp root so ReadRepoSkills reads our mock skills
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(oldCwd)
+	}()
+
+	s := &server{}
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false))
+	s.mcpSrv = mcpSrv
+	s.registerTools(mcpSrv)
+	s.registerResources(mcpSrv)
+
+	// 1. Verify tools catalog
+	req := mcplib.ReadResourceRequest{}
+	req.Params.URI = "botfam:///tools"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///tools: %v", err)
+	}
+	toolsMarkdown := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(toolsMarkdown, "# botfam Tools Catalog") || !strings.Contains(toolsMarkdown, "irc_read") {
+		t.Errorf("unexpected tools markdown: %q", toolsMarkdown)
+	}
+
+	req.Params.URI = "botfam:///tools.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///tools.json: %v", err)
+	}
+	var toolsIdx struct {
+		Schema string `json:"schema"`
+		Tools  []struct {
+			Name            string `json:"name"`
+			Description     string `json:"description"`
+			Domain          string `json:"domain"`
+			ReadOnly        bool   `json:"read_only"`
+			InputSchemaHash string `json:"input_schema_hash"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &toolsIdx); err != nil {
+		t.Fatalf("tools.json is not valid JSON: %v", err)
+	}
+	if toolsIdx.Schema != "botfam.tools.v1" {
+		t.Errorf("expected schema botfam.tools.v1, got %q", toolsIdx.Schema)
+	}
+	foundIrcRead := false
+	for _, tool := range toolsIdx.Tools {
+		if tool.Name == "irc_read" {
+			foundIrcRead = true
+			if tool.Domain != "irc" {
+				t.Errorf("expected domain 'irc' for irc_read, got %q", tool.Domain)
+			}
+			if !tool.ReadOnly {
+				t.Errorf("expected read_only true for irc_read")
+			}
+			if len(tool.InputSchemaHash) != 64 {
+				t.Errorf("expected 64-char schema hash, got %q", tool.InputSchemaHash)
+			}
+		}
+	}
+	if !foundIrcRead {
+		t.Errorf("irc_read tool not found in tools.json catalog")
+	}
+
+	// 2. Verify skills catalog
+	req.Params.URI = "botfam:///skills"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///skills: %v", err)
+	}
+	skillsMarkdown := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(skillsMarkdown, "# botfam Skills Catalog") || !strings.Contains(skillsMarkdown, "zeta-skill") {
+		t.Errorf("unexpected skills markdown: %q", skillsMarkdown)
+	}
+
+	req.Params.URI = "botfam:///skills.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///skills.json: %v", err)
+	}
+	var skillsIdx struct {
+		Schema string `json:"schema"`
+		Skills []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Path        string `json:"path"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &skillsIdx); err != nil {
+		t.Fatalf("skills.json is not valid JSON: %v", err)
+	}
+	if skillsIdx.Schema != "botfam.skills.v1" {
+		t.Errorf("expected schema botfam.skills.v1, got %q", skillsIdx.Schema)
+	}
+	if len(skillsIdx.Skills) != 1 || skillsIdx.Skills[0].Name != "zeta-skill" {
+		t.Errorf("expected skills catalog to contain 'zeta-skill', got %+v", skillsIdx.Skills)
+	}
+
+	// 3. Read specific skill
+	req.Params.URI = "botfam:///skills/zeta-skill"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read skill zeta-skill: %v", err)
+	}
+	if res[0].(mcplib.TextResourceContents).Text != zetaContent {
+		t.Errorf("expected skill content %q, got %q", zetaContent, res[0].(mcplib.TextResourceContents).Text)
+	}
+
+	// 4. Traversal and bad cases
+	negatives := []struct {
+		name string
+		uri  string
+	}{
+		{"unknown skill", "botfam:///skills/nonexistent"},
+		{"traversal under skills", "botfam:///skills/../../etc/passwd"},
+	}
+	for _, tc := range negatives {
+		req.Params.URI = tc.uri
+		if _, err := s.handleReadResource(context.Background(), req); err == nil {
+			t.Errorf("%s: expected error for URI %q, got nil", tc.name, tc.uri)
+		}
+	}
+}
+
+func TestMcpCLICommands(t *testing.T) {
+	// Setup a temporary workspace with skills
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "zeta"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	zetaContent := "---\nname: zeta-skill\ndescription: Handle zeta work.\n---\n# Zeta skill contents\n"
+	if err := os.WriteFile(filepath.Join(skillsDir, "zeta", "SKILL.md"), []byte(zetaContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(oldCwd)
+	}()
+
+	// Test list-resources output
+	var listBuf bytes.Buffer
+	if err := listResourcesCmd(&listBuf); err != nil {
+		t.Fatalf("listResourcesCmd failed: %v", err)
+	}
+	listOut := listBuf.String()
+	if !strings.Contains(listOut, "botfam:///tools") || !strings.Contains(listOut, "botfam:///skills/{name}") {
+		t.Errorf("listResourcesCmd output missing expected elements: %q", listOut)
+	}
+
+	// Test read-resource output
+	var readBuf bytes.Buffer
+	if err := readResourceCmd(&readBuf, "botfam:///skills/zeta-skill"); err != nil {
+		t.Fatalf("readResourceCmd failed: %v", err)
+	}
+	if readBuf.String() != zetaContent {
+		t.Errorf("readResourceCmd output expected %q, got %q", zetaContent, readBuf.String())
+	}
+}
+
+// TestMcpWikiCacheFallback exercises the #119 wiki provider via the local-cache
+// tier: with no forge client resolvable (no token), botfam:///wiki/* is served
+// from the local wiki/ clone and flagged stale.
+func TestMcpWikiCacheFallback(t *testing.T) {
+	s, root := newTestServer(t)
+	initGitRepo(t, root) // no remote → forge.NewClient won't resolve → cache tier
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	wikiDir := filepath.Join(root, "wiki")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wikiDir, "Home.md"), []byte("# Home\ncached body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := mcplib.ReadResourceRequest{}
+
+	// A page comes from the cache and is flagged stale.
+	req.Params.URI = "botfam:///wiki/Home"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("wiki/Home: %v", err)
+	}
+	txt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(txt, "cached body") || !strings.Contains(txt, "STALE") {
+		t.Errorf("expected cached, stale page, got %q", txt)
+	}
+
+	// The JSON index carries the wiki schema.
+	req.Params.URI = "botfam:///wiki/index.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("wiki/index.json: %v", err)
+	}
+	if !strings.Contains(res[0].(mcplib.TextResourceContents).Text, "botfam.wiki.index.v1") {
+		t.Errorf("missing wiki index schema: %q", res[0].(mcplib.TextResourceContents).Text)
+	}
+
+	// A traversal page name must error.
+	req.Params.URI = "botfam:///wiki/not%2Fa%2Fpage"
+	if _, err := s.handleReadResource(context.Background(), req); err == nil {
+		t.Error("expected error for invalid wiki page name")
+	}
+}
+
+// TestMcpProjections covers #120: a fam-declared wiki_projections entry is
+// served as botfam:///<name>[.json], filtering the wiki index by glob.
+func TestMcpProjections(t *testing.T) {
+	s, root := newTestServer(t)
+	initGitRepo(t, root)
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	// Declare a projection in fam.toml.
+	famToml := "name = \"testfam\"\nwiki_projections = [\"reviews:review-*\"]\n"
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte(famToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Local wiki cache: two reviews + one unrelated page.
+	wikiDir := filepath.Join(root, "wiki")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"review-2026-06-14-agy", "review-2026-06-13-claude", "Home"} {
+		if err := os.WriteFile(filepath.Join(wikiDir, name+".md"), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := mcplib.ReadResourceRequest{}
+
+	// Markdown projection lists only review-* pages.
+	req.Params.URI = "botfam:///reviews"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reviews: %v", err)
+	}
+	txt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(txt, "review-2026-06-14-agy") || strings.Contains(txt, "Home") {
+		t.Errorf("projection should list reviews only, got %q", txt)
+	}
+
+	// JSON projection carries the schema and filtered pages.
+	req.Params.URI = "botfam:///reviews.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("reviews.json: %v", err)
+	}
+	jtxt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(jtxt, "botfam.projection.v1") || !strings.Contains(jtxt, "review-2026-06-13-claude") {
+		t.Errorf("unexpected projection json: %q", jtxt)
+	}
+
+	// An undeclared projection name still errors.
+	req.Params.URI = "botfam:///nonexistent-projection"
+	if _, err := s.handleReadResource(context.Background(), req); err == nil {
+		t.Error("expected error for undeclared projection")
+	}
+}
+
+func TestMcpDefaultMemoryProjection(t *testing.T) {
+	s, root := newTestServer(t)
+	initGitRepo(t, root)
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
+
+	// Write fam.toml with NO projections.
+	famToml := "name = \"testfam\"\n"
+	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte(famToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Local wiki cache: memory pages and home.
+	wikiDir := filepath.Join(root, "wiki")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"memory-first-fact", "memory-second-fact", "Home"} {
+		if err := os.WriteFile(filepath.Join(wikiDir, name+".md"), []byte("# "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := mcplib.ReadResourceRequest{}
+
+	// 1. Markdown memory projection lists only memory-* pages.
+	req.Params.URI = "botfam:///memory"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("memory: %v", err)
+	}
+	txt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(txt, "memory-first-fact") || strings.Contains(txt, "Home") {
+		t.Errorf("projection should list memory facts only, got %q", txt)
+	}
+
+	// 2. Read discovery root to verify projection is advertised.
+	req.Params.URI = "botfam:///"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("root: %v", err)
+	}
+	rootTxt := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(rootTxt, "botfam:///memory") {
+		t.Errorf("expected memory projection advertised in root, got %q", rootTxt)
+	}
+
+	// 3. Read index.json to verify projection is advertised.
+	req.Params.URI = "botfam:///index.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("index: %v", err)
+	}
+	var idx struct {
+		Resources []string `json:"resources"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &idx); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	found := false
+	for _, resURI := range idx.Resources {
+		if resURI == "botfam:///memory" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("memory projection not advertised in index.json: %v", idx.Resources)
 	}
 }

@@ -20,7 +20,16 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/wiki"
+)
+
+// serverName/serverVersion identify this MCP server in its handshake and in
+// the self-discovery resources (botfam:/// and index.json).
+const (
+	serverName    = "botfam"
+	serverVersion = "0.1.0"
 )
 
 // errIdentityRequired signals that no actor identity could be resolved from
@@ -38,6 +47,7 @@ var identityOptionalTools = map[string]bool{
 type server struct {
 	envActor string
 	lockMode bool
+	mcpSrv   *mcpserver.MCPServer
 
 	mu    sync.Mutex
 	actor string
@@ -48,7 +58,8 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 		envActor: os.Getenv("COLLAB_ACTOR"),
 		lockMode: lockActorEnabled(),
 	}
-	mcpSrv := mcpserver.NewMCPServer("botfam", "0.1.0", mcpserver.WithToolCapabilities(false))
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots())
+	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
 	return serveStdio(context.Background(), mcpSrv, in, out)
@@ -82,6 +93,13 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithString("actor"),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("irc_replay",
+		mcplib.WithDescription("Replay durable shared channel history logs."),
+		mcplib.WithString("since"),
+		mcplib.WithString("channels"),
+		mcplib.WithString("actor"),
+		mcplib.WithString("work_dir"),
+	))
 	add(mcplib.NewTool("worktree_init",
 		mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
 		mcplib.WithString("target_actor", mcplib.Required()),
@@ -91,19 +109,54 @@ func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
 		mcplib.WithDescription("Safely bring the worktree up to date with main (auto-stash, merge main, pop stash)."),
 		mcplib.WithString("work_dir"),
 	))
+	add(mcplib.NewTool("orient",
+		mcplib.WithDescription("Return this fam's discovery root (fam, actor, health, channels) as botfam.discovery.v1 JSON, resolved from work_dir. Use this when botfam:/// shows <unresolved> (e.g. a system-wide MCP mount). Defaults work_dir to $PWD."),
+		mcplib.WithString("work_dir"),
+	))
 }
 
 func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
+	// orient is a read-only identity/orientation probe: it bypasses the
+	// membership/identity preamble and resolves the discovery root for the
+	// given work_dir (defaulting to $PWD). This is the authoritative path on
+	// system-wide mounts where the param-less botfam:/// resource can't see the
+	// caller's worktree (#132).
+	if name == "orient" {
+		wd := argString(args, "work_dir")
+		via := "work_dir"
+		if wd == "" {
+			wd = os.Getenv("PWD")
+			via = "pwd"
+		}
+		if wd == "" {
+			wd = "."
+			via = "default"
+		}
+		d := buildDiscoveryData(wd)
+		d.resolvedVia = via
+		body, err := renderIndexJSON(d)
+		if err != nil {
+			return nil, err
+		}
+		return mcplib.NewToolResultText(string(body)), nil
+	}
+
 	workDir := argString(args, "work_dir")
 	if workDir == "" {
-		workDir = "."
+		workDir = s.resolveDiscoveryWorkDir(ctx)
 	}
 	info, err := (fam.Resolver{WorkDir: workDir, Env: os.Environ()}).Resolve()
 	if err != nil {
 		return nil, err
 	}
-	if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
-		return nil, err
+	// Membership: a migrated fam proves it via its <fam-dir>/fam.toml roster — if
+	// ResolveFam accepts this worktree as a declared [agent.<name>], that IS
+	// membership. The legacy content-hash object-store check (which doesn't know
+	// about freshly-cloned fams) only applies when there's no fam.toml.
+	if _, rfErr := fam.ResolveFam(workDir); rfErr != nil {
+		if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
+			return nil, err
+		}
 	}
 
 	actor, err := s.resolveActor(argString(args, "actor"), info.Actor)
@@ -216,7 +269,12 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			timeoutS = 300
 		}
 		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
-		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, actor, fromOffset, time.Duration(timeoutS*float64(time.Second)))
+		// The FIFO dir is keyed by the bare actor, but the agent's own messages
+		// appear under the fam-scoped nick (claude-botfam) in the log — match on
+		// the scoped nick or the wait wakes on its own traffic (#137; matches the
+		// `botfam irc-wait` CLI fix).
+		matchNick := fam.FamScopedNick(actor, fam.FamSlug(fam.LoadFamRegistry(absWorkDir)))
+		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
 		if err != nil {
 			return nil, err
 		}
@@ -224,6 +282,52 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			lines = []string{}
 		}
 		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset, "timed_out": timedOut})
+	}
+
+	if name == "irc_replay" {
+		absWorkDir, err := filepath.Abs(workDir)
+		if err != nil {
+			return nil, err
+		}
+
+		historyPath, err := fam.DefaultHistoryPath(absWorkDir)
+		if err != nil {
+			return nil, err
+		}
+
+		since := argString(args, "since")
+		channelsStr := argString(args, "channels")
+
+		// Parse filter channels
+		var filterChans []string
+		if channelsStr != "" {
+			for _, ch := range strings.Split(channelsStr, ",") {
+				ch = strings.TrimSpace(ch)
+				if ch != "" {
+					filterChans = append(filterChans, ch)
+				}
+			}
+		} else {
+			// default to main + ccrep channels
+			reg := fam.LoadFamRegistry(absWorkDir)
+			mainChan, ccrepChan := fam.FamChannels(reg)
+			if mainChan != "" {
+				filterChans = append(filterChans, mainChan)
+			}
+			if ccrepChan != "" {
+				filterChans = append(filterChans, ccrepChan)
+			}
+		}
+
+		matchNick := fam.FamScopedNick(actor, fam.FamSlug(fam.LoadFamRegistry(absWorkDir)))
+		lines, nextOffset, err := fam.ReplayHistory(historyPath, actor, matchNick, since, filterChans)
+		if err != nil {
+			return nil, err
+		}
+		if lines == nil {
+			lines = []string{}
+		}
+		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
 	}
 
 	return nil, fmt.Errorf("unknown tool %q", name)
@@ -404,20 +508,6 @@ func argString(args map[string]any, key string) string {
 	return ""
 }
 
-func argStringDefault(args map[string]any, key, def string) string {
-	if v := argString(args, key); v != "" {
-		return v
-	}
-	return def
-}
-
-func argObject(args map[string]any, key string) map[string]any {
-	if v, ok := args[key].(map[string]any); ok {
-		return v
-	}
-	return map[string]any{}
-}
-
 func argFloatDefault(args map[string]any, key string, def float64) float64 {
 	switch v := args[key].(type) {
 	case float64:
@@ -429,38 +519,42 @@ func argFloatDefault(args map[string]any, key string, def float64) float64 {
 	}
 }
 
-func argFloatPtr(args map[string]any, key string) *float64 {
-	if _, ok := args[key]; !ok {
-		return nil
-	}
-	v := argFloatDefault(args, key, 0)
-	return &v
-}
-
 func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
-	mcpSrv.AddResource(
-		mcplib.NewResource(
-			"botfam:///docs/protocol",
-			"botfam Coordination Protocol",
-			mcplib.WithMIMEType("text/markdown"),
-		),
-		s.handleReadResource,
-	)
-	mcpSrv.AddResource(
-		mcplib.NewResource(
-			"botfam:///docs/ops",
-			"botfam Operations Guide",
-			mcplib.WithMIMEType("text/markdown"),
-		),
-		s.handleReadResource,
-	)
+	add := func(uri, name, mime string) {
+		mcpSrv.AddResource(mcplib.NewResource(uri, name, mcplib.WithMIMEType(mime)), s.handleReadResource)
+	}
+	// One discovery root, plus its structured form.
+	add("botfam:///", "botfam discovery root", "text/markdown")
+	add("botfam:///index.json", "botfam discovery index", "application/json")
+	// The embedded generic docs corpus (#117). Served from the binary, so
+	// these work in a repo with no local doc/ checked in.
+	for _, slug := range discoverySlugs {
+		add("botfam:///docs/"+slug, "botfam doc: "+slug, "text/markdown")
+	}
+	// Phase 2: tools & skills catalogs
+	add("botfam:///tools", "botfam tools catalog", "text/markdown")
+	add("botfam:///tools.json", "botfam tools catalog", "application/json")
+	add("botfam:///skills", "botfam skills catalog", "text/markdown")
+	add("botfam:///skills.json", "botfam skills catalog", "application/json")
+
+	// Resource template for individual skills
+	mcpSrv.AddResourceTemplate(mcplib.NewResourceTemplate("botfam:///skills/{name}", "botfam skill document"), s.handleReadResource)
+	// Resource template for individual wiki pages
+	mcpSrv.AddResourceTemplate(mcplib.NewResourceTemplate("botfam:///wiki/{name}", "botfam wiki page"), s.handleReadResource)
+
+	// Live forge wiki (#119). Individual pages (botfam:///wiki/<page>) are
+	// discovered via the index rather than statically advertised.
+	add("botfam:///wiki", "botfam live wiki index", "text/markdown")
+	add("botfam:///wiki/index.json", "botfam live wiki index (json)", "application/json")
+	// Fam-declared wiki projections (#120), advertised from the local registry.
+	for _, proj := range buildDiscoveryData(".").projections {
+		add("botfam:///"+proj.Name, "botfam projection: "+proj.Name, "text/markdown")
+		add("botfam:///"+proj.Name+".json", "botfam projection: "+proj.Name, "application/json")
+	}
 }
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
+	cwd, resolvedVia := s.resolveDiscoveryWorkDirVia(ctx)
 	localRepoRoot := fam.RepoPath(cwd)
 
 	u, err := url.Parse(req.Params.URI)
@@ -519,27 +613,149 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		}
 	}
 
-	var filename string
+	// Build the fam-specific runtime context. Local (and local-named) reads use
+	// cwd; a resolved cross-fam authority uses that fam's repo root.
+	dataWorkDir := cwd
+	if targetRepoRoot != localRepoRoot {
+		dataWorkDir = targetRepoRoot
+	}
+	d := buildDiscoveryData(dataWorkDir)
+	d.resolvedVia = resolvedVia
+
 	path := filepath.Clean(u.Path)
-	switch path {
-	case "/docs/protocol":
-		filename = filepath.Join(targetRepoRoot, "doc", "collab", "PROTOCOL.md")
-	case "/docs/ops":
-		filename = filepath.Join(targetRepoRoot, "doc", "collab", "IRC-OPS.md")
+	if u.Path == "" || path == "." {
+		path = "/"
+	}
+
+	switch {
+	case path == "/":
+		return markdownResource(req.Params.URI, renderRoot(d)), nil
+	case path == "/index.json":
+		body, err := renderIndexJSON(d)
+		if err != nil {
+			return nil, err
+		}
+		return []mcplib.ResourceContents{mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "application/json",
+			Text:     string(body),
+		}}, nil
+	case path == "/tools":
+		return markdownResource(req.Params.URI, renderToolsMarkdown(s)), nil
+	case path == "/tools.json":
+		body, err := s.renderToolsJSON()
+		if err != nil {
+			return nil, err
+		}
+		return []mcplib.ResourceContents{mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "application/json",
+			Text:     string(body),
+		}}, nil
+	case path == "/skills":
+		body, err := renderSkillsMarkdown(dataWorkDir)
+		if err != nil {
+			return nil, err
+		}
+		return markdownResource(req.Params.URI, body), nil
+	case path == "/skills.json":
+		body, err := renderSkillsJSON(dataWorkDir)
+		if err != nil {
+			return nil, err
+		}
+		return []mcplib.ResourceContents{mcplib.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "application/json",
+			Text:     string(body),
+		}}, nil
+	case strings.HasPrefix(path, "/skills/"):
+		skillName := strings.TrimPrefix(path, "/skills/")
+		body, err := readSkillMarkdown(dataWorkDir, skillName)
+		if err != nil {
+			return nil, err
+		}
+		return markdownResource(req.Params.URI, body), nil
+	case strings.HasPrefix(path, "/docs/"):
+		// Embedded generic corpus (#117): served from the binary, never the
+		// local checkout. Unknown slugs fail closed with the known set.
+		slug := strings.TrimPrefix(path, "/docs/")
+		if !isKnownSlug(slug) {
+			return nil, fmt.Errorf("unknown doc %q (known: %s)", slug, strings.Join(discoverySlugs, ", "))
+		}
+		content, err := docs.Render(slug, d.tmpl)
+		if err != nil {
+			return nil, fmt.Errorf("render doc %q: %w", slug, err)
+		}
+		return markdownResource(req.Params.URI, content), nil
+	case path == "/wiki" || path == "/wiki/index.json":
+		// Live forge wiki index (#119): forge API, else flagged-stale cache.
+		prov, err := wikiProvider(dataWorkDir, d.tmpl.Actor)
+		if err != nil {
+			return nil, err
+		}
+		metas, err := prov.Index()
+		if err != nil {
+			return nil, fmt.Errorf("wiki index: %w", err)
+		}
+		if path == "/wiki/index.json" {
+			body, err := renderWikiIndexJSON(metas, prov.Source())
+			if err != nil {
+				return nil, err
+			}
+			return []mcplib.ResourceContents{mcplib.TextResourceContents{
+				URI:      req.Params.URI,
+				MIMEType: "application/json",
+				Text:     string(body),
+			}}, nil
+		}
+		return markdownResource(req.Params.URI, renderWikiIndexMarkdown(metas, prov.Source())), nil
+	case strings.HasPrefix(path, "/wiki/"):
+		// A single live wiki page. Name is constrained to the forge wiki
+		// namespace; traversal/arbitrary reads are rejected by the provider.
+		name := strings.TrimPrefix(path, "/wiki/")
+		if !wiki.ValidPageName(name) {
+			return nil, fmt.Errorf("invalid wiki page %q", name)
+		}
+		prov, err := wikiProvider(dataWorkDir, d.tmpl.Actor)
+		if err != nil {
+			return nil, err
+		}
+		page, err := prov.Page(name)
+		if err != nil {
+			return nil, fmt.Errorf("wiki page %q: %w", name, err)
+		}
+		return markdownResource(req.Params.URI, renderWikiPage(page)), nil
 	default:
+		// A fam-declared wiki projection? botfam:///<name> or <name>.json (#120).
+		pname := strings.TrimPrefix(path, "/")
+		wantJSON := strings.HasSuffix(pname, ".json")
+		pname = strings.TrimSuffix(pname, ".json")
+		for _, proj := range d.projections {
+			if proj.Name != pname {
+				continue
+			}
+			prov, err := wikiProvider(dataWorkDir, d.tmpl.Actor)
+			if err != nil {
+				return nil, err
+			}
+			idx, err := prov.Index()
+			if err != nil {
+				return nil, fmt.Errorf("projection %q: %w", proj.Name, err)
+			}
+			metas := wiki.Filter(idx, proj.Match)
+			if wantJSON {
+				body, err := renderProjectionJSON(proj.Name, proj.Match, prov.Source(), metas)
+				if err != nil {
+					return nil, err
+				}
+				return []mcplib.ResourceContents{mcplib.TextResourceContents{
+					URI:      req.Params.URI,
+					MIMEType: "application/json",
+					Text:     string(body),
+				}}, nil
+			}
+			return markdownResource(req.Params.URI, renderProjectionMarkdown(proj.Name, proj.Match, prov.Source(), metas)), nil
+		}
 		return nil, fmt.Errorf("unknown resource path %q", u.Path)
 	}
-
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read resource file: %w", err)
-	}
-
-	return []mcplib.ResourceContents{
-		mcplib.TextResourceContents{
-			URI:      req.Params.URI,
-			MIMEType: "text/markdown",
-			Text:     string(content),
-		},
-	}, nil
 }

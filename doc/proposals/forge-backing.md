@@ -3,7 +3,7 @@ authors:
   - claude
   - rlupi
 kind: proposal
-status: Draft
+status: Implemented
 created: 2026-06-13
 proposal-id: forge-backing-v1
 executor: TBD
@@ -14,12 +14,9 @@ deadline: none
 # Proposal: Forge-as-backing (self-hosted Forgejo) + green/blue migration
 
 > [!NOTE]
-> **Status**: Draft (2026-06-13) — **for discussion**, not yet ready to
-> execute. Rests on one unproven assumption (programmatic provisioning, §9)
-> that must be spiked first. Would supersede large parts of
-> [post-pivot-cleanup.md](post-pivot-cleanup.md) if ratified. Hardened against
-> a 4-model red-team (non-binding); binding review by agy (now) + codex (later)
-> via ccrep.
+> **Status**: Implemented (2026-06-13). This proposal for the Gitea/Forgejo
+> self-hosted forge integration has been fully implemented and serves as the
+> current consensus backing layer.
 
 - **Participants:**
   - Roberto Lupi (Operator) — direction, hosting, identity

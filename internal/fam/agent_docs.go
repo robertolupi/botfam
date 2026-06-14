@@ -16,33 +16,14 @@ import (
 
 var agentDocFiles = []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
 
-const agentDocsTemplateText = "# botfam fam member — read this first\n" +
+const agentDocsTemplateText = "# botfam agent harness pointer\n" +
 	"\n" +
-	"This checkout is one agent's **worktree** in a botfam coordination fam.\n" +
+	"This worktree belongs to a botfam agent.\n" +
 	"\n" +
-	"1. **Your name** is this worktree's directory basename with any leading\n" +
-	"   `wt-` or `botfam-` stripped (`wt-$NAME` → `$NAME`). If in doubt:\n" +
-	"   `basename \"$PWD\"`.\n" +
-	"2. **Read [doc/collab/PROTOCOL.md](doc/collab/PROTOCOL.md) before your first\n" +
-	"   collab call.** It is the single source of truth for identity rules,\n" +
-	"   coordination tools, the ccrep change protocol, worktree ownership, and\n" +
-	"   platform gotchas.\n" +
-	"3. Talk to the fam through the **`botfam`** CLI tool. You can invoke commands\n" +
-	"   like `botfam worktree`, `botfam session`, `botfam verify`, etc. directly.\n" +
-	"4. **Connect to the IRC server immediately.** To join the conversation, run\n" +
-	"   `botfam irc-client <name>` as a background task. A registered nick's pass\n" +
-	"   file is found automatically at `~/.botfam/irc-pass-<fam>-<name>` (or the\n" +
-	"   legacy `~/.botfam/irc-pass-<name>`); pass `--pass-file` to override.\n" +
-	"   Monitor for incoming messages using the\n" +
-	"   wake watcher `botfam irc-wait`. See [doc/collab/IRC-OPS.md](doc/collab/IRC-OPS.md)\n" +
-	"   for server details and operational recipes.\n" +
-	"5. **Sending and reading.** Write lines to `scratch/irc/<name>/in`: a bare\n" +
-	"   line goes as text to your fam's main channel; `/msg <target> <text>`\n" +
-	"   messages another channel or nick; `/join <#chan>` joins a channel;\n" +
-	"   `/raw <cmd>` sends any IRC command. Replies appear in\n" +
-	"   `scratch/irc/<name>/log`. If the botfam MCP server is connected, prefer\n" +
-	"   the `irc_write` / `irc_read` / `irc_wait` tools — same semantics, no\n" +
-	"   shell approval prompts.\n" +
+	"1. **Your Name**: Resolved by running `botfam whoami` (or worktree basename).\n" +
+	"2. **MCP Onboarding**: Run `resources/read` on `botfam:///docs/start` immediately to orient yourself.\n" +
+	"3. **Core Protocol**: The full rules live at `botfam:///docs/protocol` (originally at `doc/collab/PROTOCOL.md`).\n" +
+	"4. **Environment Health**: Inspect the health warning blocks at `botfam:///` to ensure your token and client are correctly set up. If the root shows `<unresolved>` (e.g., in system-wide MCP setups), call the `orient` tool with your worktree path (as the `work_dir` argument) to bootstrap.\n" +
 	"\n" +
 	"## Repo-local Skills\n" +
 	"\n" +
@@ -56,10 +37,9 @@ const agentDocsTemplateText = "# botfam fam member — read this first\n" +
 	"- No repo-local skills found.\n" +
 	"{{- end }}\n" +
 	"\n" +
-	"Keep this file lightweight: substantive rules belong in PROTOCOL.md, never\n" +
-	"here. This file is generated from the same source as the other harness files.\n"
+	"Refer to the MCP resources above for all operational details.\n"
 
-type repoSkill struct {
+type RepoSkill struct {
 	Name        string
 	Description string
 	Path        string
@@ -150,7 +130,7 @@ func CheckAgentDocs(repoRoot string) ([]string, error) {
 }
 
 func RenderAgentDocs(repoRoot string) ([]byte, error) {
-	skills, err := readRepoSkills(repoRoot)
+	skills, err := ReadRepoSkills(repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +148,7 @@ func RenderAgentDocs(repoRoot string) ([]byte, error) {
 
 	var b bytes.Buffer
 	if err := tmpl.Execute(&b, struct {
-		Skills []repoSkill
+		Skills []RepoSkill
 	}{
 		Skills: skills,
 	}); err != nil {
@@ -177,7 +157,7 @@ func RenderAgentDocs(repoRoot string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func readRepoSkills(repoRoot string) ([]repoSkill, error) {
+func ReadRepoSkills(repoRoot string) ([]RepoSkill, error) {
 	skillsDir := filepath.Join(repoRoot, "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
@@ -187,7 +167,7 @@ func readRepoSkills(repoRoot string) ([]repoSkill, error) {
 		return nil, fmt.Errorf("read skills directory: %w", err)
 	}
 
-	var skills []repoSkill
+	var skills []RepoSkill
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -211,19 +191,19 @@ func readRepoSkills(repoRoot string) ([]repoSkill, error) {
 	return skills, nil
 }
 
-func readRepoSkill(path, rel string) (repoSkill, error) {
+func readRepoSkill(path, rel string) (RepoSkill, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return repoSkill{}, nil
+			return RepoSkill{}, nil
 		}
-		return repoSkill{}, fmt.Errorf("read %s: %w", rel, err)
+		return RepoSkill{}, fmt.Errorf("read %s: %w", rel, err)
 	}
 	name, desc, err := parseSkillFrontmatter(string(data))
 	if err != nil {
-		return repoSkill{}, fmt.Errorf("%s: %w", rel, err)
+		return RepoSkill{}, fmt.Errorf("%s: %w", rel, err)
 	}
-	return repoSkill{Name: name, Description: desc, Path: rel}, nil
+	return RepoSkill{Name: name, Description: desc, Path: rel}, nil
 }
 
 func parseSkillFrontmatter(s string) (string, string, error) {

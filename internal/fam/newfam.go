@@ -109,6 +109,7 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 	reg.Roster = roster
 	reg.RepoPaths = unique(append(append([]string{repoRoot}, worktrees...), reg.RepoPaths...))
 	reg.ObjectStores = unique(append(reg.ObjectStores, stores...))
+	reg.WikiProjections = []string{"memory:memory-*"}
 
 	if err := WriteRegistry(regPath, reg); err != nil {
 		return err
@@ -213,11 +214,88 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 		cloneWiki(repoRoot, wtPath, out)
 	}
 
+	if err := registerMCPServerGlobally(out); err != nil {
+		fmt.Fprintf(out, "Warning: failed to register MCP server globally: %v\n", err)
+	}
+
 	fmt.Fprintln(out, "\nbotfam bootstrap complete.")
 	fmt.Fprintf(out, "Project:     %s\n", projectName)
 	fmt.Fprintf(out, "Repository:  %s\n", repoRoot)
 	fmt.Fprintf(out, "Agents:      %s\n", strings.Join(agents, ", "))
 	fmt.Fprintf(out, "Human:       %s (worktree wt-%s)\n", humanActor, humanActor)
+	return nil
+}
+
+func registerMCPServerGlobally(out io.Writer) error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+	execPath, err = filepath.Abs(execPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute executable path: %w", err)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	configPaths := []string{
+		filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+		filepath.Join(home, ".claude.json"),
+	}
+
+	for _, path := range configPaths {
+		parent := filepath.Dir(path)
+		if _, err := os.Stat(parent); os.IsNotExist(err) {
+			continue
+		}
+
+		fmt.Fprintf(out, "Registering collab MCP server in global config: %s...\n", path)
+
+		var config map[string]interface{}
+		data, err := os.ReadFile(path)
+		if err == nil {
+			if err := json.Unmarshal(data, &config); err != nil {
+				config = make(map[string]interface{})
+			}
+		} else {
+			config = make(map[string]interface{})
+		}
+
+		mcpServersVal, exists := config["mcpServers"]
+		var mcpServers map[string]interface{}
+		if exists {
+			if m, ok := mcpServersVal.(map[string]interface{}); ok {
+				mcpServers = m
+			} else {
+				mcpServers = make(map[string]interface{})
+			}
+		} else {
+			mcpServers = make(map[string]interface{})
+		}
+
+		collabSrv := map[string]interface{}{
+			"command": execPath,
+			"args":    []interface{}{"serve"},
+			"env": map[string]interface{}{
+				"PATH": os.Getenv("PATH"),
+			},
+		}
+		mcpServers["collab"] = collabSrv
+		config["mcpServers"] = mcpServers
+
+		newData, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal config: %w", err)
+		}
+
+		if err := os.WriteFile(path, newData, 0644); err != nil {
+			return fmt.Errorf("failed to write config to %s: %w", path, err)
+		}
+	}
+
 	return nil
 }
 
@@ -252,11 +330,29 @@ func cloneWiki(repoRoot, wtPath string, out io.Writer) {
 		fmt.Fprintf(out, "  wiki already present: %s\n", dest)
 		return
 	}
+
+	// Read git identity config from the worktree to replicate in the cloned wiki repo.
+	name, _ := gitOne(wtPath, "config", "user.name")
+	email, _ := gitOne(wtPath, "config", "user.email")
+	name = strings.TrimSpace(name)
+	email = strings.TrimSpace(email)
+
 	if _, err := gitOutput(repoRoot, "clone", wikiURL, dest); err != nil {
 		fmt.Fprintf(out, "  warning: could not clone wiki %s: %v\n", wikiURL, err)
 		return
 	}
 	fmt.Fprintf(out, "  cloned wiki into %s\n", dest)
+
+	if name != "" {
+		if _, err := gitOutput(dest, "config", "user.name", name); err != nil {
+			fmt.Fprintf(out, "  warning: could not configure wiki user.name: %v\n", err)
+		}
+	}
+	if email != "" {
+		if _, err := gitOutput(dest, "config", "user.email", email); err != nil {
+			fmt.Fprintf(out, "  warning: could not configure wiki user.email: %v\n", err)
+		}
+	}
 }
 
 func writeClaudeSettings(checkout string) error {

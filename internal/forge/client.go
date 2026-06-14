@@ -15,7 +15,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
+
+// defaultHTTPClient is the shared fallback used by every Client that does not
+// supply its own HTTPClient. Unlike http.DefaultClient it has a finite timeout
+// so a slow or stalled Gitea host cannot wedge a caller (e.g. the forge-wait
+// loop) forever. It is process-wide but never mutated, so it is safe to share.
+var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type Client struct {
 	BaseURL string // e.g. "http://gitea:3000/"
@@ -23,6 +30,10 @@ type Client struct {
 	Repo    string // e.g. "botfam"
 	Token   string
 	Remote  string
+
+	// HTTPClient, when set, overrides defaultHTTPClient for this Client's
+	// requests. Leave nil to use the timeout-bearing shared default.
+	HTTPClient *http.Client
 }
 
 type PullRequest struct {
@@ -211,33 +222,47 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			return nil, fmt.Errorf("failed to get user home dir: %w", err)
 		}
 
-		fam := os.Getenv("BOTFAM_FAM")
-		if fam == "" {
-			absPath, err := filepath.Abs(workDir)
-			if err == nil {
-				fam = filepath.Base(filepath.Dir(absPath))
-			}
+		if famTOMLPath == "" {
+			famTOMLPath = resolveFamTOMLPath(workDir)
 		}
-		if fam == "" {
-			fam = "botfam"
+		var harness string
+		if famTOMLPath != "" {
+			harness = readHarnessFromFamTOML(famTOMLPath, actor)
 		}
 
-		tokenFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", fam, actor))
-		if _, err := os.Stat(tokenFile); os.IsNotExist(err) {
-			legacyFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s", actor))
-			if _, err := os.Stat(legacyFile); err == nil {
-				tokenFile = legacyFile
-			} else {
-				testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
-				if _, err := os.Stat(testFile); err == nil {
-					tokenFile = testFile
-				}
+		// Fail closed: the token is the canonical per-harness one. There is NO
+		// silent legacy (token-botfam-<actor>) or per-fam (token-<fam>-<actor>)
+		// fallback — those masking a missing token are exactly the #183 disease.
+		var tokenFile string
+		if harness != "" {
+			tokenFile, err = HarnessTokenPath(harness)
+			if err != nil {
+				return nil, err
 			}
 		}
 
+		// The only non-canonical path is the explicit opt-in test credential
+		// (BOTFAM_ALLOW_TEST_TOKEN_FALLBACK=1) for the local test forge — never a
+		// silent production fallback (#70).
+		needTest := tokenFile == ""
+		if !needTest {
+			if _, statErr := os.Stat(tokenFile); os.IsNotExist(statErr) {
+				needTest = true
+			}
+		}
+		if needTest && os.Getenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK") == "1" {
+			testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
+			if _, statErr := os.Stat(testFile); statErr == nil {
+				tokenFile = testFile
+			}
+		}
+
+		if tokenFile == "" {
+			return nil, fmt.Errorf("cannot resolve forge token: no [agent.%s] harness in %s — run `botfam setup`; report this to your operator (no legacy fallback)", actor, famTOMLPath)
+		}
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read token file %s: %w", tokenFile, err)
+			return nil, fmt.Errorf("forge token not found at %s: %w — mint it with `botfam mint --harness %s --user <forge-user>`; report this to your operator", tokenFile, err, harness)
 		}
 		token = strings.TrimSpace(string(b))
 	}
@@ -276,7 +301,11 @@ func (c *Client) request(method, path string, body []byte) ([]byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		httpClient = defaultHTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -354,21 +383,46 @@ func (c *Client) PostCommitStatus(commitSHA string, state string, context string
 	return err
 }
 
-func (c *Client) MergePR(prNum int, style string, msg string) error {
-	path := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", c.Owner, c.Repo, prNum)
-	payload := map[string]any{
-		"Do":                style,
-		"MergeMessageField": msg,
+// resolveFamName derives the fam name used in the token filename
+// (token-<fam>-<actor>). It honours BOTFAM_FAM when set, otherwise it follows
+// the on-disk layout convention where a worktree lives at
+// ~/src/fams/<fam>/wt-<actor>, so the fam is the basename of the directory
+// *containing the worktree root*.
+//
+// The worktree root is resolved via git first so the result is stable no
+// matter which nested subdirectory the command was invoked from. Taking the
+// parent of the raw working directory (the previous behaviour) yielded a
+// package dir name like "cmd" or "internal" when run from a subdirectory,
+// breaking token lookup (issue #81). When git can't identify a worktree (e.g.
+// outside a repo) it falls back to the parent of the working directory itself.
+func resolveFamName(workDir string) string {
+	if fam := os.Getenv("BOTFAM_FAM"); fam != "" {
+		return fam
 	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
+	root := worktreeRoot(workDir)
+	if root == "" {
+		if abs, err := filepath.Abs(workDir); err == nil {
+			root = abs
+		}
 	}
-
-	_, err = c.request("POST", path, b)
-	return err
+	if root == "" {
+		return ""
+	}
+	return filepath.Base(filepath.Dir(root))
 }
 
+// worktreeRoot returns the absolute top-level directory of the git worktree
+// containing workDir, or "" if it cannot be determined.
+func worktreeRoot(workDir string) string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = workDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
+}
 func resolveFamTOMLPath(workDir string) string {
 	if root := os.Getenv("COLLAB_ROOT"); root != "" {
 		return filepath.Join(root, "fam.toml")
@@ -423,6 +477,50 @@ func readConfigValueFromFamTOML(path string, keys ...string) string {
 		k = strings.TrimSpace(k)
 		for _, wantKey := range keys {
 			if k == wantKey {
+				v = strings.TrimSpace(v)
+				if strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
+					return v[1 : len(v)-1]
+				}
+				if strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'") {
+					return v[1 : len(v)-1]
+				}
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+func readHarnessFromFamTOML(path string, actor string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	inAgentBlock := false
+	targetHeader := fmt.Sprintf("[agent.%s]", actor)
+	targetHeaderQuoted := fmt.Sprintf("[agent.%q]", actor)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			if line == targetHeader || line == targetHeaderQuoted {
+				inAgentBlock = true
+			} else {
+				inAgentBlock = false
+			}
+			continue
+		}
+		if inAgentBlock {
+			k, v, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			k = strings.TrimSpace(k)
+			if k == "harness" {
 				v = strings.TrimSpace(v)
 				if strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
 					return v[1 : len(v)-1]

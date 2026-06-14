@@ -1,13 +1,23 @@
+---
+authors:
+  - rlupi
+kind: proposal
+status: Superseded
+superseded-by: doc/collab/PROTOCOL.md
+created: 2026-06-11
+---
+
 # Proposal: Machine-Derived ccrep — `botfam propose / approve / merge`
 
 > [!NOTE]
-> **Status**: Implemented (2026-06-11). The `botfam propose`, `approve`, and
-> `merge` commands are implemented in the CLI and are wire-compatible with the
-> IRC coordination plane.
+> **Status**: Superseded (2026-06-13) by the Gitea PR consensus model
+> ([PROTOCOL.md](../collab/PROTOCOL.md) §3). The CLI registers no
+> `propose`/`approve`/`merge` commands; coordination is managed natively.
 
 ## Status
 
-**Implemented** (2026-06-11).
+**Superseded** (2026-06-13) by the Gitea PR consensus model
+([PROTOCOL.md](../collab/PROTOCOL.md) §3).
 
 ## Problem
 

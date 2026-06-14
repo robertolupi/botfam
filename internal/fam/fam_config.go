@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Legacy defaults used when no fam registry is resolvable. They match the
@@ -39,6 +40,20 @@ func FamSlug(reg Registry) string {
 		return reg.Slug
 	}
 	return reg.Name
+}
+
+// FamBranch returns the integration branch for this family: the explicit
+// fam.toml branch when set, else the default derived integration branch
+// name (<slug>-next).
+func FamBranch(reg Registry) string {
+	if reg.Branch != "" {
+		return reg.Branch
+	}
+	slug := FamSlug(reg)
+	if slug != "" {
+		return slug + "-next"
+	}
+	return "botfam-next"
 }
 
 // FamChannels returns the fam's main and ccrep IRC channels. Explicit
@@ -96,23 +111,46 @@ func DefaultHistoryPath(workDir string) (string, error) {
 	return filepath.Join(info.Root, FamLedgerDirName(reg), "history.jsonl"), nil
 }
 
-// DefaultPassFile returns the IRC pass file to use for nick when --pass-file
-// is omitted: ~/.botfam/irc-pass-<slug>-<nick> when present, else the legacy
-// ~/.botfam/irc-pass-<nick> when present, else "" (anonymous connect).
-func DefaultPassFile(famSlug, nick string) string {
+// DefaultPassFile returns the IRC pass file to use for actor when --pass-file
+// is omitted. It is tolerant of both fam-scoping orderings so existing files
+// keep working (#137): it tries, in order,
+//   - ~/.botfam/irc-pass-<actor>-<slug>   (the standard going forward)
+//   - ~/.botfam/irc-pass-<slug>-<actor>   (legacy ordering)
+//   - ~/.botfam/irc-pass-<actor>          (unscoped legacy)
+//
+// and returns the first that exists, else "" (anonymous connect).
+func DefaultPassFile(famSlug, actor string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
 	var candidates []string
 	if famSlug != "" {
-		candidates = append(candidates, filepath.Join(home, ".botfam", "irc-pass-"+famSlug+"-"+nick))
+		candidates = append(candidates,
+			filepath.Join(home, ".botfam", "irc-pass-"+actor+"-"+famSlug),
+			filepath.Join(home, ".botfam", "irc-pass-"+famSlug+"-"+actor),
+		)
 	}
-	candidates = append(candidates, filepath.Join(home, ".botfam", "irc-pass-"+nick))
+	candidates = append(candidates, filepath.Join(home, ".botfam", "irc-pass-"+actor))
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
 	}
 	return ""
+}
+
+// FamScopedNick returns the fam-scoped IRC nick for an actor: "<actor>-<slug>"
+// (e.g. "claude-botfam", "agy-dc"), so agents from different fams sharing the
+// same actor name (and even the same wt-<actor> dir) never collide on a shared
+// IRC server (#137). It is idempotent (won't double-suffix) and returns the
+// bare actor when no slug is resolvable.
+func FamScopedNick(actor, famSlug string) string {
+	if famSlug == "" || actor == "" {
+		return actor
+	}
+	if strings.HasSuffix(actor, "-"+famSlug) {
+		return actor
+	}
+	return actor + "-" + famSlug
 }

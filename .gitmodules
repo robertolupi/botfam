@@ -1,0 +1,4 @@
+[submodule "third_party/gitea-mcp"]
+	path = third_party/gitea-mcp
+	url = http://gitea:3000/botfam/gitea-mcp.git
+	branch = botfam

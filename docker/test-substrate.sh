@@ -26,7 +26,7 @@ last_probe = 0.0
 while time.time() < deadline:
     try:
         line = f.readline()
-    except TimeoutError:
+    except (TimeoutError, OSError):
         line = ""
     if line:
         line = line.strip()
