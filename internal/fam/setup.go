@@ -1,6 +1,7 @@
 package fam
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -127,6 +128,9 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	}
 	if err := createProjectSymlink(project, info.Root); err != nil {
 		return err
+	}
+	if err := RegisterMCPServerGlobally(out); err != nil {
+		fmt.Fprintf(out, "Warning: failed to register MCP server globally: %v\n", err)
 	}
 	fmt.Fprintf(out, "botfam root: %s\n", info.Root)
 	return nil
@@ -261,4 +265,77 @@ func hasAny(a, b []string) bool {
 		}
 	}
 	return false
+}
+
+func RegisterMCPServerGlobally(out io.Writer) error {
+	execPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("failed to get executable path: %w", err)
+	}
+	execPath, err = filepath.Abs(execPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute executable path: %w", err)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
+
+	configPaths := []string{
+		filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
+	}
+
+	for _, path := range configPaths {
+		parent := filepath.Dir(path)
+		if _, err := os.Stat(parent); os.IsNotExist(err) {
+			continue
+		}
+
+		fmt.Fprintf(out, "Registering botfam MCP server in global config: %s...\n", path)
+
+		var config map[string]interface{}
+		data, err := os.ReadFile(path)
+		if err == nil {
+			if err := json.Unmarshal(data, &config); err != nil {
+				config = make(map[string]interface{})
+			}
+		} else {
+			config = make(map[string]interface{})
+		}
+
+		mcpServersVal, exists := config["mcpServers"]
+		var mcpServers map[string]interface{}
+		if exists {
+			if m, ok := mcpServersVal.(map[string]interface{}); ok {
+				mcpServers = m
+			} else {
+				mcpServers = make(map[string]interface{})
+			}
+		} else {
+			mcpServers = make(map[string]interface{})
+		}
+
+		botfamSrv := map[string]interface{}{
+			"command": execPath,
+			"args":    []interface{}{"serve"},
+			"env": map[string]interface{}{
+				"PATH": os.Getenv("PATH"),
+			},
+		}
+		delete(mcpServers, "collab")
+		mcpServers["botfam"] = botfamSrv
+		config["mcpServers"] = mcpServers
+
+		newData, err := json.MarshalIndent(config, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal config: %w", err)
+		}
+
+		if err := os.WriteFile(path, newData, 0644); err != nil {
+			return fmt.Errorf("failed to write config to %s: %w", path, err)
+		}
+	}
+
+	return nil
 }
