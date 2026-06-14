@@ -5,6 +5,7 @@ go 1.25.11
 require (
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/openai/openai-go/v2 v2.7.1
+	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/spf13/cobra v1.9.1
 )
 

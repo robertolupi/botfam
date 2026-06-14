@@ -1,7 +1,6 @@
 package fam
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -9,26 +8,53 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
 )
 
+// AgentConfig is a single `[agent.<name>]` or `[user.<name>]` entry in fam.toml:
+// how botfam configures that worktree. The map key (and Name) is the worktree
+// directory basename (the `wt-` prefix is retired). Email is optional and
+// defaults to the host git email plus-addressed with Name. IsUser marks a
+// `[user.<name>]` (human) entry, which gets a git identity but no harness/runtime.
+// See wiki/proposal-unified-fam-config §4.2.
+type AgentConfig struct {
+	Name      string `toml:"-"` // filled from the table key
+	Harness   string `toml:"harness"`
+	ForgeUser string `toml:"forge_user"`
+	Email     string `toml:"email"`
+	IsUser    bool   `toml:"-"` // true for [user.<name>] entries
+}
+
 type Registry struct {
-	Name         string
-	Slug         string
-	Branch       string
-	RootSet      []string
-	Origin       string
-	Roster       []string
-	Channels     []string
-	RepoPaths    []string
-	ObjectStores []string
-	CreatedAt    string
+	Name         string   `toml:"name"`
+	Slug         string   `toml:"slug"`
+	Branch       string   `toml:"branch"`
+	RootSet      []string `toml:"root_set"`
+	Origin       string   `toml:"origin"`
+	Roster       []string `toml:"roster"`
+	Channels     []string `toml:"channels"`
+	RepoPaths    []string `toml:"repo_paths"`
+	ObjectStores []string `toml:"object_stores"`
+	CreatedAt    string   `toml:"created_at"`
+
+	// ForgeURL is the HTTP(S) forge API base (e.g. http://gitea.home.rlupi.com:3000/).
+	// Repository is the org/repo on the forge. Both are explicit in fam.toml so
+	// nothing has to guess them from a (possibly SSH) git remote — see #184.
+	ForgeURL   string `toml:"forge_url"`
+	Repository string `toml:"repository"`
+
+	// Agents and Users hold the `[agent.<name>]` / `[user.<name>]` tables, keyed
+	// by worktree-directory name. Agents may run the botfam runtime; Users are
+	// human checkouts (git identity only). See wiki/proposal-unified-fam-config.
+	Agents map[string]AgentConfig `toml:"agent"`
+	Users  map[string]AgentConfig `toml:"user"`
 
 	// WikiProjections declares curated wiki indexes as "name:glob" entries
 	// (e.g. "reviews:review-*"). Each becomes botfam:///<name>[.json], listing
 	// the wiki pages whose name matches the glob. Fam-specific: every fam
 	// declares its own set (or none) — see #120.
-	WikiProjections []string
+	WikiProjections []string `toml:"wiki_projections"`
 }
 
 // Setup is the thin args/io entry point retained for tests; it builds the
@@ -125,50 +151,26 @@ func EnsureMembership(root string, explicit bool, workDir string) error {
 }
 
 func ReadRegistry(path string) (Registry, error) {
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Registry{}, err
 	}
-	defer f.Close()
-	reg := Registry{}
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
-			continue
-		}
-		k, v, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		switch k {
-		case "name":
-			reg.Name = parseString(v)
-		case "slug":
-			reg.Slug = parseString(v)
-		case "branch":
-			reg.Branch = parseString(v)
-		case "origin":
-			reg.Origin = parseString(v)
-		case "created_at":
-			reg.CreatedAt = parseString(v)
-		case "root_set":
-			reg.RootSet = parseArray(v)
-		case "roster":
-			reg.Roster = parseArray(v)
-		case "channels":
-			reg.Channels = parseArray(v)
-		case "repo_paths":
-			reg.RepoPaths = parseArray(v)
-		case "object_stores":
-			reg.ObjectStores = parseArray(v)
-		case "wiki_projections":
-			reg.WikiProjections = parseArray(v)
-		}
+	var reg Registry
+	if err := toml.Unmarshal(data, &reg); err != nil {
+		return Registry{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return reg, sc.Err()
+	// TOML map keys aren't injected into the struct value, so backfill the
+	// canonical Name (and IsUser for users) from the table key.
+	for k, ac := range reg.Agents {
+		ac.Name = k
+		reg.Agents[k] = ac
+	}
+	for k, ac := range reg.Users {
+		ac.Name = k
+		ac.IsUser = true
+		reg.Users[k] = ac
+	}
+	return reg, nil
 }
 
 func WriteRegistry(path string, reg Registry) error {
@@ -235,25 +237,6 @@ func writeArray(b *strings.Builder, key string, vals []string) {
 		fmt.Fprintf(b, "%q", v)
 	}
 	b.WriteString("]\n")
-}
-
-func parseString(v string) string {
-	return strings.Trim(strings.TrimSpace(v), `"`)
-}
-
-func parseArray(v string) []string {
-	v = strings.TrimSpace(v)
-	v = strings.TrimPrefix(v, "[")
-	v = strings.TrimSuffix(v, "]")
-	if strings.TrimSpace(v) == "" {
-		return nil
-	}
-	parts := strings.Split(v, ",")
-	out := []string{}
-	for _, p := range parts {
-		out = append(out, parseString(p))
-	}
-	return out
 }
 
 func splitCSV(s string) []string {
