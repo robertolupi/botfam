@@ -36,6 +36,7 @@ func TestEmbeddedCorpusIsGeneric(t *testing.T) {
 		"wt-claude",
 		"wt-rlupi",
 		"robertolupi",
+		"roberto.lupi",
 	}
 
 	err := fs.WalkDir(Files, "corpus", func(path string, d fs.DirEntry, err error) error {

@@ -27,5 +27,5 @@ target.
 - **Explicit identity**: The main checkout does not trigger worktree config, so
   execute merges with explicit git identity flags:
   ```bash
-  git -c user.name=<actor> -c user.email=roberto.lupi+<actor>@gmail.com merge --no-ff <branch>
+  git -c user.name=<actor> -c user.email=<operator-email> merge --no-ff <branch>
   ```
