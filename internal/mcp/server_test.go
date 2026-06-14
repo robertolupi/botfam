@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/robertolupi/botfam/internal/fam"
 )
@@ -630,5 +632,192 @@ func TestMcpResources(t *testing.T) {
 		if _, err := s.handleReadResource(context.Background(), req); err == nil {
 			t.Errorf("%s: expected error for URI %q, got nil", tc.name, tc.uri)
 		}
+	}
+}
+
+func TestMcpCatalogsAndCLI(t *testing.T) {
+	// Setup a temporary workspace with skills
+	root := t.TempDir()
+	
+	// Create mock skills in the temp root
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "zeta"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	zetaContent := "---\nname: zeta-skill\ndescription: Handle zeta work.\n---\n# Zeta skill contents\n"
+	if err := os.WriteFile(filepath.Join(skillsDir, "zeta", "SKILL.md"), []byte(zetaContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Change cwd to temp root so ReadRepoSkills reads our mock skills
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(oldCwd)
+	}()
+
+	s := &server{}
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false))
+	s.mcpSrv = mcpSrv
+	s.registerTools(mcpSrv)
+	s.registerResources(mcpSrv)
+
+	// 1. Verify tools catalog
+	req := mcplib.ReadResourceRequest{}
+	req.Params.URI = "botfam:///tools"
+	res, err := s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///tools: %v", err)
+	}
+	toolsMarkdown := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(toolsMarkdown, "# botfam Tools Catalog") || !strings.Contains(toolsMarkdown, "irc_read") {
+		t.Errorf("unexpected tools markdown: %q", toolsMarkdown)
+	}
+
+	req.Params.URI = "botfam:///tools.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///tools.json: %v", err)
+	}
+	var toolsIdx struct {
+		Schema string `json:"schema"`
+		Tools  []struct {
+			Name            string `json:"name"`
+			Description     string `json:"description"`
+			Domain          string `json:"domain"`
+			ReadOnly        bool   `json:"read_only"`
+			InputSchemaHash string `json:"input_schema_hash"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &toolsIdx); err != nil {
+		t.Fatalf("tools.json is not valid JSON: %v", err)
+	}
+	if toolsIdx.Schema != "botfam.tools.v1" {
+		t.Errorf("expected schema botfam.tools.v1, got %q", toolsIdx.Schema)
+	}
+	foundIrcRead := false
+	for _, tool := range toolsIdx.Tools {
+		if tool.Name == "irc_read" {
+			foundIrcRead = true
+			if tool.Domain != "irc" {
+				t.Errorf("expected domain 'irc' for irc_read, got %q", tool.Domain)
+			}
+			if !tool.ReadOnly {
+				t.Errorf("expected read_only true for irc_read")
+			}
+			if len(tool.InputSchemaHash) != 64 {
+				t.Errorf("expected 64-char schema hash, got %q", tool.InputSchemaHash)
+			}
+		}
+	}
+	if !foundIrcRead {
+		t.Errorf("irc_read tool not found in tools.json catalog")
+	}
+
+	// 2. Verify skills catalog
+	req.Params.URI = "botfam:///skills"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///skills: %v", err)
+	}
+	skillsMarkdown := res[0].(mcplib.TextResourceContents).Text
+	if !strings.Contains(skillsMarkdown, "# botfam Skills Catalog") || !strings.Contains(skillsMarkdown, "zeta-skill") {
+		t.Errorf("unexpected skills markdown: %q", skillsMarkdown)
+	}
+
+	req.Params.URI = "botfam:///skills.json"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read botfam:///skills.json: %v", err)
+	}
+	var skillsIdx struct {
+		Schema string `json:"schema"`
+		Skills []struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Path        string `json:"path"`
+		} `json:"skills"`
+	}
+	if err := json.Unmarshal([]byte(res[0].(mcplib.TextResourceContents).Text), &skillsIdx); err != nil {
+		t.Fatalf("skills.json is not valid JSON: %v", err)
+	}
+	if skillsIdx.Schema != "botfam.skills.v1" {
+		t.Errorf("expected schema botfam.skills.v1, got %q", skillsIdx.Schema)
+	}
+	if len(skillsIdx.Skills) != 1 || skillsIdx.Skills[0].Name != "zeta-skill" {
+		t.Errorf("expected skills catalog to contain 'zeta-skill', got %+v", skillsIdx.Skills)
+	}
+
+	// 3. Read specific skill
+	req.Params.URI = "botfam:///skills/zeta-skill"
+	res, err = s.handleReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("failed to read skill zeta-skill: %v", err)
+	}
+	if res[0].(mcplib.TextResourceContents).Text != zetaContent {
+		t.Errorf("expected skill content %q, got %q", zetaContent, res[0].(mcplib.TextResourceContents).Text)
+	}
+
+	// 4. Traversal and bad cases
+	negatives := []struct {
+		name string
+		uri  string
+	}{
+		{"unknown skill", "botfam:///skills/nonexistent"},
+		{"traversal under skills", "botfam:///skills/../../etc/passwd"},
+	}
+	for _, tc := range negatives {
+		req.Params.URI = tc.uri
+		if _, err := s.handleReadResource(context.Background(), req); err == nil {
+			t.Errorf("%s: expected error for URI %q, got nil", tc.name, tc.uri)
+		}
+	}
+}
+
+func TestMcpCLICommands(t *testing.T) {
+	// Setup a temporary workspace with skills
+	root := t.TempDir()
+	skillsDir := filepath.Join(root, "skills")
+	if err := os.MkdirAll(filepath.Join(skillsDir, "zeta"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	zetaContent := "---\nname: zeta-skill\ndescription: Handle zeta work.\n---\n# Zeta skill contents\n"
+	if err := os.WriteFile(filepath.Join(skillsDir, "zeta", "SKILL.md"), []byte(zetaContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldCwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(oldCwd)
+	}()
+
+	// Test list-resources output
+	var listBuf bytes.Buffer
+	if err := listResourcesCmd(&listBuf); err != nil {
+		t.Fatalf("listResourcesCmd failed: %v", err)
+	}
+	listOut := listBuf.String()
+	if !strings.Contains(listOut, "botfam:///tools") || !strings.Contains(listOut, "botfam:///skills/{name}") {
+		t.Errorf("listResourcesCmd output missing expected elements: %q", listOut)
+	}
+
+	// Test read-resource output
+	var readBuf bytes.Buffer
+	if err := readResourceCmd(&readBuf, "botfam:///skills/zeta-skill"); err != nil {
+		t.Fatalf("readResourceCmd failed: %v", err)
+	}
+	if readBuf.String() != zetaContent {
+		t.Errorf("readResourceCmd output expected %q, got %q", zetaContent, readBuf.String())
 	}
 }
