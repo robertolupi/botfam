@@ -69,6 +69,96 @@ func TestResolveDiscoveryWorkDirViaLabelsTier(t *testing.T) {
 	}
 }
 
+// resolves builds a fam-detection predicate that approves exactly the given
+// dirs, standing in for the env-coupled famResolvable in resolveWorkDir tests.
+func resolves(dirs ...string) func(string) bool {
+	set := make(map[string]bool, len(dirs))
+	for _, d := range dirs {
+		set[d] = true
+	}
+	return func(p string) bool { return set[p] }
+}
+
+// TestResolveWorkDirRootsTier exercises the client `roots` tier — the path that
+// is dead code on per-project mounts (cwd!="/") and was therefore unvalidated by
+// real Claude harness boots (#136). On a system-wide mount (cwd=="/") with no
+// COLLAB_ROOT, a fam-resolvable client root must win and label as "roots".
+func TestResolveWorkDirRootsTier(t *testing.T) {
+	root := "/Users/x/wt-claude"
+	requestRoots := func(ctx context.Context) (*mcplib.ListRootsResult, error) {
+		return &mcplib.ListRootsResult{Roots: []mcplib.Root{{URI: "file://" + root}}}, nil
+	}
+	dir, via := resolveWorkDir(context.Background(), "", "/", "", requestRoots, resolves(root))
+	if dir != root || via != "roots" {
+		t.Errorf("resolveWorkDir = (%q, %q), want (%q, roots)", dir, via, root)
+	}
+}
+
+// TestResolveWorkDirSkipsUnresolvableRoots verifies the roots tier ignores a
+// client root that is not fam-resolvable and keeps scanning (#136).
+func TestResolveWorkDirSkipsUnresolvableRoots(t *testing.T) {
+	good := "/Users/x/wt-claude"
+	requestRoots := func(ctx context.Context) (*mcplib.ListRootsResult, error) {
+		return &mcplib.ListRootsResult{Roots: []mcplib.Root{
+			{URI: "file:///tmp/not-a-fam"},
+			{URI: "file://" + good},
+		}}, nil
+	}
+	dir, via := resolveWorkDir(context.Background(), "", "/", "", requestRoots, resolves(good))
+	if dir != good || via != "roots" {
+		t.Errorf("resolveWorkDir = (%q, %q), want (%q, roots)", dir, via, good)
+	}
+}
+
+// TestResolveWorkDirPerProjectShortCircuitsBeforeRoots pins new-claude's
+// finding: a per-project mount (cwd inside a fam) resolves at tier 2 and never
+// consults the client roots, so the roots tier truly only matters for
+// system-wide mounts (#136).
+func TestResolveWorkDirPerProjectShortCircuitsBeforeRoots(t *testing.T) {
+	project := "/Users/x/wt-claude"
+	other := "/Users/x/wt-other"
+	called := false
+	requestRoots := func(ctx context.Context) (*mcplib.ListRootsResult, error) {
+		called = true
+		return &mcplib.ListRootsResult{Roots: []mcplib.Root{{URI: "file://" + other}}}, nil
+	}
+	dir, via := resolveWorkDir(context.Background(), "", project, "", requestRoots, resolves(project, other))
+	if dir != project || via != "cwd" {
+		t.Errorf("resolveWorkDir = (%q, %q), want (%q, cwd)", dir, via, project)
+	}
+	if called {
+		t.Error("client roots were consulted on a per-project mount; tier 2 must short-circuit")
+	}
+}
+
+// TestResolveWorkDirRootsFallthroughToPWD covers a system-wide mount whose
+// client either has no roots capability or returns nothing addressable: it must
+// fall through to a fam-resolvable PWD (#136).
+func TestResolveWorkDirRootsFallthroughToPWD(t *testing.T) {
+	pwd := "/Users/x/wt-claude"
+
+	// No roots capability at all (requestRoots nil).
+	if dir, via := resolveWorkDir(context.Background(), "", "/", pwd, nil, resolves(pwd)); dir != pwd || via != "pwd" {
+		t.Errorf("no-roots: resolveWorkDir = (%q, %q), want (%q, pwd)", dir, via, pwd)
+	}
+
+	// Roots present but none fam-resolvable: fall through to PWD.
+	empty := func(ctx context.Context) (*mcplib.ListRootsResult, error) {
+		return &mcplib.ListRootsResult{Roots: []mcplib.Root{{URI: "file:///tmp/not-a-fam"}}}, nil
+	}
+	if dir, via := resolveWorkDir(context.Background(), "", "/", pwd, empty, resolves(pwd)); dir != pwd || via != "pwd" {
+		t.Errorf("unresolvable-roots: resolveWorkDir = (%q, %q), want (%q, pwd)", dir, via, pwd)
+	}
+}
+
+// TestResolveWorkDirCollabRootWins verifies the explicit COLLAB_ROOT tier beats
+// everything, including a usable cwd (#136).
+func TestResolveWorkDirCollabRootWins(t *testing.T) {
+	if dir, via := resolveWorkDir(context.Background(), "/explicit", "/Users/x/wt-claude", "", nil, resolves("/explicit")); dir != "/explicit" || via != "collab_root" {
+		t.Errorf("resolveWorkDir = (%q, %q), want (/explicit, collab_root)", dir, via)
+	}
+}
+
 // TestRenderIndexJSONIncludesResolvedVia verifies resolved_via is surfaced on
 // the structured index (#137).
 func TestRenderIndexJSONIncludesResolvedVia(t *testing.T) {
