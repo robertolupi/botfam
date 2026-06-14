@@ -93,6 +93,9 @@ else
   else
     key="credential.${SCHEME}://${FORGE_HOSTPORT}.helper"
     git config "$SCOPE" "$key" "$helper"
+    if [ "$SCOPE" = "--local" ]; then
+      git config "$SCOPE" credential.helper ""
+    fi
     echo "[2/4] helper: git config ${SCOPE} ${key} -> ${helper}"
   fi
 fi
