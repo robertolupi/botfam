@@ -21,41 +21,41 @@ import (
 // See wiki/proposal-unified-fam-config §4.2.
 type AgentConfig struct {
 	Name      string `toml:"-"` // filled from the table key
-	Harness   string `toml:"harness"`
-	ForgeUser string `toml:"forge_user"`
-	Email     string `toml:"email"`
+	Harness   string `toml:"harness,omitempty"`
+	ForgeUser string `toml:"forge_user,omitempty"`
+	Email     string `toml:"email,omitempty"`
 	IsUser    bool   `toml:"-"` // true for [user.<name>] entries
 }
 
 type Registry struct {
 	Name         string   `toml:"name"`
-	Slug         string   `toml:"slug"`
-	Branch       string   `toml:"branch"`
-	RootSet      []string `toml:"root_set"`
-	Origin       string   `toml:"origin"`
-	Roster       []string `toml:"roster"`
-	Channels     []string `toml:"channels"`
-	RepoPaths    []string `toml:"repo_paths"`
-	ObjectStores []string `toml:"object_stores"`
-	CreatedAt    string   `toml:"created_at"`
+	Slug         string   `toml:"slug,omitempty"`
+	Branch       string   `toml:"branch,omitempty"`
+	RootSet      []string `toml:"root_set,omitempty"`
+	Origin       string   `toml:"origin,omitempty"`
+	Roster       []string `toml:"roster,omitempty"`
+	Channels     []string `toml:"channels,omitempty"`
+	RepoPaths    []string `toml:"repo_paths,omitempty"`
+	ObjectStores []string `toml:"object_stores,omitempty"`
+	CreatedAt    string   `toml:"created_at,omitempty"`
 
 	// ForgeURL is the HTTP(S) forge API base (e.g. http://gitea.home.rlupi.com:3000/).
 	// Repository is the org/repo on the forge. Both are explicit in fam.toml so
 	// nothing has to guess them from a (possibly SSH) git remote — see #184.
-	ForgeURL   string `toml:"forge_url"`
-	Repository string `toml:"repository"`
+	ForgeURL   string `toml:"forge_url,omitempty"`
+	Repository string `toml:"repository,omitempty"`
 
 	// Agents and Users hold the `[agent.<name>]` / `[user.<name>]` tables, keyed
 	// by worktree-directory name. Agents may run the botfam runtime; Users are
 	// human checkouts (git identity only). See wiki/proposal-unified-fam-config.
-	Agents map[string]AgentConfig `toml:"agent"`
-	Users  map[string]AgentConfig `toml:"user"`
+	Agents map[string]AgentConfig `toml:"agent,omitempty"`
+	Users  map[string]AgentConfig `toml:"user,omitempty"`
 
 	// WikiProjections declares curated wiki indexes as "name:glob" entries
 	// (e.g. "reviews:review-*"). Each becomes botfam:///<name>[.json], listing
 	// the wiki pages whose name matches the glob. Fam-specific: every fam
 	// declares its own set (or none) — see #120.
-	WikiProjections []string `toml:"wiki_projections"`
+	WikiProjections []string `toml:"wiki_projections,omitempty"`
 }
 
 // Setup is the thin args/io entry point retained for tests; it builds the
@@ -178,27 +178,12 @@ func ReadRegistry(path string) (Registry, error) {
 }
 
 func WriteRegistry(path string, reg Registry) error {
-	var b strings.Builder
-	fmt.Fprintf(&b, "name = %q\n", reg.Name)
-	if reg.Slug != "" {
-		fmt.Fprintf(&b, "slug = %q\n", reg.Slug)
-	}
-	if reg.Branch != "" {
-		fmt.Fprintf(&b, "branch = %q\n", reg.Branch)
-	}
-	fmt.Fprintf(&b, "created_at = %q\n", reg.CreatedAt)
-	writeArray(&b, "root_set", reg.RootSet)
-	writeArray(&b, "roster", reg.Roster)
-	if len(reg.Channels) > 0 {
-		writeArray(&b, "channels", reg.Channels)
-	}
-	writeArray(&b, "repo_paths", reg.RepoPaths)
-	writeArray(&b, "object_stores", reg.ObjectStores)
-	if len(reg.WikiProjections) > 0 {
-		writeArray(&b, "wiki_projections", reg.WikiProjections)
+	data, err := toml.Marshal(reg)
+	if err != nil {
+		return fmt.Errorf("marshal fam.toml: %w", err)
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(b.String()), 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
@@ -230,17 +215,6 @@ func validateSetupName(kind, name string) error {
 		}
 	}
 	return nil
-}
-
-func writeArray(b *strings.Builder, key string, vals []string) {
-	fmt.Fprintf(b, "%s = [", key)
-	for i, v := range vals {
-		if i > 0 {
-			b.WriteString(", ")
-		}
-		fmt.Fprintf(b, "%q", v)
-	}
-	b.WriteString("]\n")
 }
 
 func splitCSV(s string) []string {
