@@ -20,4 +20,3 @@ Generated from `skills/*/SKILL.md`.
 - `writing-markdown`: Use when creating or editing any markdown under doc/ or README.md in the botfam repo — canonical frontmatter schema, block-style YAML, mdformat workflow, and the rules that keep agent-, Obsidian-, and GitHub-rendered markdown from fighting each other.
 
 Refer to the MCP resources above for all operational details.
-
