@@ -122,7 +122,8 @@ func TestResolveFamAgentWorktree(t *testing.T) {
 	if rf.ForgeURL != "http://gitea.home.rlupi.com:3000/" {
 		t.Errorf("forge_url = %q", rf.ForgeURL)
 	}
-	want := filepath.Join(famDir, ".botfam", "token-claude")
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".botfam", "token-claude-code")
 	if rf.TokenPath != want {
 		t.Errorf("token path = %q, want %q", rf.TokenPath, want)
 	}

@@ -227,22 +227,41 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			fam = "botfam"
 		}
 
-		tokenFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", fam, actor))
+		if famTOMLPath == "" {
+			famTOMLPath = resolveFamTOMLPath(workDir)
+		}
+
+		var tokenFile string
+		var harness string
+		if famTOMLPath != "" {
+			harness = readHarnessFromFamTOML(famTOMLPath, actor)
+		}
+		if harness != "" {
+			var err error
+			tokenFile, err = HarnessTokenPath(harness)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			tokenFile = filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", fam, actor))
+		}
+
 		if _, err := os.Stat(tokenFile); os.IsNotExist(err) {
 			legacyFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s", actor))
 			if _, err := os.Stat(legacyFile); err == nil {
 				tokenFile = legacyFile
-			} else if os.Getenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK") == "1" {
-				// Opt-in only. The token-botfam-<actor>-test files are minted by
-				// the local test Forgejo (docker/bootstrap-test-forgejo.sh).
-				// Never fall back to them in production — that would silently run
-				// commands like forge-wait / external-review against test
-				// credentials instead of failing closed (#70). Test harnesses
-				// that want this path set BOTFAM_ALLOW_TEST_TOKEN_FALLBACK=1 (or,
-				// preferably, pass GITEA_TOKEN explicitly).
-				testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
-				if _, err := os.Stat(testFile); err == nil {
-					tokenFile = testFile
+			} else {
+				if harness != "" {
+					perFamAgentFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-%s-%s", fam, actor))
+					if _, err := os.Stat(perFamAgentFile); err == nil {
+						tokenFile = perFamAgentFile
+					}
+				}
+				if _, err := os.Stat(tokenFile); os.IsNotExist(err) && os.Getenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK") == "1" {
+					testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
+					if _, err := os.Stat(testFile); err == nil {
+						tokenFile = testFile
+					}
 				}
 			}
 		}
@@ -464,6 +483,50 @@ func readConfigValueFromFamTOML(path string, keys ...string) string {
 		k = strings.TrimSpace(k)
 		for _, wantKey := range keys {
 			if k == wantKey {
+				v = strings.TrimSpace(v)
+				if strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
+					return v[1 : len(v)-1]
+				}
+				if strings.HasPrefix(v, "'") && strings.HasSuffix(v, "'") {
+					return v[1 : len(v)-1]
+				}
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+func readHarnessFromFamTOML(path string, actor string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	inAgentBlock := false
+	targetHeader := fmt.Sprintf("[agent.%s]", actor)
+	targetHeaderQuoted := fmt.Sprintf("[agent.%q]", actor)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			if line == targetHeader || line == targetHeaderQuoted {
+				inAgentBlock = true
+			} else {
+				inAgentBlock = false
+			}
+			continue
+		}
+		if inAgentBlock {
+			k, v, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			k = strings.TrimSpace(k)
+			if k == "harness" {
 				v = strings.TrimSpace(v)
 				if strings.HasPrefix(v, "\"") && strings.HasSuffix(v, "\"") {
 					return v[1 : len(v)-1]
