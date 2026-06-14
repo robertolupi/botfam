@@ -7,9 +7,9 @@ import (
 
 func TestParseCredentialHelpers(t *testing.T) {
 	out := "file:/Users/x/.gitconfig\tosxkeychain\n" +
-		"file:/Users/x/wt-claude/.git/config\t!git-credential-botfam"
+		"file:/Users/x/wt-claude/.git/config\t!botfam credential"
 	got := parseCredentialHelpers(out)
-	if strings.Join(got, "|") != "osxkeychain|!git-credential-botfam" {
+	if strings.Join(got, "|") != "osxkeychain|!botfam credential" {
 		t.Errorf("parseCredentialHelpers = %v", got)
 	}
 
@@ -58,8 +58,8 @@ func TestOffendingHelpers(t *testing.T) {
 		in   []string
 		want string
 	}{
-		{"keychain leaks", []string{"osxkeychain", "!git-credential-botfam"}, "osxkeychain"},
-		{"botfam only is clean", []string{"!git-credential-botfam"}, ""},
+		{"keychain leaks", []string{"osxkeychain", "!botfam credential"}, "osxkeychain"},
+		{"botfam only is clean", []string{"!botfam credential"}, ""},
 		{"plain botfam name is clean", []string{"botfam"}, ""},
 		{"empty reset ignored", []string{"", "botfam"}, ""},
 		{"multiple inherited", []string{"osxkeychain", "store"}, "osxkeychain,store"},

@@ -83,6 +83,7 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		fam.NewWhoamiCmd(),
 		fam.NewMemoryCmd(),
 		fam.NewDoctorCmd(),
+		fam.NewCredentialCmd(),
 	)
 	return root
 }

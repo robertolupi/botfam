@@ -51,7 +51,7 @@ done
 [ -n "$HOST" ] && [ -n "$REPO" ] && [ -n "$BRANCH" ] || { echo "error: --host, --repo, --branch are required" >&2; exit 2; }
 if [ -z "$TOKEN" ]; then
   # Default the token file to this worktree's <fam>/<actor> identity instead of
-  # hardcoding Claude — same derivation as forge-login.sh / git-credential-botfam.
+  # hardcoding Claude — same derivation as forge-login.sh / `botfam credential`.
   # An explicit --token-file (set above) is preserved: derive_identity only
   # fills TOKEN_FILE when it is still empty.
   if [ -z "$TOKEN_FILE" ]; then
