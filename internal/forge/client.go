@@ -15,7 +15,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
+
+// defaultHTTPClient is the shared fallback used by every Client that does not
+// supply its own HTTPClient. Unlike http.DefaultClient it has a finite timeout
+// so a slow or stalled Gitea host cannot wedge a caller (e.g. the forge-wait
+// loop) forever. It is process-wide but never mutated, so it is safe to share.
+var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type Client struct {
 	BaseURL string // e.g. "http://gitea:3000/"
@@ -23,6 +30,10 @@ type Client struct {
 	Repo    string // e.g. "botfam"
 	Token   string
 	Remote  string
+
+	// HTTPClient, when set, overrides defaultHTTPClient for this Client's
+	// requests. Leave nil to use the timeout-bearing shared default.
+	HTTPClient *http.Client
 }
 
 type PullRequest struct {
@@ -211,13 +222,7 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			return nil, fmt.Errorf("failed to get user home dir: %w", err)
 		}
 
-		fam := os.Getenv("BOTFAM_FAM")
-		if fam == "" {
-			absPath, err := filepath.Abs(workDir)
-			if err == nil {
-				fam = filepath.Base(filepath.Dir(absPath))
-			}
-		}
+		fam := resolveFamName(workDir)
 		if fam == "" {
 			fam = "botfam"
 		}
@@ -276,7 +281,11 @@ func (c *Client) request(method, path string, body []byte) ([]byte, error) {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		httpClient = defaultHTTPClient
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -354,21 +363,46 @@ func (c *Client) PostCommitStatus(commitSHA string, state string, context string
 	return err
 }
 
-func (c *Client) MergePR(prNum int, style string, msg string) error {
-	path := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", c.Owner, c.Repo, prNum)
-	payload := map[string]any{
-		"Do":                style,
-		"MergeMessageField": msg,
+// resolveFamName derives the fam name used in the token filename
+// (token-<fam>-<actor>). It honours BOTFAM_FAM when set, otherwise it follows
+// the on-disk layout convention where a worktree lives at
+// ~/src/fams/<fam>/wt-<actor>, so the fam is the basename of the directory
+// *containing the worktree root*.
+//
+// The worktree root is resolved via git first so the result is stable no
+// matter which nested subdirectory the command was invoked from. Taking the
+// parent of the raw working directory (the previous behaviour) yielded a
+// package dir name like "cmd" or "internal" when run from a subdirectory,
+// breaking token lookup (issue #81). When git can't identify a worktree (e.g.
+// outside a repo) it falls back to the parent of the working directory itself.
+func resolveFamName(workDir string) string {
+	if fam := os.Getenv("BOTFAM_FAM"); fam != "" {
+		return fam
 	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
+	root := worktreeRoot(workDir)
+	if root == "" {
+		if abs, err := filepath.Abs(workDir); err == nil {
+			root = abs
+		}
 	}
-
-	_, err = c.request("POST", path, b)
-	return err
+	if root == "" {
+		return ""
+	}
+	return filepath.Base(filepath.Dir(root))
 }
 
+// worktreeRoot returns the absolute top-level directory of the git worktree
+// containing workDir, or "" if it cannot be determined.
+func worktreeRoot(workDir string) string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = workDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out.String())
+}
 func resolveFamTOMLPath(workDir string) string {
 	if root := os.Getenv("COLLAB_ROOT"); root != "" {
 		return filepath.Join(root, "fam.toml")

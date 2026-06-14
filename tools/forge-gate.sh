@@ -11,7 +11,8 @@
 #   forge-gate.sh apply --host URL --repo owner/name --branch NAME [opts]
 #
 # Options:
-#   --token-file F   token file (default ~/.botfam/token-botfam-claude)
+#   --token-file F   token file (default: this worktree's
+#                    ~/.botfam/token-<fam>-<actor>, or $BOTFAM_TOKEN_FILE)
 #   --token T        token literal (overrides --token-file; not logged)
 #   --approvals N    required independent approvals (default 2)
 #   --merge-user U   (apply) restrict merge to this user (repeatable); omit = any maintainer
@@ -32,7 +33,7 @@ set +x  # never trace — keep the token out of any log
 CMD="${1:-}"; shift || true
 case "$CMD" in check|apply) ;; *) echo "usage: forge-gate.sh <check|apply> --host URL --repo owner/name --branch NAME [opts]" >&2; exit 2;; esac
 
-HOST=""; REPO=""; BRANCH=""; TOKEN_FILE="$HOME/.botfam/token-botfam-claude"; TOKEN=""
+HOST=""; REPO=""; BRANCH=""; TOKEN_FILE=""; TOKEN=""
 APPROVALS=2; MERGE_USERS=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -49,6 +50,15 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$HOST" ] && [ -n "$REPO" ] && [ -n "$BRANCH" ] || { echo "error: --host, --repo, --branch are required" >&2; exit 2; }
 if [ -z "$TOKEN" ]; then
+  # Default the token file to this worktree's <fam>/<actor> identity instead of
+  # hardcoding Claude — same derivation as forge-login.sh / git-credential-botfam.
+  # An explicit --token-file (set above) is preserved: derive_identity only
+  # fills TOKEN_FILE when it is still empty.
+  if [ -z "$TOKEN_FILE" ]; then
+    # shellcheck source=tools/lib-botfam.sh
+    . "$(dirname "$0")/lib-botfam.sh"
+    derive_identity
+  fi
   [ -r "$TOKEN_FILE" ] || { echo "error: token file $TOKEN_FILE not readable (use --token-file or --token)" >&2; exit 2; }
   TOKEN="$(tr -d '\r\n' < "$TOKEN_FILE")"
 fi

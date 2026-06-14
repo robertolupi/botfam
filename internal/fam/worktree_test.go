@@ -194,3 +194,89 @@ func TestWorktreeRegister(t *testing.T) {
 		t.Errorf("expected idempotent message, got: %s", out.String())
 	}
 }
+
+func TestWorktreeSyncWiki(t *testing.T) {
+	tempDir := t.TempDir()
+	mainDir := filepath.Join(tempDir, "main")
+	if err := os.Mkdir(mainDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, mainDir)
+
+	// Create a branch to check out in the worktree
+	cmd := exec.Command("git", "branch", "feature-branch")
+	cmd.Dir = mainDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create branch: %v", err)
+	}
+
+	// Create linked worktree
+	wtDir := filepath.Join(tempDir, "wt-bob")
+	cmd = exec.Command("git", "worktree", "add", wtDir, "feature-branch")
+	cmd.Dir = mainDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add worktree: %v", err)
+	}
+
+	// Init worktree config identity
+	var out bytes.Buffer
+	if err := WorktreeCmd([]string{"init", "bob", wtDir}, &out); err != nil {
+		t.Fatalf("worktree init failed: %v", err)
+	}
+
+	// Set up mock wiki remote
+	wikiRemote := filepath.Join(tempDir, "wiki.git")
+	cmd = exec.Command("git", "init", "--bare", wikiRemote)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to init bare wiki remote: %v", err)
+	}
+
+	// Clone the mock wiki into wtDir/wiki
+	wikiLocal := filepath.Join(wtDir, "wiki")
+	cmd = exec.Command("git", "clone", wikiRemote, wikiLocal)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to clone mock wiki: %v", err)
+	}
+
+	// Configure git identity in wikiLocal so we can commit
+	exec.Command("git", "-C", wikiLocal, "config", "user.name", "bob").Run()
+	exec.Command("git", "-C", wikiLocal, "config", "user.email", "bob@example.com").Run()
+
+	// Push a commit to the wiki remote
+	dummyFile := filepath.Join(wikiLocal, "readme.md")
+	if err := os.WriteFile(dummyFile, []byte("wiki version 1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	exec.Command("git", "-C", wikiLocal, "add", "readme.md").Run()
+	exec.Command("git", "-C", wikiLocal, "commit", "-m", "first wiki commit").Run()
+	exec.Command("git", "-C", wikiLocal, "push", "origin", "main").Run()
+
+	// Now make a second clone of the wiki remote somewhere else, push a change to simulate upstream updates
+	wikiUpstream := filepath.Join(tempDir, "wiki-upstream")
+	cmd = exec.Command("git", "clone", wikiRemote, wikiUpstream)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to clone upstream: %v", err)
+	}
+	exec.Command("git", "-C", wikiUpstream, "config", "user.name", "alice").Run()
+	exec.Command("git", "-C", wikiUpstream, "config", "user.email", "alice@example.com").Run()
+	if err := os.WriteFile(filepath.Join(wikiUpstream, "readme.md"), []byte("wiki version 2"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	exec.Command("git", "-C", wikiUpstream, "commit", "-am", "upstream change").Run()
+	exec.Command("git", "-C", wikiUpstream, "push", "origin", "main").Run()
+
+	// Run worktree sync in wtDir. It should sync both main repo and the wiki!
+	out.Reset()
+	if err := WorktreeCmd([]string{"sync", wtDir}, &out); err != nil {
+		t.Fatalf("worktree sync failed: %v\nOutput: %s", err, out.String())
+	}
+
+	// Assert that wikiLocal got updated to "wiki version 2"
+	content, err := os.ReadFile(dummyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "wiki version 2" {
+		t.Errorf("expected wiki local to be synced to version 2, got %q", string(content))
+	}
+}

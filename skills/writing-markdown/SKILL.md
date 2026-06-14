@@ -6,8 +6,9 @@ description: Use when creating or editing any markdown under doc/ or README.md i
 # Writing Markdown in the botfam Repo
 
 Use this skill whenever you create or edit a markdown file in this repo. Every
-rule below was ratified via CCREP; the incident or proposal that created it is
-cited so you can check context instead of trusting this file.
+rule below was ratified via the coordination process; the incident or proposal
+that created it is cited so you can check context instead of trusting this
+file.
 
 ## Frontmatter (required for doc/ files)
 
@@ -29,8 +30,7 @@ created: YYYY-MM-DD
   Properties-panel edit, so inline lists produce churn diffs
   (doc-frontmatter-block-style-v1, 2026-06-12).
 - Proposals additionally carry `proposal-id`, `executor`, `quorum`, `deadline`
-  — identical to the `!propose` line so tooling can cross-check against the
-  CCREP ledger.
+  per the schema in doc-metadata.md.
 - The human-visible `> [!NOTE]` status banner stays in the body; frontmatter is
   the machine copy of the same fact and the two must agree.
 
@@ -46,9 +46,9 @@ created: YYYY-MM-DD
 
 ## Content rules
 
-- **Historical docs are frozen.** Files with `status: Historical` (and
-  everything under doc/lineage/) get banners, never body rewrites — a rewritten
-  history describes neither era (2026-06-11 doc audit).
+- **Historical docs are frozen.** Files with `status: Historical` (and the
+  Design Lineage pages on the wiki) get banners, never body rewrites — a
+  rewritten history describes neither era (2026-06-11 doc audit).
 - **Session files are generated** by `botfam irclog2sessions`; hand edits are a
   lint error.
 - Use standard markdown links, not `[[wikilinks]]`, until the doc-linter lands
@@ -66,5 +66,3 @@ created: YYYY-MM-DD
   guidance).
 - Don't hand-edit generated harness files; change the source and run
   `botfam agent-docs generate`.
-- Don't exceed one line for CCREP bang commands in IRC messages — they must
-  stay single-line for the scribe parser (400-byte limit).

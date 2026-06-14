@@ -29,6 +29,7 @@ func VerifyCmd(args []string, out io.Writer) error {
 //
 // dance used before ccrep approvals.
 func NewVerifyCmd() *cobra.Command {
+	var race bool
 	c := &cobra.Command{
 		Use:   "verify <sha> [pkgs...]",
 		Short: "Build and test a commit in an ephemeral worktree",
@@ -39,13 +40,14 @@ pass/fail. The worktree is always cleaned up, even on failure.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVerify(args[0], args[1:], cmd.OutOrStdout())
+			return runVerify(args[0], args[1:], race, cmd.OutOrStdout())
 		},
 	}
+	c.Flags().BoolVar(&race, "race", false, "Run tests with data race detector")
 	return c
 }
 
-func runVerify(sha string, pkgs []string, out io.Writer) error {
+func runVerify(sha string, pkgs []string, race bool, out io.Writer) error {
 	if len(pkgs) == 0 {
 		pkgs = []string{"./..."}
 	}
@@ -59,7 +61,11 @@ func runVerify(sha string, pkgs []string, out io.Writer) error {
 		return fmt.Errorf("cannot resolve %q to a commit: %w", sha, err)
 	}
 
-	tmpDir, err := os.MkdirTemp("", "botfam-verify-")
+	scratchTmp := filepath.Join(repo, "scratch", "tmp")
+	if err := os.MkdirAll(scratchTmp, 0o755); err != nil {
+		return fmt.Errorf("failed to create scratch tmp dir: %w", err)
+	}
+	tmpDir, err := os.MkdirTemp(scratchTmp, "botfam-verify-")
 	if err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
@@ -91,7 +97,11 @@ func runVerify(sha string, pkgs []string, out io.Writer) error {
 	}
 
 	// go test <pkgs...>
-	testArgs := append([]string{"test"}, pkgs...)
+	testArgs := []string{"test"}
+	if race {
+		testArgs = append(testArgs, "-race")
+	}
+	testArgs = append(testArgs, pkgs...)
 	fmt.Fprintf(out, "==> go %s\n", strings.Join(testArgs, " "))
 	testOut, testErr := runGo(wtPath, testArgs...)
 	writeGoOutput(out, testOut)
