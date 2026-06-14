@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -166,6 +167,64 @@ func buildDiscoveryData(workDir string) discoveryData {
 
 	d.health = discoveryHealth(workDir, d.tmpl)
 	return d
+}
+
+// resolveDiscoveryWorkDir finds the work dir to resolve fam/actor for a
+// resource read. Resources are param-less, and a system-wide MCP server runs
+// with CWD=/, so this layered chain (first hit wins) makes the discovery root
+// resolve across mount topologies (#132):
+//  1. COLLAB_ROOT env (explicit)
+//  2. server CWD, if it sits inside a fam (per-project mounts + the CLI path)
+//  3. client workspace roots via the MCP `roots` capability (system-wide mounts)
+//  4. the launching shell's PWD
+//  5. server CWD as a last resort (surfaces <unresolved> + a health warning)
+func (s *server) resolveDiscoveryWorkDir(ctx context.Context) string {
+	if r := os.Getenv("COLLAB_ROOT"); r != "" {
+		return r
+	}
+	// A real working dir is the caller's context (per-project mounts, the CLI,
+	// tests) — use it. Only "/" (a system-wide mount's CWD) is treated as "no
+	// context" so we fall through to client roots / PWD.
+	if cwd, err := os.Getwd(); err == nil && cwd != "/" {
+		return cwd
+	}
+	if s.mcpSrv != nil {
+		if res, err := s.mcpSrv.RequestRoots(ctx, mcplib.ListRootsRequest{}); err == nil && res != nil {
+			for _, root := range res.Roots {
+				if p := fileURIToPath(root.URI); p != "" && famResolvable(p) {
+					return p
+				}
+			}
+		}
+	}
+	if p := os.Getenv("PWD"); p != "" && famResolvable(p) {
+		return p
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		return cwd
+	}
+	return "."
+}
+
+// famResolvable reports whether dir sits inside a fam (a fam.toml is reachable).
+func famResolvable(dir string) bool {
+	return fam.FamSlug(fam.LoadFamRegistry(dir)) != ""
+}
+
+// fileURIToPath turns a file:// root URI into a local path, or "" if not a
+// file URI.
+func fileURIToPath(uri string) string {
+	if !strings.HasPrefix(uri, "file://") {
+		return ""
+	}
+	p := strings.TrimPrefix(uri, "file://")
+	if strings.HasPrefix(p, "/") {
+		return p // file:///abs/path
+	}
+	if i := strings.Index(p, "/"); i >= 0 {
+		return p[i:] // file://host/abs/path -> /abs/path
+	}
+	return ""
 }
 
 func discoveryHealth(workDir string, t docs.TemplateData) []healthCheck {
