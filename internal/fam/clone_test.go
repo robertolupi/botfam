@@ -61,6 +61,9 @@ func TestParseAgentsSpec(t *testing.T) {
 	if got["claude"].Name != "claude" {
 		t.Errorf("name not set: %+v", got["claude"])
 	}
+	if got["claude"].ForgeUser != "claude-bot" {
+		t.Errorf("forge_user default = %q, want claude-bot", got["claude"].ForgeUser)
+	}
 }
 
 func TestParseAgentsSpecRejectsBadName(t *testing.T) {
