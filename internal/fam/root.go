@@ -32,6 +32,9 @@ type RootInfo struct {
 func (r Resolver) Resolve() (RootInfo, error) {
 	repoName := ResolveRepoName(r.WorkDir)
 	var parsedActor string
+	var unifiedRoot string
+	var unifiedName string
+
 	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
 		if evalDir, err := filepath.EvalSymlinks(absDir); err == nil {
 			absDir = evalDir
@@ -57,13 +60,20 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		// worktree-root basename if it is a declared [agent.<name>]/[user.<name>]
 		// in the canonical <fam-dir>/fam.toml (read directly — not via
 		// LoadFamRegistry, which would recurse through Resolve).
-		if parsedActor == "" && gitRoot != "" {
-			base := filepath.Base(gitRoot)
-			if reg, err := ReadRegistry(filepath.Join(filepath.Dir(gitRoot), "fam.toml")); err == nil {
+		if gitRoot != "" {
+			famDir := filepath.Dir(gitRoot)
+			famTOMLPath := filepath.Join(famDir, "fam.toml")
+			if reg, err := ReadRegistry(famTOMLPath); err == nil {
+				base := filepath.Base(gitRoot)
 				if _, ok := reg.Agents[base]; ok {
 					parsedActor = base
 				} else if _, ok := reg.Users[base]; ok {
 					parsedActor = base
+				}
+				unifiedRoot = famDir
+				unifiedName = reg.Name
+				if unifiedName == "" {
+					unifiedName = filepath.Base(famDir)
 				}
 			}
 		}
@@ -93,6 +103,17 @@ func (r Resolver) Resolve() (RootInfo, error) {
 	sort.Strings(roots)
 	sum := sha256.Sum256([]byte(strings.Join(roots, "\n")))
 	id := hex.EncodeToString(sum[:])[:12]
+
+	if unifiedRoot != "" {
+		return RootInfo{
+			Root:      unifiedRoot,
+			Name:      unifiedName,
+			RootSet:   roots,
+			RootSetID: id,
+			Actor:     parsedActor,
+		}, nil
+	}
+
 	name := "fam-" + id
 	if suffix := getenv(r.Env, "BOTFAM_FAM"); suffix != "" {
 		name += "-" + sanitizeSuffix(suffix)

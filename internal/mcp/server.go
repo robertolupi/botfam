@@ -124,6 +124,12 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	if name == "orient" {
 		wd := argString(args, "work_dir")
 		via := "work_dir"
+		if wd == "" || wd == "." {
+			cwd, err := os.Getwd()
+			if err == nil && cwd == "/" {
+				wd, via = s.resolveDiscoveryWorkDirVia(ctx)
+			}
+		}
 		if wd == "" {
 			wd = os.Getenv("PWD")
 			via = "pwd"
@@ -142,8 +148,13 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	}
 
 	workDir := argString(args, "work_dir")
-	if workDir == "" {
-		workDir = s.resolveDiscoveryWorkDir(ctx)
+	if workDir == "" || workDir == "." {
+		cwd, err := os.Getwd()
+		if err == nil && cwd == "/" {
+			workDir = s.resolveDiscoveryWorkDir(ctx)
+		} else if workDir == "" {
+			workDir = s.resolveDiscoveryWorkDir(ctx)
+		}
 	}
 	info, err := (fam.Resolver{WorkDir: workDir, Env: os.Environ()}).Resolve()
 	if err != nil {
