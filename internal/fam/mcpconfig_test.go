@@ -204,3 +204,112 @@ func TestRenderClaudeMCPPreservesForeign(t *testing.T) {
 		}
 	}
 }
+
+func TestAntigravityMCPConfigurator(t *testing.T) {
+	tmp := t.TempDir()
+	geminiDir := filepath.Join(tmp, ".gemini", "antigravity")
+	if err := os.MkdirAll(geminiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &AntigravityMCPConfigurator{HomeDir: tmp}
+	if c.Harness() != "antigravity" {
+		t.Errorf("Harness() = %q", c.Harness())
+	}
+
+	// Project scope returns error
+	if err := c.Set(MCPServerSpec{Name: "botfam", Command: "/b", Scope: Project}); err == nil {
+		t.Error("expected Project scope to be unimplemented")
+	}
+
+	// Global scope Set works
+	spec := MCPServerSpec{
+		Name:    "botfam",
+		Command: "/usr/bin/botfam",
+		Args:    []string{"serve"},
+		Env:     map[string]string{"GITEA_ACCESS_TOKEN_FILE": "/t"},
+		Scope:   Global,
+	}
+	if err := c.Set(spec); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// Get works
+	got, ok, err := c.Get("botfam", Global)
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if got.Command != "/usr/bin/botfam" || got.Args[0] != "serve" || got.Env["GITEA_ACCESS_TOKEN_FILE"] != "/t" {
+		t.Errorf("got spec: %+v", got)
+	}
+
+	// List works
+	names, err := c.List(Global)
+	if err != nil || len(names) != 1 || names[0] != "botfam" {
+		t.Errorf("List: got %v, err=%v", names, err)
+	}
+
+	// Remove works
+	if err := c.Remove("botfam", Global); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	names, _ = c.List(Global)
+	if len(names) != 0 {
+		t.Errorf("expected empty list, got %v", names)
+	}
+}
+
+func TestCodexMCPConfigurator(t *testing.T) {
+	tmp := t.TempDir()
+	codexDir := filepath.Join(tmp, ".codex")
+	if err := os.MkdirAll(codexDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &CodexMCPConfigurator{HomeDir: tmp}
+	if c.Harness() != "codex" {
+		t.Errorf("Harness() = %q", c.Harness())
+	}
+
+	// Project scope returns error
+	if err := c.Set(MCPServerSpec{Name: "botfam", Command: "/b", Scope: Project}); err == nil {
+		t.Error("expected Project scope to be unimplemented")
+	}
+
+	// Global scope Set works
+	spec := MCPServerSpec{
+		Name:    "botfam",
+		Command: "/usr/bin/botfam",
+		Args:    []string{"serve"},
+		Env:     map[string]string{"GITEA_ACCESS_TOKEN_FILE": "/t"},
+		Scope:   Global,
+	}
+	if err := c.Set(spec); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	// Get works
+	got, ok, err := c.Get("botfam", Global)
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if got.Command != "/usr/bin/botfam" || got.Args[0] != "serve" || got.Env["GITEA_ACCESS_TOKEN_FILE"] != "/t" {
+		t.Errorf("got spec: %+v", got)
+	}
+
+	// List works
+	names, err := c.List(Global)
+	if err != nil || len(names) != 1 || names[0] != "botfam" {
+		t.Errorf("List: got %v, err=%v", names, err)
+	}
+
+	// Remove works
+	if err := c.Remove("botfam", Global); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	names, _ = c.List(Global)
+	if len(names) != 0 {
+		t.Errorf("expected empty list, got %v", names)
+	}
+}
+

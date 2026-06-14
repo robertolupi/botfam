@@ -87,7 +87,7 @@ func TestRegisterMCPServerGlobally(t *testing.T) {
 	var out bytes.Buffer
 	forgeURL := "http://gitea.home.rlupi.com:3000"
 
-	err = RegisterMCPServerGlobally(forgeURL, &out)
+	err = RegisterMCPServerGlobally(forgeURL, "botfam", &out)
 	if err != nil {
 		t.Fatalf("RegisterMCPServerGlobally failed: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestRegisterMCPServerGloballyEmptyForgeURL(t *testing.T) {
 	t.Setenv("HOME", tempDir)
 
 	var out bytes.Buffer
-	err = RegisterMCPServerGlobally("", &out)
+	err = RegisterMCPServerGlobally("", "botfam", &out)
 	if err != nil {
 		t.Fatalf("RegisterMCPServerGlobally failed: %v", err)
 	}
@@ -145,11 +145,45 @@ func TestRegisterMCPServerGloballyEmptyForgeURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := config.McpServers["forge"]; ok {
-		t.Error("forge server should have been deleted when forgeURL is empty")
+	if _, ok := config.McpServers["forge"]; !ok {
+		t.Error("forge server should NOT have been deleted when forgeURL is empty (Issue #227)")
 	}
 	if _, ok := config.McpServers["botfam"]; !ok {
 		t.Error("botfam server should still be registered when forgeURL is empty")
+	}
+}
+
+func TestRegisterMCPServerGloballyWithCustomSlug(t *testing.T) {
+	tempDir := t.TempDir()
+	geminiDir := filepath.Join(tempDir, ".gemini", "antigravity")
+	if err := os.MkdirAll(geminiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	mcpConfigPath := filepath.Join(geminiDir, "mcp_config.json")
+	t.Setenv("HOME", tempDir)
+
+	var out bytes.Buffer
+	err := RegisterMCPServerGlobally("http://myforge", "deep-cuts", &out)
+	if err != nil {
+		t.Fatalf("RegisterMCPServerGlobally failed: %v", err)
+	}
+
+	data, err := os.ReadFile(mcpConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config struct {
+		McpServers map[string]interface{} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := config.McpServers["forge-deep-cuts"]; !ok {
+		t.Error("forge server should have been registered as forge-deep-cuts for slug deep-cuts")
+	}
+	if _, ok := config.McpServers["forge"]; ok {
+		t.Error("generic forge server should not have been registered when a custom slug is present")
 	}
 }
 

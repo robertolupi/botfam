@@ -1,7 +1,6 @@
 package fam
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -130,7 +129,7 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	if err := createProjectSymlink(project, info.Root); err != nil {
 		return err
 	}
-	if err := RegisterMCPServerGlobally(reg.ForgeURL, out); err != nil {
+	if err := RegisterMCPServerGlobally(reg.ForgeURL, FamSlug(reg), out); err != nil {
 		fmt.Fprintf(out, "Warning: failed to register MCP server globally: %v\n", err)
 	}
 	fmt.Fprintf(out, "botfam root: %s\n", info.Root)
@@ -242,7 +241,7 @@ func hasAny(a, b []string) bool {
 	return false
 }
 
-func RegisterMCPServerGlobally(forgeURL string, out io.Writer) error {
+func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) error {
 	execPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -257,127 +256,94 @@ func RegisterMCPServerGlobally(forgeURL string, out io.Writer) error {
 		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	configPaths := []string{
-		filepath.Join(home, ".gemini", "antigravity", "mcp_config.json"),
-		filepath.Join(home, ".codex", "config.toml"),
+	configurators := []MCPConfigurator{
+		NewAntigravityMCPConfigurator(),
+		NewCodexMCPConfigurator(),
 	}
 
-	for _, path := range configPaths {
-		parent := filepath.Dir(path)
-		if _, err := os.Stat(parent); os.IsNotExist(err) {
+	for _, cfg := range configurators {
+		harness := cfg.Harness()
+
+		var dir string
+		var path string
+		if harness == "antigravity" {
+			dir = filepath.Join(home, ".gemini", "antigravity")
+			path = filepath.Join(dir, "mcp_config.json")
+		} else if harness == "codex" {
+			dir = filepath.Join(home, ".codex")
+			path = filepath.Join(dir, "config.toml")
+		}
+
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue
-		}
-
-		var harness string
-		if strings.Contains(path, "antigravity") {
-			harness = "antigravity"
-		} else if strings.Contains(path, ".codex") {
-			harness = "codex"
-		}
-
-		isTOML := strings.HasSuffix(path, ".toml")
-		mcpServersKey := "mcpServers"
-		if isTOML {
-			mcpServersKey = "mcp_servers"
 		}
 
 		fmt.Fprintf(out, "Registering botfam MCP server in global config: %s...\n", path)
 
-		var config map[string]interface{}
-		data, err := os.ReadFile(path)
-		if err == nil {
-			if isTOML {
-				if err := toml.Unmarshal(data, &config); err != nil {
-					config = make(map[string]interface{})
-				}
-			} else {
-				if err := json.Unmarshal(data, &config); err != nil {
-					config = make(map[string]interface{})
-				}
-			}
-		} else {
-			config = make(map[string]interface{})
+		// 1. Configure botfam server (merge to preserve existing properties like cwd, tools)
+		botfamSpec, ok, _ := cfg.Get("botfam", Global)
+		env := map[string]string{
+			"PATH": os.Getenv("PATH"),
 		}
-		if config == nil {
-			config = make(map[string]interface{})
-		}
-
-		mcpServersVal, exists := config[mcpServersKey]
-		var mcpServers map[string]interface{}
-		if exists {
-			if m, ok := mcpServersVal.(map[string]interface{}); ok {
-				mcpServers = m
-			} else {
-				mcpServers = make(map[string]interface{})
-			}
-		} else {
-			mcpServers = make(map[string]interface{})
-		}
-
-		// Configure botfam server (merge to preserve existing properties like cwd, startup_timeout_sec, tools)
-		var botfamSrv map[string]interface{}
-		if existing, ok := mcpServers["botfam"].(map[string]interface{}); ok {
-			botfamSrv = existing
-		} else {
-			botfamSrv = make(map[string]interface{})
-		}
-		botfamSrv["command"] = execPath
-		botfamSrv["args"] = []interface{}{"serve"}
-		if envVal, ok := botfamSrv["env"].(map[string]interface{}); ok {
-			envVal["PATH"] = os.Getenv("PATH")
-			botfamSrv["env"] = envVal
-		} else {
-			botfamSrv["env"] = map[string]interface{}{
-				"PATH": os.Getenv("PATH"),
+		if ok && botfamSpec.Env != nil {
+			for k, v := range botfamSpec.Env {
+				env[k] = v
 			}
 		}
-		delete(mcpServers, "collab")
-		mcpServers["botfam"] = botfamSrv
+		env["PATH"] = os.Getenv("PATH")
 
-		// Configure forge server (merge to preserve existing properties like cwd, startup_timeout_sec, tools)
-		if forgeURL != "" && harness != "" {
+		err = cfg.Set(MCPServerSpec{
+			Name:    "botfam",
+			Command: execPath,
+			Args:    []string{"serve"},
+			Env:     env,
+			Scope:   Global,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to register botfam for %s: %w", harness, err)
+		}
+
+		// Remove legacy collab server
+		_ = cfg.Remove("collab", Global)
+
+		// 2. Configure forge server (merge to preserve existing properties)
+		if forgeURL != "" {
 			tokenPath, err := forge.HarnessTokenPath(harness)
 			if err != nil {
 				return err
 			}
-			var forgeSrv map[string]interface{}
-			if existing, ok := mcpServers["forge"].(map[string]interface{}); ok {
-				forgeSrv = existing
-			} else {
-				forgeSrv = make(map[string]interface{})
+
+			// Scope the global registration by slug to prevent collisions (Issue #225)
+			forgeName := "forge"
+			if slug != "" && slug != "botfam" {
+				forgeName = "forge-" + slug
 			}
-			forgeSrv["command"] = filepath.Join(home, "bin", "gitea-mcp-server")
-			forgeSrv["args"] = []interface{}{"-t", "stdio", "-H", forgeURL}
-			if envVal, ok := forgeSrv["env"].(map[string]interface{}); ok {
-				envVal["GITEA_ACCESS_TOKEN_FILE"] = tokenPath
-				forgeSrv["env"] = envVal
-			} else {
-				forgeSrv["env"] = map[string]interface{}{
-					"GITEA_ACCESS_TOKEN_FILE": tokenPath,
+
+			forgeSpec, ok, _ := cfg.Get(forgeName, Global)
+			forgeEnv := map[string]string{
+				"GITEA_ACCESS_TOKEN_FILE": tokenPath,
+			}
+			if ok && forgeSpec.Env != nil {
+				for k, v := range forgeSpec.Env {
+					forgeEnv[k] = v
 				}
 			}
-			mcpServers["forge"] = forgeSrv
-		} else {
-			delete(mcpServers, "forge")
-			if forgeURL == "" {
-				fmt.Fprintln(out, "Warning: forge_url is empty; skipping global forge MCP registration")
+			forgeEnv["GITEA_ACCESS_TOKEN_FILE"] = tokenPath
+
+			err = cfg.Set(MCPServerSpec{
+				Name:    forgeName,
+				Command: filepath.Join(home, "bin", "gitea-mcp-server"),
+				Args:    []string{"-t", "stdio", "-H", forgeURL},
+				Env:     forgeEnv,
+				Scope:   Global,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to register %s for %s: %w", forgeName, harness, err)
 			}
-		}
-
-		config[mcpServersKey] = mcpServers
-
-		var newData []byte
-		if isTOML {
-			newData, err = toml.Marshal(config)
 		} else {
-			newData, err = json.MarshalIndent(config, "", "  ")
-		}
-		if err != nil {
-			return fmt.Errorf("failed to marshal config: %w", err)
-		}
-
-		if err := os.WriteFile(path, newData, 0644); err != nil {
-			return fmt.Errorf("failed to write config to %s: %w", path, err)
+			// Issue #227 fix by construction: never delete the forge entry if forgeURL is empty.
+			// Just output a warning so the user knows.
+			fmt.Fprintln(out, "Warning: forge_url is empty; skipping global forge MCP registration")
 		}
 	}
 
