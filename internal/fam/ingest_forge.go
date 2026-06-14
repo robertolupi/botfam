@@ -11,9 +11,11 @@ import (
 )
 
 // ForgeClient is the slice of the forge client the ingester needs; an interface
-// so the poller is testable with a fake.
+// so the poller is testable with a fake. It enumerates the *full* unread set
+// (all pages) because the poller advances a high-water cursor and must not skip
+// past notifications it never saw (#251 review).
 type ForgeClient interface {
-	ListUnreadNotifications() ([]forge.Notification, error)
+	ListAllUnreadNotifications() ([]forge.Notification, error)
 	MarkNotificationRead(id int64) error
 }
 
@@ -35,7 +37,10 @@ func NewForgePoller(client ForgeClient, repo string, markRead bool) Poller {
 func (p *forgePoller) Name() string { return mailbox.SourceForge }
 
 func (p *forgePoller) Poll(w *mailbox.Writer, c *mailbox.Cursors) error {
-	ns, err := p.client.ListUnreadNotifications()
+	// Enumerate the full unread set (all pages): the cursor below advances to the
+	// max id seen, so seeing only page 1 would jump the high-water mark past
+	// unenumerated same-repo notifications and skip them forever (#251 review).
+	ns, err := p.client.ListAllUnreadNotifications()
 	if err != nil {
 		return err
 	}

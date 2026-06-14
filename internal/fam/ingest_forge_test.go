@@ -2,6 +2,7 @@ package fam
 
 import (
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/robertolupi/botfam/internal/forge"
@@ -13,7 +14,7 @@ type fakeForge struct {
 	marked []int64
 }
 
-func (f *fakeForge) ListUnreadNotifications() ([]forge.Notification, error) { return f.notifs, nil }
+func (f *fakeForge) ListAllUnreadNotifications() ([]forge.Notification, error) { return f.notifs, nil }
 func (f *fakeForge) MarkNotificationRead(id int64) error {
 	f.marked = append(f.marked, id)
 	return nil
@@ -88,6 +89,39 @@ func TestForgePollerRepoScopedAndEdgeTriggered(t *testing.T) {
 	w2.Close()
 	if after := len(forgeEvents(t, mboxPath)); after != before {
 		t.Errorf("edge-trigger re-surfaced notifications: %d -> %d", before, after)
+	}
+}
+
+// TestForgePollerNoSkipBeyondOnePage guards the #251 review fix: with more unread
+// same-repo notifications than a single API page, none may be skipped. The fake
+// satisfies the full-enumeration contract (ListAllUnreadNotifications), so every
+// id > cursor must surface and the cursor must land on the global max.
+func TestForgePollerNoSkipBeyondOnePage(t *testing.T) {
+	var notifs []forge.Notification
+	for id := int64(1); id <= 120; id++ { // > 2 pages of 50
+		notifs = append(notifs, notif(id, "botfam/botfam", "Issue",
+			"http://gitea:3000/botfam/botfam/issues/"+strconv.FormatInt(id, 10)))
+	}
+	fc := &fakeForge{notifs: notifs}
+	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
+	p := NewForgePoller(fc, "botfam/botfam", false)
+
+	w, _ := mailbox.OpenWriter(mboxPath)
+	var cur mailbox.Cursors
+	if err := p.Poll(w, &cur); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	evs := forgeEvents(t, mboxPath)
+	if len(evs) != 120 {
+		t.Fatalf("surfaced %d events, want all 120 (no skip beyond page 1)", len(evs))
+	}
+	if evs[0].NotifID != 1 || evs[len(evs)-1].NotifID != 120 {
+		t.Errorf("surfaced range %d..%d, want 1..120", evs[0].NotifID, evs[len(evs)-1].NotifID)
+	}
+	if cur.ForgeLastNotificationID != 120 {
+		t.Errorf("cursor = %d, want 120", cur.ForgeLastNotificationID)
 	}
 }
 

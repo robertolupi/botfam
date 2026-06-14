@@ -37,6 +37,63 @@ func TestListUnreadNotifications(t *testing.T) {
 	}
 }
 
+func TestListAllUnreadNotificationsPaginates(t *testing.T) {
+	var pages []int
+	c := &Client{
+		BaseURL: "http://forge.test", Token: "t",
+		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
+			page := r.URL.Query().Get("page")
+			pages = append(pages, len(pages)+1)
+			w.WriteHeader(http.StatusOK)
+			switch page {
+			case "1":
+				// A full page (limit=50) must trigger a follow-up fetch.
+				var b []byte
+				b = append(b, '[')
+				for i := 1; i <= 50; i++ {
+					if i > 1 {
+						b = append(b, ',')
+					}
+					b = append(b, []byte(`{"id":`+itoa(i)+`,"unread":true,"subject":{"type":"Issue"},"repository":{"full_name":"botfam/botfam"}}`)...)
+				}
+				b = append(b, ']')
+				_, _ = w.Write(b)
+			case "2":
+				// A short page ends pagination.
+				_, _ = w.Write([]byte(`[{"id":51,"unread":true,"subject":{"type":"Issue"},"repository":{"full_name":"botfam/botfam"}}]`))
+			default:
+				t.Errorf("unexpected extra page request: %s", page)
+				_, _ = w.Write([]byte(`[]`))
+			}
+		}),
+	}
+	ns, err := c.ListAllUnreadNotifications()
+	if err != nil {
+		t.Fatalf("ListAllUnreadNotifications: %v", err)
+	}
+	if len(ns) != 51 {
+		t.Fatalf("got %d notifications across pages, want 51", len(ns))
+	}
+	if len(pages) != 2 {
+		t.Errorf("made %d page requests, want exactly 2 (stop on short page)", len(pages))
+	}
+	if ns[50].ID != 51 {
+		t.Errorf("last notification id = %d, want 51 (from page 2)", ns[50].ID)
+	}
+}
+
+func itoa(i int) string {
+	if i == 0 {
+		return "0"
+	}
+	var b []byte
+	for i > 0 {
+		b = append([]byte{byte('0' + i%10)}, b...)
+		i /= 10
+	}
+	return string(b)
+}
+
 func TestGetSubject(t *testing.T) {
 	c := &Client{
 		BaseURL: "http://forge.test", Token: "t",

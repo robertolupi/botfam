@@ -23,10 +23,21 @@ type Notification struct {
 	} `json:"repository"`
 }
 
-// ListUnreadNotifications returns the agent's unread notification threads across
-// all repositories — every subject type, not just pull requests.
+// notificationsPageLimit is the per-page size; maxNotificationPages caps total
+// pagination so a runaway unread set cannot loop forever.
+const (
+	notificationsPageLimit = 50
+	maxNotificationPages    = 100
+)
+
+// ListUnreadNotifications returns the first page of the agent's unread
+// notification threads across all repositories — every subject type, not just
+// pull requests. Sufficient for callers that only need "is anything unread?"
+// (e.g. forge-wait). Callers that advance a high-water cursor must use
+// ListAllUnreadNotifications instead, or they will skip notifications beyond
+// page 1.
 func (c *Client) ListUnreadNotifications() ([]Notification, error) {
-	b, err := c.request("GET", "notifications?status-types=unread&page=1&limit=50", nil)
+	b, err := c.request("GET", fmt.Sprintf("notifications?status-types=unread&page=1&limit=%d", notificationsPageLimit), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -35,6 +46,30 @@ func (c *Client) ListUnreadNotifications() ([]Notification, error) {
 		return nil, fmt.Errorf("decode notifications: %w", err)
 	}
 	return ns, nil
+}
+
+// ListAllUnreadNotifications returns every unread notification thread, paging
+// until a short page. A cursor-advancing consumer (the mailbox ingester) must
+// enumerate the whole unread set before moving its high-water mark, otherwise an
+// account with more than one page of unread can permanently skip same-repo
+// notifications whose ids fall below an over-advanced cursor (#251 review).
+func (c *Client) ListAllUnreadNotifications() ([]Notification, error) {
+	var all []Notification
+	for page := 1; page <= maxNotificationPages; page++ {
+		b, err := c.request("GET", fmt.Sprintf("notifications?status-types=unread&page=%d&limit=%d", page, notificationsPageLimit), nil)
+		if err != nil {
+			return nil, err
+		}
+		var ns []Notification
+		if err := json.Unmarshal(b, &ns); err != nil {
+			return nil, fmt.Errorf("decode notifications: %w", err)
+		}
+		all = append(all, ns...)
+		if len(ns) < notificationsPageLimit {
+			break
+		}
+	}
+	return all, nil
 }
 
 // MarkNotificationRead marks a single notification thread read so it does not
