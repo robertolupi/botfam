@@ -119,6 +119,12 @@ func runIrcClient(actor, server, channel, workDir, passFile string, rawNick bool
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	pidPath := filepath.Join(workDir, "pid")
+	if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0644); err != nil {
+		return fmt.Errorf("failed to write pidfile: %w", err)
+	}
+	defer os.Remove(pidPath)
+
 	fifoPath := filepath.Join(workDir, "in")
 	logPath := filepath.Join(workDir, "log")
 
