@@ -1,7 +1,6 @@
 package fam
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +9,8 @@ import (
 )
 
 // mcpConfig / mcpServer mirror the `.mcp.json` schema consumed by claude-code.
+// They are retained for the render_test.go assertions, which decode the file
+// back into these typed structs.
 type mcpConfig struct {
 	MCPServers map[string]mcpServer `json:"mcpServers"`
 }
@@ -25,6 +26,12 @@ type mcpServer struct {
 // token file. This is the project-scoped renderer from
 // wiki/proposal-unified-fam-config §4.5 — forgeURL/tokenPath come from the one
 // resolver, so the config cannot disagree with the health check (#183/#184).
+//
+// It edits the file through the claude-code MCPConfigurator (Set the botfam,
+// forge, and gopls entries), so any OTHER servers a developer hand-added (e.g.
+// codebase-memory-mcp, gopls) are PRESERVED instead of being clobbered. This is
+// the merge-not-overwrite fix for #227 (setup wiping unrelated entries) and the
+// collisions in #225 — the renderer used to os.WriteFile the whole file.
 //
 // Both server commands are the absolute `~/bin/<binary>` paths that
 // tools/install.sh produces (botfam + the vendored gitea-mcp-server from the
@@ -48,25 +55,41 @@ func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
 		return fmt.Errorf("resolve home dir: %w", err)
 	}
 	binDir := filepath.Join(home, "bin") // tools/install.sh install target
-	cfg := mcpConfig{MCPServers: map[string]mcpServer{
-		"botfam": {Command: filepath.Join(binDir, "botfam"), Args: []string{"serve"}},
-		"forge": {
-			Command: filepath.Join(binDir, "gitea-mcp-server"),
-			Args:    []string{"-t", "stdio", "-H", forgeURL},
-			Env:     map[string]string{"GITEA_ACCESS_TOKEN_FILE": tokenPath},
-		},
-	}}
+
+	cfg := NewClaudeMCPConfigurator(worktree)
+
+	if err := cfg.Set(MCPServerSpec{
+		Name:    "botfam",
+		Command: filepath.Join(binDir, "botfam"),
+		Args:    []string{"serve"},
+		Scope:   Project,
+	}); err != nil {
+		return fmt.Errorf("set botfam server: %w", err)
+	}
+	if err := cfg.Set(MCPServerSpec{
+		Name:    "forge",
+		Command: filepath.Join(binDir, "gitea-mcp-server"),
+		Args:    []string{"-t", "stdio", "-H", forgeURL},
+		Env:     map[string]string{"GITEA_ACCESS_TOKEN_FILE": tokenPath},
+		Scope:   Project,
+	}); err != nil {
+		return fmt.Errorf("set forge server: %w", err)
+	}
 	// gopls ships an MCP server (`gopls mcp`); register it for Go tooling when
 	// installed, resolved to an absolute path so a stale copy can't shadow it.
+	// When gopls is absent we leave any existing entry alone rather than
+	// deleting it (non-destructive).
 	if goplsPath := lookGopls(); goplsPath != "" {
-		cfg.MCPServers["gopls"] = mcpServer{Command: goplsPath, Args: []string{"mcp"}}
+		if err := cfg.Set(MCPServerSpec{
+			Name:    "gopls",
+			Command: goplsPath,
+			Args:    []string{"mcp"},
+			Scope:   Project,
+		}); err != nil {
+			return fmt.Errorf("set gopls server: %w", err)
+		}
 	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	return os.WriteFile(filepath.Join(worktree, ".mcp.json"), data, 0o644)
+	return nil
 }
 
 // lookGopls returns the absolute path to the gopls binary if it is on PATH,
