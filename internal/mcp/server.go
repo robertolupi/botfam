@@ -76,14 +76,20 @@ type server struct {
 // "call botfam wait" prompt rather than a flood (proposal §5).
 const nudgeDebounce = 2 * time.Second
 
-// nudgeMethod is the JSON-RPC method for the best-effort wake nudge (#337).
-// botfam-namespaced so a client that doesn't recognize it simply ignores it
-// (graceful degradation — the agent still wakes via `botfam wait`).
-const nudgeMethod = "notifications/botfam/wake"
+// nudgeMethod is the JSON-RPC method for the best-effort wake nudge (#337). We
+// use the standard MCP logging notification (notifications/message) rather than
+// a custom method: empirically (#349) Claude Code does not surface a custom
+// server→client notification to agent attention, whereas the standard logging
+// channel is the most widely surfaced. Still graceful — a client that drops it
+// just falls back to `botfam wait`.
+const nudgeMethod = "notifications/message"
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	s := &server{}
-	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots())
+	// WithLogging declares the logging capability so clients accept the
+	// best-effort wake nudge (#337), which rides the standard notifications/message
+	// logging channel (see nudgeMethod).
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots(), mcpserver.WithLogging())
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
@@ -192,14 +198,22 @@ func (s *server) nudge(m *mailbox.Message) {
 	s.lastNudge = time.Now()
 	s.mu.Unlock()
 
-	params := make(map[string]any, 8)
+	data := make(map[string]any, 8)
 	for k, v := range m.SanitizedHeaders() {
-		params[k] = v
+		data[k] = v
 	}
 	// A bounded hint that the spool has unread mail; the agent reads the actual
 	// content (URL/body) via `botfam wait`, never from the nudge.
-	params["hint"] = "new spool message — call `botfam wait` to read"
-	s.mcpSrv.SendNotificationToAllClients(nudgeMethod, params)
+	data["hint"] = "new spool message — call `botfam wait` to read"
+	// Standard MCP logging-notification shape (level/logger/data) so a client
+	// that surfaces server logs shows the nudge; data is headers-only (§5). Sent
+	// to all sessions (no client-session ctx in the ingester goroutine), which
+	// also bypasses per-session level gating — fine for a best-effort nudge.
+	s.mcpSrv.SendNotificationToAllClients(nudgeMethod, map[string]any{
+		"level":  "info",
+		"logger": "botfam",
+		"data":   data,
+	})
 }
 
 func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
