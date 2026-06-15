@@ -364,7 +364,10 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		// appear under the fam-scoped nick (claude-botfam) in the log — match on
 		// the scoped nick or the wait wakes on its own traffic (#137; matches the
 		// `botfam irc-wait` CLI fix).
-		matchNick := famconfig.FamScopedNick(actor, c.Slug)
+		matchNick := c.ScopedNick
+		if actor != c.Actor {
+			matchNick = famconfig.FamScopedNick(actor, c.Slug)
+		}
 		lines, nextOffset, timedOut, err := irc.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
 		if err != nil {
 			return nil, err
@@ -376,7 +379,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	}
 
 	if name == "irc_replay" {
-		historyPath := filepath.Join(c.FamDir, c.Name+"-collab", "history.jsonl")
+		historyPath := filepath.Join(c.FamDir, famconfig.FamLedgerDirName(c.Registry), "history.jsonl")
 		since := argString(args, "since")
 		channelsStr := argString(args, "channels")
 
@@ -400,7 +403,10 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			}
 		}
 
-		matchNick := famconfig.FamScopedNick(actor, c.Slug)
+		matchNick := c.ScopedNick
+		if actor != c.Actor {
+			matchNick = famconfig.FamScopedNick(actor, c.Slug)
+		}
 		lines, nextOffset, err := irc.ReplayHistory(historyPath, actor, matchNick, since, filterChans)
 		if err != nil {
 			return nil, err
@@ -656,9 +662,8 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	} else {
 		// Named authority. Resolve the local family first so a name/slug that
 		// refers to this fam never scans ~/.botfam.
-		localInfo, errInfo := (famconfig.Resolver{WorkDir: cwd}).Resolve()
-		localReg := famconfig.LoadFamRegistry(cwd)
-		if (errInfo == nil && u.Host == localInfo.Name) || u.Host == localReg.Name || u.Host == localReg.Slug {
+		localCtx, errCtx := famctx.Resolve(ctx, famctx.Inputs{WorkDir: cwd, Mode: famctx.ModeLocate})
+		if (errCtx == nil && u.Host == localCtx.Name) || u.Host == localCtx.Registry.Name || u.Host == localCtx.Slug {
 			targetRepoRoot = localRepoRoot
 		} else {
 			// Cross-fam: search ~/.botfam/ for a family matching name or slug.

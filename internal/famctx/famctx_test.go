@@ -262,3 +262,99 @@ wait_ingest = false
 		t.Errorf("expected unset_flag to fall back to default true, got false")
 	}
 }
+
+func TestResolveRefusalModes(t *testing.T) {
+	// Setup family with alice (user), bob (agent)
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+
+	famTOML := `name = "myfam"
+slug = "mf"
+
+[agent.bob]
+harness = "claude-code"
+
+[user.alice]
+`
+	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Missing fam.toml under ModeAgentRuntime
+	plainDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(plainDir); err == nil {
+		plainDir = eval
+	}
+	gitInit(t, plainDir)
+	_, err := Resolve(context.Background(), Inputs{
+		WorkDir: plainDir,
+		Mode:    ModeAgentRuntime,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no readable fam.toml") {
+		t.Errorf("expected missing fam.toml error under ModeAgentRuntime, got %v", err)
+	}
+
+	// 2. User worktree under ModeAgentRuntime
+	aliceDir := filepath.Join(famDir, "alice")
+	if err := os.Mkdir(aliceDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, aliceDir)
+	_, err = Resolve(context.Background(), Inputs{
+		WorkDir: aliceDir,
+		Mode:    ModeAgentRuntime,
+	})
+	if err == nil || !strings.Contains(err.Error(), "human) checkout") {
+		t.Errorf("expected user worktree refusal under ModeAgentRuntime, got %v", err)
+	}
+
+	// 3. Unregistered agent under ModeAgentRuntime
+	charlieDir := filepath.Join(famDir, "charlie")
+	if err := os.Mkdir(charlieDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, charlieDir)
+	_, err = Resolve(context.Background(), Inputs{
+		WorkDir: charlieDir,
+		Mode:    ModeAgentRuntime,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not a declared [agent.<name>]") {
+		t.Errorf("expected unregistered agent refusal under ModeAgentRuntime, got %v", err)
+	}
+
+	// 4. COLLAB_ACTOR conflict
+	bobDir := filepath.Join(famDir, "bob")
+	if err := os.Mkdir(bobDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, bobDir)
+	_, err = Resolve(context.Background(), Inputs{
+		WorkDir: bobDir,
+		Mode:    ModeAgentRuntime,
+		Env:     []string{"COLLAB_ACTOR=charlie"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "conflicts with resolved directory actor") {
+		t.Errorf("expected COLLAB_ACTOR conflict error, got %v", err)
+	}
+
+	// 5. ScopedNick idempotency and derived paths correctness
+	ctx, err := Resolve(context.Background(), Inputs{
+		WorkDir: bobDir,
+		Mode:    ModeAgentRuntime,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.ScopedNick != "bob-mf" {
+		t.Errorf("expected ScopedNick bob-mf, got %q", ctx.ScopedNick)
+	}
+	if ctx.MailboxPath != filepath.Join(famDir, "bob.mailbox") {
+		t.Errorf("expected MailboxPath under famDir, got %q", ctx.MailboxPath)
+	}
+	if ctx.IRCLogDir != filepath.Join(bobDir, "scratch", "irc", "bob") {
+		t.Errorf("expected IRCLogDir under worktree root, got %q", ctx.IRCLogDir)
+	}
+}
+

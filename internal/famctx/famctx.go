@@ -2,16 +2,13 @@ package famctx
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/gitexec"
 )
 
 type ResolveMode int
@@ -115,6 +112,10 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 	// 1. Inputs.WorkDir
 	candidateDirs = append(candidateDirs, workDir)
 	sources = append(sources, SourceWorkDir)
+	if idx := strings.Index(workDir, string(filepath.Separator)+"wiki"); idx >= 0 {
+		candidateDirs = append(candidateDirs, workDir[:idx])
+		sources = append(sources, SourceWorkDir)
+	}
 
 	// 2. ClientRoots
 	for _, root := range inputs.ClientRoots {
@@ -130,42 +131,153 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 		sources = append(sources, SourcePWD)
 	}
 
-	// Try each candidate directory using the walk-up resolver
-	var resolvedFamDir string
-	var resolvedActor string
-	var resolvedRole ActorRole
-	var resolvedReg famconfig.Registry
-	var resolvedSource Source
 	var resolveErr error
 
 	for i, dir := range candidateDirs {
-		fd, act, rle, reg, err := resolveWalk(dir)
-		if err == nil {
-			resolvedFamDir = fd
-			resolvedActor = act
-			resolvedRole = rle
-			resolvedReg = reg
-			resolvedSource = sources[i]
-			break
-		}
-		if resolveErr == nil {
-			resolveErr = err
+		// Use famconfig.Resolver to resolve walk-up/legacy root and actor name
+		info, err := (famconfig.Resolver{WorkDir: dir, Env: inputs.Env}).Resolve()
+		if err != nil {
+			if resolveErr == nil {
+				resolveErr = err
+			}
+			continue
 		}
 
-		// Try legacy fallback for this candidate before moving to the next candidate
-		fd, name, roots, id, legacyErr := resolveLegacyGitHash(dir, inputs.Env)
-		if legacyErr == nil {
+		evalRoot := info.Root
+		if eval, err := filepath.EvalSymlinks(info.Root); err == nil {
+			evalRoot = eval
+		}
+
+		tomlPath := filepath.Join(evalRoot, "fam.toml")
+		var reg famconfig.Registry
+		var role ActorRole = RoleUnknown
+		var agent famconfig.AgentConfig
+		var cSource Source = sources[i]
+		var cFamTOMLPath string
+
+		if fileExists(tomlPath) {
+			cFamTOMLPath = tomlPath
+			reg, err = famconfig.ReadRegistry(tomlPath)
+			if err != nil {
+				if inputs.Mode == ModeAgentRuntime || inputs.Mode == ModeRegistry {
+					return Context{}, fmt.Errorf("no readable fam.toml at %s: run `botfam setup`; if it persists, report to your operator (%v)", tomlPath, err)
+				}
+				if resolveErr == nil {
+					resolveErr = err
+				}
+				continue
+			}
+
+			// Determine actor and role
+			actor := info.Actor
+			// Bound actor overrides (only for permissive modes)
+			envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
+			if actor == "" {
+				if inputs.CallActor != "" {
+					actor = inputs.CallActor
+				} else if inputs.BoundActor != "" {
+					actor = inputs.BoundActor
+				} else if envActor != "" {
+					actor = envActor
+				}
+			}
+
+			// Validate COLLAB_ACTOR conflict
+			if envActor != "" && info.Actor != "" && envActor != info.Actor {
+				return Context{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, info.Actor)
+			}
+
+			isAgent := false
+			isUser := false
+			if actor != "" {
+				agent, isAgent = reg.Agents[actor]
+				_, isUser = reg.Users[actor]
+				if isAgent {
+					role = RoleAgent
+				} else if isUser {
+					role = RoleUser
+				} else {
+					role = RoleUnknown
+				}
+			} else {
+				// empty actor: check if it's the base checkout
+				gitRoot, _ := gitexec.One(dir, "rev-parse", "--show-toplevel")
+				if eval, err := filepath.EvalSymlinks(gitRoot); err == nil {
+					gitRoot = eval
+				}
+				if gitRoot != "" && gitRoot == evalRoot {
+					role = RoleBase
+				}
+			}
+
+			// Enforce ModeAgentRuntime checks
 			if inputs.Mode == ModeAgentRuntime {
-				return Context{}, fmt.Errorf("strict agent runtime required: no fam.toml found (resolved role: unknown)")
+				if isUser {
+					return Context{}, fmt.Errorf("worktree %q is a [user.%s] (human) checkout; the botfam runtime only runs in [agent.<name>] worktrees — report to your operator", actor, actor)
+				}
+				if !isAgent {
+					return Context{}, fmt.Errorf("worktree %q is not a declared [agent.<name>] in %s (base checkout or unknown agent); the runtime refuses to start here — report to your operator", actor, tomlPath)
+				}
 			}
-			resolvedFamDir = fd
-			repoName := famconfig.ResolveRepoName(dir)
-			resolvedActor = famconfig.ParseActor(filepath.Base(dir), repoName)
-			resolvedRole = RoleUnknown
-			resolvedSource = SourceGitRoots
-			resolvedReg = famconfig.Registry{
-				Name: name,
+
+			tokenPath := ""
+			if isAgent && agent.Harness != "" {
+				if tp, err := famconfig.HarnessTokenPath(agent.Harness); err == nil {
+					tokenPath = tp
+				}
 			}
+
+			slug := famconfig.FamSlug(reg)
+			c := Context{
+				FamDir:       evalRoot,
+				FamTOMLPath:  cFamTOMLPath,
+				Name:         reg.Name,
+				Slug:         slug,
+				Registry:     reg,
+				WorktreeRoot: gitRoot(dir),
+				WorkDir:      dir,
+				Source:       cSource,
+				Actor:        actor,
+				ActorRole:    role,
+				Agent:        agent,
+				Flags:        famconfig.ResolveFlags(reg, actor),
+				MailboxPath:  filepath.Join(evalRoot, actor+".mailbox"),
+				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
+				TokenPath:    tokenPath,
+				ScopedNick:   famconfig.FamScopedNick(actor, slug),
+				RootSet:      info.RootSet,
+				RootSetID:    info.RootSetID,
+			}
+			return c, nil
+
+		} else {
+			// fam.toml does NOT exist
+			if inputs.Mode == ModeAgentRuntime || inputs.Mode == ModeRegistry {
+				// ModeAgentRuntime / ModeRegistry requires fam.toml
+				resolveErr = fmt.Errorf("no readable fam.toml at %s: run `botfam setup`; if it persists, report to your operator (file not found)", tomlPath)
+				continue
+			}
+
+			// Permissive legacy git-history fallback!
+			cSource = SourceGitRoots
+			actor := info.Actor
+			envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
+			if actor == "" {
+				if inputs.CallActor != "" {
+					actor = inputs.CallActor
+				} else if inputs.BoundActor != "" {
+					actor = inputs.BoundActor
+				} else if envActor != "" {
+					actor = envActor
+				}
+			}
+
+			// Validate COLLAB_ACTOR conflict
+			if envActor != "" && info.Actor != "" && envActor != info.Actor {
+				return Context{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, info.Actor)
+			}
+
+			slug := info.Name
 			var diags []Diagnostic
 			diags = append(diags, Diagnostic{
 				Severity: "warning",
@@ -173,109 +285,38 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			})
 
 			c := Context{
-				FamDir:       resolvedFamDir,
+				FamDir:       evalRoot,
 				FamTOMLPath:  "",
-				Name:         name,
-				Slug:         name,
-				Registry:     resolvedReg,
+				Name:         info.Name,
+				Slug:         slug,
+				Registry:     famconfig.Registry{Name: info.Name},
 				WorktreeRoot: gitRoot(dir),
 				WorkDir:      dir,
-				Source:       resolvedSource,
-				Actor:        resolvedActor,
+				Source:       cSource,
+				Actor:        actor,
 				ActorRole:    RoleUnknown,
-				RootSet:      roots,
-				RootSetID:    id,
+				Flags:        nil,
+				MailboxPath:  filepath.Join(evalRoot, actor+".mailbox"),
+				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
+				ScopedNick:   famconfig.FamScopedNick(actor, slug),
+				RootSet:      info.RootSet,
+				RootSetID:    info.RootSetID,
 				Diagnostics:  diags,
 			}
 			return c, nil
 		}
 	}
 
-	if resolvedFamDir == "" {
-		if inputs.Mode == ModeLocate {
-			return Context{
-				WorkDir:     workDir,
-				Diagnostics: []Diagnostic{{Severity: "error", Message: "No family context resolved"}},
-			}, nil
-		}
-		return Context{}, fmt.Errorf("no family config resolved: %w", resolveErr)
+	if inputs.Mode == ModeLocate {
+		return Context{
+			WorkDir:     workDir,
+			Diagnostics: []Diagnostic{{Severity: "error", Message: "No family context resolved"}},
+		}, nil
 	}
-
-	// Resolve the Actor from bound inputs if empty (permissive modes only)
-	actor := resolvedActor
-	role := resolvedRole
-	if actor == "" {
-		envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
-		if inputs.CallActor != "" {
-			actor = inputs.CallActor
-		} else if inputs.BoundActor != "" {
-			actor = inputs.BoundActor
-		} else if envActor != "" {
-			actor = envActor
-		}
-
-		if actor != "" {
-			if _, ok := resolvedReg.Agents[actor]; ok {
-				role = RoleAgent
-			} else if _, ok := resolvedReg.Users[actor]; ok {
-				role = RoleUser
-			} else {
-				role = RoleUnknown
-			}
-		}
+	if resolveErr == nil {
+		resolveErr = fmt.Errorf("no family config resolved")
 	}
-
-	// Check for actor conflicts
-	envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
-	if envActor != "" && resolvedActor != "" && envActor != resolvedActor {
-		return Context{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, resolvedActor)
-	}
-
-	// Check strict modes
-	if inputs.Mode == ModeAgentRuntime {
-		if role != RoleAgent {
-			return Context{}, fmt.Errorf("strict agent runtime required: resolved role is %s (actor: %s)", role, actor)
-		}
-	}
-
-	c := Context{
-		FamDir:       resolvedFamDir,
-		FamTOMLPath:  filepath.Join(resolvedFamDir, "fam.toml"),
-		Name:         resolvedReg.Name,
-		Slug:         famconfig.FamSlug(resolvedReg),
-		Registry:     resolvedReg,
-		WorktreeRoot: gitRoot(workDir),
-		WorkDir:      workDir,
-		Source:       resolvedSource,
-		Actor:        actor,
-		ActorRole:    role,
-		Flags:        famconfig.ResolveFlags(resolvedReg, actor),
-	}
-
-	if role == RoleAgent && actor != "" {
-		c.Agent = resolvedReg.Agents[actor]
-	} else if role == RoleUser && actor != "" {
-		c.Agent = resolvedReg.Users[actor]
-	}
-
-	// Populate derived paths (stable)
-	if actor != "" {
-		c.MailboxPath = filepath.Join(resolvedFamDir, actor+".mailbox")
-		c.IRCLogDir = filepath.Join(resolvedFamDir, actor+"-collab") // wait, is it? Claude will override if wrong
-		if c.Agent.Harness != "" {
-			if tokenPath, err := famconfig.HarnessTokenPath(c.Agent.Harness); err == nil {
-				c.TokenPath = tokenPath
-			}
-		}
-		// ScopedNick is populated using famconfig.FamScopedNick once Claude moves it
-		// For now we'll do actor + "-" + slug
-		c.ScopedNick = actor
-		if c.Slug != "" {
-			c.ScopedNick = actor + "-" + c.Slug
-		}
-	}
-
-	return c, nil
+	return Context{}, resolveErr
 }
 
 // ResolveAgentRuntime resolves the family context under strict agent-runtime expectations.
@@ -379,86 +420,10 @@ func (c *Context) LocationOf(path string) (Location, error) {
 	return LocationForeign, nil
 }
 
-// --- Walk-up resolution helpers -----------------------------------------------
-
-func resolveWalk(workDir string) (famDir string, actor string, role ActorRole, reg famconfig.Registry, err error) {
-	curr := filepath.Clean(workDir)
-	home, _ := os.UserHomeDir()
-	if home != "" {
-		home = filepath.Clean(home)
-	}
-
-	for {
-		parent := filepath.Dir(curr)
-		tomlPath := filepath.Join(parent, "fam.toml")
-		if fileExists(tomlPath) {
-			if r, rerr := famconfig.ReadRegistry(tomlPath); rerr == nil {
-				base := filepath.Base(curr)
-				repoName := famconfig.ResolveRepoName(curr)
-				actor := famconfig.ParseActor(base, repoName)
-				if actor == "" {
-					actor = base
-				}
-				if _, ok := r.Agents[actor]; ok {
-					return parent, actor, RoleAgent, r, nil
-				}
-				if _, ok := r.Users[actor]; ok {
-					return parent, actor, RoleUser, r, nil
-				}
-			}
-		}
-
-		if curr == home || parent == curr {
-			break
-		}
-		curr = parent
-	}
-
-	curr = filepath.Clean(workDir)
-	for {
-		tomlPath := filepath.Join(curr, "fam.toml")
-		if fileExists(tomlPath) {
-			if r, rerr := famconfig.ReadRegistry(tomlPath); rerr == nil {
-				role := RoleUnknown
-				if root, err := gitOne(curr, "rev-parse", "--show-toplevel"); err == nil && root != "" {
-					role = RoleBase
-				}
-				return curr, "", role, r, nil
-			}
-		}
-
-		parent := filepath.Dir(curr)
-		if curr == home || parent == curr {
-			break
-		}
-		curr = parent
-	}
-
-	return "", "", RoleUnknown, famconfig.Registry{}, fmt.Errorf("no fam.toml found")
-}
-
-func resolveLegacyGitHash(workDir string, env []string) (famDir string, name string, roots []string, id string, err error) {
-	roots, err = gitLines(workDir, "rev-list", "--max-parents=0", "HEAD")
-	if err != nil {
-		return "", "", nil, "", err
-	}
-	sort.Strings(roots)
-	sum := sha256.Sum256([]byte(strings.Join(roots, "\n")))
-	id = hex.EncodeToString(sum[:])[:12]
-	name = "fam-" + id
-	if suffix := lookupEnv(env, "BOTFAM_FAM"); suffix != "" {
-		name += "-" + sanitizeSuffix(suffix)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", "", nil, "", err
-	}
-	famDir = filepath.Join(home, ".botfam", name)
-	return famDir, name, roots, id, nil
-}
+// --- Internal Helpers ---------------------------------------------------------
 
 func gitRoot(dir string) string {
-	root, err := gitOne(dir, "rev-parse", "--show-toplevel")
+	root, err := gitexec.One(dir, "rev-parse", "--show-toplevel")
 	if err != nil || root == "" {
 		return ""
 	}
@@ -486,47 +451,10 @@ func fileExists(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-func gitOutput(workDir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = workDir
-	return cmd.Output()
-}
-
 func gitLines(workDir string, args ...string) ([]string, error) {
-	out, err := gitOutput(workDir, args...)
-	if err != nil {
-		return nil, err
-	}
-	var lines []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return lines, nil
+	return gitexec.Lines(workDir, args...)
 }
 
 func gitOne(workDir string, args ...string) (string, error) {
-	lines, err := gitLines(workDir, args...)
-	if err != nil {
-		return "", err
-	}
-	if len(lines) == 0 {
-		return "", fmt.Errorf("git %s returned no output", strings.Join(args, " "))
-	}
-	return lines[0], nil
+	return gitexec.One(workDir, args...)
 }
-
-func sanitizeSuffix(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
-		return "default"
-	}
-	return b.String()
-}
-
