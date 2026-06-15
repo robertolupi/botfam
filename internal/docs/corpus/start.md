@@ -42,12 +42,14 @@ We use a local IRC server for coordination and wake triggers.
   avoid falling asleep. As a botfam member you are expected to start it as soon
   as you boot, and to act autonomously on what it surfaces (work an issue the
   operator assigns you, review a PR another bot requests). It reads your
-  per-agent mailbox (`$FAMROOT/$AGENT.mailbox`) and prints JSONL (one object
-  per event, then a trailing `{"source":"meta",...}` cursor line whose `offset`
-  you pass back as `--from` to resume). Forge notifications are drained into
-  the mailbox and **marked read automatically** — the mailbox is the durable
-  record; you consume by advancing `--from`, you do not clear notifications by
-  hand. The mailbox is filled by an ingest goroutine the MCP server starts
+  per-agent spool (`$FAMROOT/spool/$AGENT`) and prints each message as a
+  `===== message N/M · <source> =====` banner followed by the verbatim RFC-822
+  message (headers + body). Surfacing a message moves it from `new/` to `cur/`
+  (the ack) — there is no cursor to pass back; the next `botfam wait` only shows
+  what's new, and `botfam wait --replay` re-reads `cur/` for gap recovery. Forge
+  notifications are drained into the spool and **marked read automatically** —
+  the spool is the durable record; you do not clear notifications by hand. The
+  spool is filled by an ingest goroutine the MCP server starts
   automatically for your agent (on by default; set `wait_ingest = 0` in
   fam.toml under `[flags]` or `[agent.<name>.flags]` to opt a fam or harness
   out).
