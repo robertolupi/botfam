@@ -2,6 +2,7 @@ package harness
 
 import (
 	"fmt"
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,19 +116,19 @@ func RenderGitIdentity(worktree, name, email string) error {
 		return fmt.Errorf("cannot render git identity: agent name is empty")
 	}
 	if email == "" {
-		host, _ := gitOne(worktree, "config", "user.email")
+		host, _ := gitexec.One(worktree, "config", "user.email")
 		email = plusAddress(strings.TrimSpace(host), name)
 	}
 	// Per-worktree config requires the worktreeConfig extension; without it
 	// `git config --worktree` fails on a linked worktree (matches worktree.go).
-	if _, err := gitOutput(worktree, "config", "extensions.worktreeConfig", "true"); err != nil {
+	if _, err := gitexec.Output(worktree, "config", "extensions.worktreeConfig", "true"); err != nil {
 		return fmt.Errorf("enable worktreeConfig: %w", err)
 	}
-	if _, err := gitOutput(worktree, "config", "--worktree", "user.name", name); err != nil {
+	if _, err := gitexec.Output(worktree, "config", "--worktree", "user.name", name); err != nil {
 		return fmt.Errorf("set user.name: %w", err)
 	}
 	if email != "" {
-		if _, err := gitOutput(worktree, "config", "--worktree", "user.email", email); err != nil {
+		if _, err := gitexec.Output(worktree, "config", "--worktree", "user.email", email); err != nil {
 			return fmt.Errorf("set user.email: %w", err)
 		}
 	}

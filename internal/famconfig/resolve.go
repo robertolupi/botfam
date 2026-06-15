@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"os"
 	"path/filepath"
 	"sort"
@@ -40,7 +41,7 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		if evalDir, err := filepath.EvalSymlinks(absDir); err == nil {
 			absDir = evalDir
 		}
-		gitRoot, _ := gitOne(absDir, "rev-parse", "--show-toplevel")
+		gitRoot, _ := gitexec.One(absDir, "rev-parse", "--show-toplevel")
 		if evalRoot, err := filepath.EvalSymlinks(gitRoot); err == nil {
 			gitRoot = evalRoot
 		}
@@ -102,7 +103,7 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		}, nil
 	}
 
-	roots, err := gitLines(r.WorkDir, "rev-list", "--max-parents=0", "HEAD")
+	roots, err := gitexec.Lines(r.WorkDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		return RootInfo{}, makeNoGitHistoryError()
 	}
@@ -139,7 +140,7 @@ func (r Resolver) Resolve() (RootInfo, error) {
 
 // ResolveRepoName returns the name of the main repository directory.
 func ResolveRepoName(workDir string) string {
-	common, err := gitOne(workDir, "rev-parse", "--git-common-dir")
+	common, err := gitexec.One(workDir, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return ""
 	}
@@ -198,7 +199,7 @@ func validateName(name string) error {
 // GitObjectStores returns the absolute, symlink-resolved object store paths for
 // workDir's repository, including alternates.
 func GitObjectStores(workDir string) ([]string, error) {
-	common, err := gitOne(workDir, "rev-parse", "--git-common-dir")
+	common, err := gitexec.One(workDir, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +244,7 @@ func GitObjectStores(workDir string) ([]string, error) {
 // RepoPath returns the absolute, symlink-resolved top-level of workDir's
 // repository, falling back to the absolute workDir when it is not a git tree.
 func RepoPath(workDir string) string {
-	if top, err := gitOne(workDir, "rev-parse", "--show-toplevel"); err == nil {
+	if top, err := gitexec.One(workDir, "rev-parse", "--show-toplevel"); err == nil {
 		if rp, err := filepath.EvalSymlinks(top); err == nil {
 			return rp
 		}

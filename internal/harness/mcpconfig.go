@@ -651,4 +651,3 @@ func (c *CodexMCPConfigurator) List(s Scope) ([]string, error) {
 	sort.Strings(names)
 	return names, nil
 }
-

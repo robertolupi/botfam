@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,8 +67,8 @@ func TestRenderGitIdentity(t *testing.T) {
 	if err := RenderGitIdentity(wt, "claude", "roberto.lupi+claude@gmail.com"); err != nil {
 		t.Fatalf("RenderGitIdentity: %v", err)
 	}
-	name, _ := gitOne(wt, "config", "--worktree", "user.name")
-	email, _ := gitOne(wt, "config", "--worktree", "user.email")
+	name, _ := gitexec.One(wt, "config", "--worktree", "user.name")
+	email, _ := gitexec.One(wt, "config", "--worktree", "user.email")
 	if name != "claude" {
 		t.Errorf("user.name = %q", name)
 	}
@@ -79,13 +80,13 @@ func TestRenderGitIdentity(t *testing.T) {
 func TestRenderGitIdentityEmailDefault(t *testing.T) {
 	wt := t.TempDir()
 	gitInit(t, wt)
-	if _, err := gitOutput(wt, "config", "user.email", "roberto.lupi@gmail.com"); err != nil {
+	if _, err := gitexec.Output(wt, "config", "user.email", "roberto.lupi@gmail.com"); err != nil {
 		t.Fatal(err)
 	}
 	if err := RenderGitIdentity(wt, "agy", ""); err != nil {
 		t.Fatalf("RenderGitIdentity: %v", err)
 	}
-	email, _ := gitOne(wt, "config", "--worktree", "user.email")
+	email, _ := gitexec.One(wt, "config", "--worktree", "user.email")
 	if email != "roberto.lupi+agy@gmail.com" {
 		t.Errorf("plus-addressed email = %q, want roberto.lupi+agy@gmail.com", email)
 	}
