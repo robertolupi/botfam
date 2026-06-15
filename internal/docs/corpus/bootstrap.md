@@ -43,7 +43,7 @@ That is the whole engine. Everything below is convention on top of it.
 ## 2. Where state lives
 
 Host-local coordination state lives **outside any git repo** — in a scratch/tmp
-area or a shared fam root (`$COLLAB_ROOT`, default `~/.botfam/{{.Fam}}/`). It is
+area or a shared fam root (typically `~/.botfam/{{.Fam}}/`). It is
 ephemeral and rebuildable, never the source of truth, so keep it out of version
 control. Name files so a plain lexical sort is chronological — e.g. a
 zero-padded-nanos prefix `<nanos>-<rand>` — so "oldest first" needs no parsing.

@@ -2,20 +2,15 @@ package provision
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 // EnsureMembership verifies that workDir's repository belongs to the fam rooted
-// at root. An explicit root (COLLAB_ROOT) is trusted and only ensured to exist.
-// Otherwise the fam.toml must be readable and one of the repo's git object
+// at root. The fam.toml must be readable and one of the repo's git object
 // stores must be registered in object_stores — else membership is refused.
-func EnsureMembership(root string, explicit bool, workDir string) error {
-	if explicit {
-		return os.MkdirAll(root, 0o755)
-	}
+func EnsureMembership(root string, workDir string) error {
 	reg, err := famconfig.ReadRegistry(filepath.Join(root, "fam.toml"))
 	if err != nil {
 		return fmt.Errorf("fam root %s is not set up or readable; run botfam setup", root)

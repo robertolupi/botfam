@@ -251,8 +251,6 @@ func TestNewClient_Resolution(t *testing.T) {
 	// Clean up any existing fam.toml in parent temp directory after test
 	defer os.Remove(famTOML)
 
-	// Setenv COLLAB_ROOT empty so it falls back to git/fam.toml resolution
-	t.Setenv("COLLAB_ROOT", "")
 	t.Setenv("GITEA_URL", "")
 	t.Setenv("GITEA_OWNER", "")
 	t.Setenv("GITEA_REPO", "")
@@ -327,7 +325,6 @@ repository = "my-owner/my-repo"
 func TestNewClient_AgentWorktreeViaResolveFam(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("COLLAB_ROOT", "")
 	t.Setenv("GITEA_URL", "")
 	t.Setenv("GITEA_OWNER", "")
 	t.Setenv("GITEA_REPO", "")

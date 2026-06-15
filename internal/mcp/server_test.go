@@ -24,7 +24,26 @@ import (
 func newTestServer(t *testing.T) (*server, string) {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv("COLLAB_ROOT", root)
+	if eval, err := filepath.EvalSymlinks(root); err == nil {
+		root = eval
+	}
+
+	// Create main and wt-agy worktree
+	wtDir := setupTestWorktree(t, root, "wt-agy", "agy")
+	writeMockRegistry(t, root, wtDir, "mockfam")
+
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(wtDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(orig)
+	})
+
+	t.Setenv("HOME", root)
 	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_LOCK_ACTOR", "")
 	t.Setenv("BOTFAM_TESTING", "1")
@@ -33,6 +52,41 @@ func newTestServer(t *testing.T) (*server, string) {
 		envActor: "",
 		lockMode: false,
 	}, root
+}
+
+func writeMockRegistry(t *testing.T, baseDir, workDir string, name string) {
+	t.Helper()
+	stores, err := famconfig.GitObjectStores(workDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var storesStr []string
+	for _, s := range stores {
+		storesStr = append(storesStr, fmt.Sprintf("%q", s))
+	}
+	tomlContent := fmt.Sprintf(`name = %q
+roster = ["alice", "bob", "agy", "someactor", "myrepo"]
+object_stores = [%s]
+
+[agent.alice]
+harness = "claude-code"
+
+[agent.bob]
+harness = "claude-code"
+
+[agent.agy]
+harness = "antigravity"
+
+[agent.someactor]
+harness = "claude-code"
+
+[agent.myrepo]
+harness = "claude-code"
+`, name, strings.Join(storesStr, ", "))
+
+	if err := os.WriteFile(filepath.Join(baseDir, "fam.toml"), []byte(tomlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // TestMaybeStartIngestGuards locks the early-return guards on the default-on
@@ -69,8 +123,9 @@ func mkdir(t *testing.T, path string) string {
 func TestBoundActorConflictsWithWorkDirActor(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
-	bobDir := mkdir(t, filepath.Join(base, "wt-bob"))
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	bobDir := setupTestWorktree(t, base, "wt-bob", "bob")
+	writeMockRegistry(t, base, aliceDir, "mockfam")
 
 	// Create log files so irc_read doesn't fail
 	if err := os.MkdirAll(filepath.Join(aliceDir, "scratch", "irc", "alice"), 0755); err != nil {
@@ -121,10 +176,12 @@ func setupTestWorktree(t *testing.T, baseDir, name, actor string) string {
 			t.Fatalf("failed to run %s %v in %s: %v\nOutput: %s", cmdName, args, dir, err, string(out))
 		}
 	}
-	runCmd(mainDir, "git", "init")
-	runCmd(mainDir, "git", "config", "user.name", "test")
-	runCmd(mainDir, "git", "config", "user.email", "test@example.com")
-	runCmd(mainDir, "git", "commit", "--allow-empty", "-m", "initial commit")
+	if _, err := os.Stat(filepath.Join(mainDir, ".git")); os.IsNotExist(err) {
+		runCmd(mainDir, "git", "init")
+		runCmd(mainDir, "git", "config", "user.name", "test")
+		runCmd(mainDir, "git", "config", "user.email", "test@example.com")
+		runCmd(mainDir, "git", "commit", "--allow-empty", "-m", "initial commit")
+	}
 
 	wtDir := filepath.Join(baseDir, name)
 	runCmd(mainDir, "git", "worktree", "add", wtDir)
@@ -141,14 +198,15 @@ func TestIdentityOptionalToolsWithoutIdentity(t *testing.T) {
 	base := t.TempDir()
 	plainDir := setupTestWorktree(t, base, "myrepo", "someactor")
 
-	// Create a mock fam.toml so worktree commands can resolve it
-	tomlContent := `name = "mockfam"
-roster = ["alice", "bob"]
-repo_paths = []
-`
-	if err := os.WriteFile(filepath.Join(plainDir, "fam.toml"), []byte(tomlContent), 0644); err != nil {
+	t.Setenv("HOME", base)
+	info, err := (famconfig.Resolver{WorkDir: plainDir, Env: []string{"HOME=" + base}}).Resolve()
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(info.Root, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeMockRegistry(t, info.Root, plainDir, "mockfam")
 
 	// worktree_sync does not use the calling actor.
 	if _, err := s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": plainDir}); err != nil {
@@ -159,7 +217,7 @@ repo_paths = []
 	}
 
 	// Identity-requiring tools must still fail without an identity.
-	_, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": plainDir})
+	_, err = s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": plainDir})
 	if err == nil {
 		t.Fatal("expected identity error for irc_read without identity")
 	}
@@ -172,15 +230,7 @@ func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
 	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-
-	// Create mock fam.toml in aliceDir
-	tomlContent := `name = "mockfam"
-roster = ["alice", "bob"]
-repo_paths = []
-`
-	if err := os.WriteFile(filepath.Join(aliceDir, "fam.toml"), []byte(tomlContent), 0644); err != nil {
-		t.Fatal(err)
-	}
+	writeMockRegistry(t, base, aliceDir, "mockfam")
 
 	// Conflicting explicit actor vs directory actor must still be rejected,
 	// even for an identity-optional tool.
@@ -208,7 +258,8 @@ repo_paths = []
 func TestIrcWriteTool(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "mockfam")
 
 	// Create scratch/irc/alice directory structure
 	fifoDir := filepath.Join(aliceDir, "scratch", "irc", "alice")
@@ -371,7 +422,8 @@ func decodeToolResult(t *testing.T, res *mcplib.CallToolResult, v any) {
 func TestIrcReadTool(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "mockfam")
 
 	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
 	content := "12:00 <bob> one\n12:01 <bob> two\n12:02 <bob> three\n"
@@ -420,7 +472,8 @@ func TestIrcReadTool(t *testing.T) {
 func TestIrcReadToolMissingLog(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "mockfam")
 
 	_, err := s.callTool(context.Background(), "irc_read", map[string]any{
 		"work_dir": aliceDir,
@@ -438,17 +491,16 @@ func TestIrcReadToolMissingLog(t *testing.T) {
 }
 
 func TestIrcReplayTool(t *testing.T) {
-	s, root := newTestServer(t)
-	// Create mock fam.toml in root
-	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\nroster = [\"alice\"]\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
+	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "myfam")
 
 	// Create a history file
-	historyDir := mkdir(t, filepath.Join(root, "myfam-collab"))
+	historyDir := filepath.Join(base, "myfam-collab")
+	if err := os.MkdirAll(historyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	historyFile := filepath.Join(historyDir, "history.jsonl")
 
 	writeEntry := func(sender, evType, target, body string) {
@@ -504,7 +556,8 @@ func TestIrcReplayTool(t *testing.T) {
 func TestIrcWaitToolTimeout(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "mockfam")
 
 	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
 	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte("12:00 <bob> static\n"), 0o644); err != nil {
@@ -545,12 +598,10 @@ func TestIrcWaitToolTimeout(t *testing.T) {
 // actor — otherwise it wakes on its own traffic once nicks are scoped (#137,
 // codex review of #139).
 func TestIrcWaitToolFiltersScopedSelf(t *testing.T) {
-	s, root := newTestServer(t)
-	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	s, _ := newTestServer(t)
 	base := t.TempDir()
-	aliceDir := mkdir(t, filepath.Join(base, "wt-alice"))
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "myfam")
 	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
 	content := "12:00 <alice-myfam> my own line\n12:01 <bob> peer line\n"
 	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte(content), 0o644); err != nil {
@@ -618,6 +669,8 @@ func TestWorktreeMcpTools(t *testing.T) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to add worktree: %v", err)
 	}
+
+	writeMockRegistry(t, tempDir, wtDir, "mockfam")
 
 	// Call worktree_init via MCP
 	res, err := s.callTool(context.Background(), "worktree_init", map[string]any{
@@ -1007,13 +1060,13 @@ func TestMcpWikiCacheFallback(t *testing.T) {
 // served as botfam:///<name>[.json], filtering the wiki index by glob.
 func TestMcpProjections(t *testing.T) {
 	s, root := newTestServer(t)
-	initGitRepo(t, root)
 
 	oldCwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chdir(root); err != nil {
+	wtDir := filepath.Join(root, "wt-agy")
+	if err := os.Chdir(wtDir); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
@@ -1024,7 +1077,7 @@ func TestMcpProjections(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Local wiki cache: two reviews + one unrelated page.
-	wikiDir := filepath.Join(root, "wiki")
+	wikiDir := filepath.Join(wtDir, "wiki")
 	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1067,13 +1120,13 @@ func TestMcpProjections(t *testing.T) {
 
 func TestMcpDefaultMemoryProjection(t *testing.T) {
 	s, root := newTestServer(t)
-	initGitRepo(t, root)
 
 	oldCwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chdir(root); err != nil {
+	wtDir := filepath.Join(root, "wt-agy")
+	if err := os.Chdir(wtDir); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
@@ -1084,7 +1137,7 @@ func TestMcpDefaultMemoryProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Local wiki cache: memory pages and home.
-	wikiDir := filepath.Join(root, "wiki")
+	wikiDir := filepath.Join(wtDir, "wiki")
 	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1177,7 +1230,6 @@ harness = "antigravity"
 		t.Fatal(err)
 	}
 
-	t.Setenv("COLLAB_ROOT", "")
 	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_FAM", "")
 	t.Setenv("PWD", wtDir)

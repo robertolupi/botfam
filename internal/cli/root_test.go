@@ -50,7 +50,6 @@ func TestParseActor(t *testing.T) {
 func TestResolver(t *testing.T) {
 	// The Resolver getenv falls back to os.Getenv even when Env is non-nil
 	// (known issue L2); pin process env so the test is deterministic.
-	t.Setenv("COLLAB_ROOT", "")
 	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_FAM", "")
 
@@ -59,23 +58,6 @@ func TestResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tempDir)
-
-	// Case 1: Explicit COLLAB_ROOT env var
-	env := []string{"COLLAB_ROOT=" + tempDir}
-	r := Resolver{
-		WorkDir: tempDir,
-		Env:     env,
-	}
-	info, err := r.Resolve()
-	if err != nil {
-		t.Fatalf("explicit COLLAB_ROOT failed: %v", err)
-	}
-	if info.Root != tempDir {
-		t.Errorf("expected Root %q, got %q", tempDir, info.Root)
-	}
-	if !info.Explicit {
-		t.Error("expected Explicit to be true")
-	}
 
 	// Case 2: Inside a git repository
 	gitDir := filepath.Join(tempDir, "myrepo")
@@ -160,7 +142,7 @@ func TestResolver(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected resolve outside git repository to fail")
 	}
-	expectedErrSub := "COLLAB_ROOT is unset and no git history could be used to derive a fam root"
+	expectedErrSub := "not inside a fam worktree and no git history could be used to derive a fam root"
 	if !strings.Contains(err.Error(), expectedErrSub) {
 		t.Errorf("expected error containing %q, got %q", expectedErrSub, err.Error())
 	}

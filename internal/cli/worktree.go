@@ -47,6 +47,6 @@ func NewWorktreeCmd() *cobra.Command {
 }
 
 // EnsureMembership re-exports provision.EnsureMembership.
-func EnsureMembership(root string, explicit bool, workDir string) error {
-	return provision.EnsureMembership(root, explicit, workDir)
+func EnsureMembership(root string, workDir string) error {
+	return provision.EnsureMembership(root, workDir)
 }

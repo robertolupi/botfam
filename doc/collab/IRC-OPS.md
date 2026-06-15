@@ -120,7 +120,7 @@ sends the `!propose` (sha defaults to HEAD), and leaves. The scribe normalizes
 
 ## 6. Scribe Operational Notes
 
-- The scribe's actor roster comes from `fam.toml` via the `COLLAB_ROOT` mount,
+- The scribe's actor roster comes from `fam.toml` via the working directory,
   read once at container **start** — roster edits require a scribe bounce.
 - `quorum=all` / `quorum=majority` are count-based thresholds with the author
   excluded, not identity-based sets.

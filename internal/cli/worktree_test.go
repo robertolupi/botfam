@@ -151,17 +151,14 @@ func TestWorktreeRegister(t *testing.T) {
 	}
 
 	// Fam root whose registry starts knowing only the main checkout.
-	root := filepath.Join(tempDir, "famroot")
-	if err := os.MkdirAll(root, 0755); err != nil {
-		t.Fatal(err)
-	}
+	// We write fam.toml to tempDir (the parent of mainDir) to resolve via unified layout.
+	root := tempDir
 	regPath := filepath.Join(root, "fam.toml")
 	if err := WriteRegistry(regPath, Registry{
 		Name: "test", CreatedAt: "now", RepoPaths: []string{eval(mainDir)},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("COLLAB_ROOT", root)
 
 	// First register: should add the two missing worktrees.
 	var out bytes.Buffer

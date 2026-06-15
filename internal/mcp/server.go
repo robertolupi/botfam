@@ -228,7 +228,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		if famTomlPresent(workDir) {
 			return nil, quarantineError(rfErr)
 		}
-		if err := provision.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
+		if err := provision.EnsureMembership(info.Root, workDir); err != nil {
 			return nil, err
 		}
 	}

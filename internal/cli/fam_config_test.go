@@ -85,26 +85,39 @@ func TestFamLedgerDirName(t *testing.T) {
 
 func TestDefaultHistoryPath(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("COLLAB_ROOT", root)
+	if eval, err := filepath.EvalSymlinks(root); err == nil {
+		root = eval
+	}
+	wt := filepath.Join(root, "wt-agy")
+	if err := os.MkdirAll(wt, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, wt)
+	homeDir := filepath.Join(root, "mockhome")
+	t.Setenv("HOME", homeDir)
 	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_FAM", "")
 
-	// No fam.toml: legacy ledger directory.
-	got, err := DefaultHistoryPath(root)
+	// No fam.toml: legacy ledger directory (falls back to git history under HOME).
+	got, err := DefaultHistoryPath(wt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(root, "botfam-collab", "history.jsonl")
+	gotInfo, err := (Resolver{WorkDir: wt, Env: []string{"HOME=" + homeDir}}).Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(homeDir, ".botfam", gotInfo.Name, "botfam-collab", "history.jsonl")
 	if got != want {
 		t.Errorf("no registry: DefaultHistoryPath = %q, want %q", got, want)
 	}
 
-	// With a named fam.toml: per-fam ledger directory.
+	// With a named fam.toml: per-fam ledger directory (resolves to root via unified layout).
 	reg := Registry{Name: "deep-cuts", CreatedAt: "2026-06-12T00:00:00Z"}
 	if err := WriteRegistry(filepath.Join(root, "fam.toml"), reg); err != nil {
 		t.Fatal(err)
 	}
-	got, err = DefaultHistoryPath(root)
+	got, err = DefaultHistoryPath(wt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +129,11 @@ func TestDefaultHistoryPath(t *testing.T) {
 
 func TestLoadFamRegistryRoundTripsChannels(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("COLLAB_ROOT", root)
+	wt := filepath.Join(root, "wt-agy")
+	if err := os.MkdirAll(wt, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGitRepo(t, wt)
 	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_FAM", "")
 
@@ -128,7 +145,7 @@ func TestLoadFamRegistryRoundTripsChannels(t *testing.T) {
 	if err := WriteRegistry(filepath.Join(root, "fam.toml"), reg); err != nil {
 		t.Fatal(err)
 	}
-	got := LoadFamRegistry(root)
+	got := LoadFamRegistry(wt)
 	if got.Name != "deep-cuts" {
 		t.Errorf("Name = %q, want deep-cuts", got.Name)
 	}

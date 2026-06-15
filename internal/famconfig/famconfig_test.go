@@ -99,16 +99,6 @@ func TestFindFamTOMLPath(t *testing.T) {
 		t.Errorf("parent-of-toplevel: got %q, want %q", got, want)
 	}
 
-	// COLLAB_ROOT override wins when it has a fam.toml.
-	if got := FindFamTOMLPath(wt, []string{"COLLAB_ROOT=" + famDir}); got != want {
-		t.Errorf("COLLAB_ROOT: got %q, want %q", got, want)
-	}
-
-	// COLLAB_ROOT pointing at a dir with no fam.toml falls through to parent.
-	if got := FindFamTOMLPath(wt, []string{"COLLAB_ROOT=" + t.TempDir()}); got != want {
-		t.Errorf("COLLAB_ROOT-no-toml fallthrough: got %q, want %q", got, want)
-	}
-
 	// A non-git dir with no env yields "".
 	if got := FindFamTOMLPath(t.TempDir(), []string{}); got != "" {
 		t.Errorf("non-git: got %q, want empty", got)

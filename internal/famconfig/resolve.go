@@ -27,7 +27,6 @@ type RootInfo struct {
 	Name      string
 	RootSet   []string
 	RootSetID string
-	Explicit  bool
 	Actor     string
 }
 
@@ -88,19 +87,6 @@ func (r Resolver) Resolve() (RootInfo, error) {
 
 	if envActor := getenv(r.Env, "COLLAB_ACTOR"); parsedActor != "" && envActor != "" && envActor != parsedActor {
 		return RootInfo{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, parsedActor)
-	}
-
-	if root := getenv(r.Env, "COLLAB_ROOT"); root != "" {
-		abs, err := filepath.Abs(root)
-		if err != nil {
-			return RootInfo{}, err
-		}
-		return RootInfo{
-			Root:     abs,
-			Name:     filepath.Base(abs),
-			Explicit: true,
-			Actor:    parsedActor,
-		}, nil
 	}
 
 	roots, err := gitexec.Lines(r.WorkDir, "rev-list", "--max-parents=0", "HEAD")
@@ -314,18 +300,17 @@ func unique(xs []string) []string {
 func makeNoGitHistoryError() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return errors.New("COLLAB_ROOT is unset and no git history could be used to derive a fam root; run botfam setup or set COLLAB_ROOT")
+		return errors.New("not inside a fam worktree and no git history could be used to derive a fam root; run from a member worktree or run botfam setup")
 	}
 	botfamDir := filepath.Join(home, ".botfam")
 	entries, err := os.ReadDir(botfamDir)
 	if err != nil {
-		return errors.New("COLLAB_ROOT is unset and no git history could be used to derive a fam root; run botfam setup or set COLLAB_ROOT")
+		return errors.New("not inside a fam worktree and no git history could be used to derive a fam root; run from a member worktree or run botfam setup")
 	}
 
 	var sb strings.Builder
-	sb.WriteString("COLLAB_ROOT is unset and no git history could be used to derive a fam root.\n")
-	sb.WriteString("To fix this, either run from a member worktree, or set COLLAB_ROOT explicitly:\n")
-	sb.WriteString("  COLLAB_ROOT=~/.botfam/<fam> botfam <command>\n\n")
+	sb.WriteString("not inside a fam worktree and no git history could be used to derive a fam root.\n")
+	sb.WriteString("To fix this, run from inside a member worktree or run 'botfam setup'.\n\n")
 
 	var fams []string
 	for _, entry := range entries {

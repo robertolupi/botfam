@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,20 +27,6 @@ func TestFileURIToPath(t *testing.T) {
 	}
 }
 
-// TestResolveDiscoveryWorkDirPrefersCollabRoot covers tier 1 of the #132
-// resolution chain.
-func TestResolveDiscoveryWorkDirPrefersCollabRoot(t *testing.T) {
-	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("COLLAB_ROOT", root)
-	s := &server{}
-	if got := s.resolveDiscoveryWorkDir(context.Background()); got != root {
-		t.Errorf("resolveDiscoveryWorkDir = %q, want COLLAB_ROOT %q", got, root)
-	}
-}
-
 // TestOrientToolReturnsDiscoveryRoot verifies the orient tool returns the
 // botfam.discovery.v1 index for the given work_dir, bypassing the membership
 // preamble (#132).
@@ -56,18 +43,6 @@ func TestOrientToolReturnsDiscoveryRoot(t *testing.T) {
 	text := res.Content[0].(mcplib.TextContent).Text
 	if !strings.Contains(text, "botfam.discovery.v1") {
 		t.Errorf("orient output missing discovery schema: %q", text)
-	}
-}
-
-// TestResolveDiscoveryWorkDirViaLabelsTier verifies the resolved_via label
-// tracks which tier of the resolution chain fired (#137).
-func TestResolveDiscoveryWorkDirViaLabelsTier(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("COLLAB_ROOT", root)
-	s := &server{}
-	dir, via := s.resolveDiscoveryWorkDirVia(context.Background())
-	if dir != root || via != "collab_root" {
-		t.Errorf("resolveDiscoveryWorkDirVia = (%q, %q), want (%q, %q)", dir, via, root, "collab_root")
 	}
 }
 
@@ -90,7 +65,7 @@ func TestResolveWorkDirRootsTier(t *testing.T) {
 	requestRoots := func(ctx context.Context) (*mcplib.ListRootsResult, error) {
 		return &mcplib.ListRootsResult{Roots: []mcplib.Root{{URI: "file://" + root}}}, nil
 	}
-	dir, via := resolveWorkDir(context.Background(), "", "/", "", requestRoots, resolves(root))
+	dir, via := resolveWorkDir(context.Background(), "/", "", requestRoots, resolves(root))
 	if dir != root || via != "roots" {
 		t.Errorf("resolveWorkDir = (%q, %q), want (%q, roots)", dir, via, root)
 	}
@@ -106,7 +81,7 @@ func TestResolveWorkDirSkipsUnresolvableRoots(t *testing.T) {
 			{URI: "file://" + good},
 		}}, nil
 	}
-	dir, via := resolveWorkDir(context.Background(), "", "/", "", requestRoots, resolves(good))
+	dir, via := resolveWorkDir(context.Background(), "/", "", requestRoots, resolves(good))
 	if dir != good || via != "roots" {
 		t.Errorf("resolveWorkDir = (%q, %q), want (%q, roots)", dir, via, good)
 	}
@@ -122,7 +97,7 @@ func TestResolveWorkDirRootsPrioritizedOverCWD(t *testing.T) {
 		called = true
 		return &mcplib.ListRootsResult{Roots: []mcplib.Root{{URI: "file://" + other}}}, nil
 	}
-	dir, via := resolveWorkDir(context.Background(), "", project, "", requestRoots, resolves(project, other))
+	dir, via := resolveWorkDir(context.Background(), project, "", requestRoots, resolves(project, other))
 	if dir != other || via != "roots" {
 		t.Errorf("resolveWorkDir = (%q, %q), want (%q, roots)", dir, via, other)
 	}
@@ -138,7 +113,7 @@ func TestResolveWorkDirRootsFallthroughToPWD(t *testing.T) {
 	pwd := "/Users/x/wt-claude"
 
 	// No roots capability at all (requestRoots nil).
-	if dir, via := resolveWorkDir(context.Background(), "", "/", pwd, nil, resolves(pwd)); dir != pwd || via != "pwd" {
+	if dir, via := resolveWorkDir(context.Background(), "/", pwd, nil, resolves(pwd)); dir != pwd || via != "pwd" {
 		t.Errorf("no-roots: resolveWorkDir = (%q, %q), want (%q, pwd)", dir, via, pwd)
 	}
 
@@ -146,16 +121,8 @@ func TestResolveWorkDirRootsFallthroughToPWD(t *testing.T) {
 	empty := func(ctx context.Context) (*mcplib.ListRootsResult, error) {
 		return &mcplib.ListRootsResult{Roots: []mcplib.Root{{URI: "file:///tmp/not-a-fam"}}}, nil
 	}
-	if dir, via := resolveWorkDir(context.Background(), "", "/", pwd, empty, resolves(pwd)); dir != pwd || via != "pwd" {
+	if dir, via := resolveWorkDir(context.Background(), "/", pwd, empty, resolves(pwd)); dir != pwd || via != "pwd" {
 		t.Errorf("unresolvable-roots: resolveWorkDir = (%q, %q), want (%q, pwd)", dir, via, pwd)
-	}
-}
-
-// TestResolveWorkDirCollabRootWins verifies the explicit COLLAB_ROOT tier beats
-// everything, including a usable cwd (#136).
-func TestResolveWorkDirCollabRootWins(t *testing.T) {
-	if dir, via := resolveWorkDir(context.Background(), "/explicit", "/Users/x/wt-claude", "", nil, resolves("/explicit")); dir != "/explicit" || via != "collab_root" {
-		t.Errorf("resolveWorkDir = (%q, %q), want (/explicit, collab_root)", dir, via)
 	}
 }
 
@@ -176,12 +143,27 @@ func TestRenderIndexJSONIncludesResolvedVia(t *testing.T) {
 // fam.toml wins over the resolver's root-set id (#130).
 func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("COLLAB_ROOT", root)
+	wt := filepath.Join(root, "wt-agy")
+	if err := os.MkdirAll(wt, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.name", "test"},
+		{"config", "user.email", "test@example.com"},
+		{"commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = wt
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
 	t.Setenv("COLLAB_ACTOR", "")
 	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d := buildDiscoveryData(root)
+	d := buildDiscoveryData(wt)
 	if d.tmpl.Fam != "myfam" {
 		t.Errorf("Fam = %q, want %q (registry name must win over the resolver id)", d.tmpl.Fam, "myfam")
 	}
@@ -200,8 +182,6 @@ func TestIRCClientHealthCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Case 1: FIFO exists but no pidfile exists -> should be warn
-	t.Setenv("COLLAB_ROOT", workDir)
 	t.Setenv("COLLAB_ACTOR", actor)
 
 	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")

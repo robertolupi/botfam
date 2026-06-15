@@ -37,7 +37,7 @@ services:
     command: ["scribe", "--server", "ergo:6667", "--file", "/collab/history.jsonl"]
     environment:
       COLLAB_HISTORY: /collab/history.jsonl
-      COLLAB_ROOT: /root/.botfam/wt
+    working_dir: /root/.botfam/wt
     volumes:
       - /Users/rlupi/src/botfam-collab:/collab
       - ~/.botfam:/root/.botfam:ro
@@ -51,7 +51,7 @@ services:
     command: ["scribe", "--server", "ergo:6667", "--nick", "scribe-dc", "--file", "/collab/history.jsonl"]
     environment:
       COLLAB_HISTORY: /collab/history.jsonl
-      COLLAB_ROOT: /root/.botfam/fam-3cf8b32f26d5
+    working_dir: /root/.botfam/fam-3cf8b32f26d5
     volumes:
       - /Users/rlupi/src/fams/deep-cuts/dc-collab:/collab
       - ~/.botfam:/root/.botfam:ro

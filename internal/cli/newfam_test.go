@@ -19,8 +19,6 @@ func TestNewfam(t *testing.T) {
 	initGitRepo(t, mainDir)
 
 	// Set environment variables for the test
-	collabRoot := filepath.Join(tempDir, "collab")
-	t.Setenv("COLLAB_ROOT", collabRoot)
 	t.Setenv("USER", "testoperator")
 	t.Setenv("HOME", tempDir)
 
@@ -47,7 +45,11 @@ func TestNewfam(t *testing.T) {
 	}
 
 	// Check if the registry fam.toml was written correctly
-	regPath := filepath.Join(collabRoot, "fam.toml")
+	info, err := (Resolver{WorkDir: mainDir}).Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	regPath := filepath.Join(info.Root, "fam.toml")
 	reg, err := ReadRegistry(regPath)
 	if err != nil {
 		t.Fatalf("failed to read registry at %s: %v", regPath, err)
@@ -262,8 +264,6 @@ func TestNewfamMCPSelfDiscoverability(t *testing.T) {
 	initGitRepo(t, mainDir)
 
 	// Set environment variables for the test
-	collabRoot := filepath.Join(tempDir, "collab")
-	t.Setenv("COLLAB_ROOT", collabRoot)
 	t.Setenv("USER", "testoperator")
 	t.Setenv("HOME", tempDir)
 

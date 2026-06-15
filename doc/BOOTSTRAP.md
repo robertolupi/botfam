@@ -73,8 +73,8 @@ ______________________________________________________________________
 
 ## 2. Directory layout
 
-State lives **outside any git repo**, in a shared fam root (`$COLLAB_ROOT`,
-default `~/.botfam/<fam>/`):
+State lives **outside any git repo**, in a shared fam root (typically
+`~/.botfam/<fam>/`):
 
 ```
 <fam-root>/
