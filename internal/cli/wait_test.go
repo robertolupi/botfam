@@ -2,7 +2,7 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"io"
 	"path/filepath"
 	"strings"
@@ -32,112 +32,97 @@ func seedSpool(t *testing.T) (dir string) {
 	return dir
 }
 
-// parseWaitOutput splits JSONL `wait` output into surfaced messages and the
-// trailing meta summary.
-func parseWaitOutput(t *testing.T, out string) (msgs []emittedMessage, summary waitSummary) {
-	t.Helper()
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
-			continue
-		}
-		var probe struct {
-			Source string `json:"source"`
-		}
-		if err := json.Unmarshal([]byte(line), &probe); err != nil {
-			t.Fatalf("non-JSON output line %q: %v", line, err)
-		}
-		if probe.Source == "meta" {
-			if err := json.Unmarshal([]byte(line), &summary); err != nil {
-				t.Fatal(err)
-			}
-			continue
-		}
-		var m emittedMessage
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatal(err)
-		}
-		msgs = append(msgs, m)
-	}
-	return msgs, summary
+// countMessages reports how many "===== message N/M =====" banners are in out.
+func countMessages(out string) int {
+	return strings.Count(out, "===== message ")
 }
 
 func TestWaitDrainsExistingEvents(t *testing.T) {
 	dir := seedSpool(t)
 	var out bytes.Buffer
-	if err := runWait(&out, dir, parseSources("irc,forge"), 2*time.Second, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &out, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	msgs, summary := parseWaitOutput(t, out.String())
-	if len(msgs) != 2 {
-		t.Fatalf("got %d messages, want 2 (drain-both)", len(msgs))
+	s := out.String()
+	if n := countMessages(s); n != 2 {
+		t.Fatalf("got %d message banners, want 2 (drain-both):\n%s", n, s)
 	}
-	if summary.Woke != mailbox.SourceIRC {
-		t.Errorf("woke = %q, want irc (first arrival)", summary.Woke)
+	// irc was delivered first, so it is message 1, and it wakes us.
+	if !strings.Contains(s, "===== message 1/2 · irc =====") {
+		t.Errorf("first message banner not irc:\n%s", s)
 	}
-	if summary.TimedOut {
-		t.Error("timed_out = true, want false")
+	// Verbatim body present (no JSON escaping).
+	if !strings.Contains(s, "claude: ping") || !strings.Contains(s, "issue: botfam/botfam#230") {
+		t.Errorf("verbatim message content missing:\n%s", s)
 	}
-	if summary.Count != 2 {
-		t.Errorf("count = %d, want 2", summary.Count)
+	if !strings.Contains(s, "===== woke: 2 messages =====") {
+		t.Errorf("woke footer missing/wrong:\n%s", s)
 	}
 }
 
 func TestWaitSourceFilter(t *testing.T) {
 	dir := seedSpool(t)
 	var out bytes.Buffer
-	if err := runWait(&out, dir, parseSources("forge"), 2*time.Second, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &out, io.Discard, dir, parseSources("forge"), 2*time.Second, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	msgs, summary := parseWaitOutput(t, out.String())
-	if len(msgs) != 1 || msgs[0].Source != mailbox.SourceForge {
-		t.Fatalf("source filter surfaced %d messages, want only forge", len(msgs))
+	s := out.String()
+	if n := countMessages(s); n != 1 {
+		t.Fatalf("source filter surfaced %d messages, want only forge:\n%s", n, s)
 	}
-	if summary.Woke != mailbox.SourceForge {
-		t.Errorf("woke = %q, want forge", summary.Woke)
+	if !strings.Contains(s, "· forge =====") {
+		t.Errorf("surfaced message is not forge:\n%s", s)
+	}
+	// The filtered-out irc message must not be emitted.
+	if strings.Contains(s, "claude: ping") {
+		t.Errorf("filtered-out irc message leaked into output:\n%s", s)
+	}
+	if !strings.Contains(s, "===== woke: 1 message =====") {
+		t.Errorf("woke footer missing/wrong:\n%s", s)
 	}
 }
 
 // TestWaitAcksDrainedMessages: a read moves new/->cur/ (the ack), so a second
-// wait with nothing new must time out cleanly rather than re-surface the batch.
+// wait with nothing new must time out rather than re-surface the batch — and the
+// filtered-out source is acked too (consumed), not left to re-appear.
 func TestWaitAcksDrainedMessages(t *testing.T) {
 	dir := seedSpool(t)
 	var first bytes.Buffer
-	if err := runWait(&first, dir, parseSources("irc,forge"), 2*time.Second, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &first, io.Discard, dir, parseSources("forge"), 2*time.Second, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if msgs, _ := parseWaitOutput(t, first.String()); len(msgs) != 2 {
-		t.Fatalf("first drain surfaced %d, want 2", len(msgs))
+	if n := countMessages(first.String()); n != 1 {
+		t.Fatalf("first drain surfaced %d, want 1", n)
 	}
 
 	var second bytes.Buffer
-	if err := runWait(&second, dir, parseSources("irc,forge"), 200*time.Millisecond, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &second, io.Discard, dir, parseSources("irc,forge"), 150*time.Millisecond, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	msgs, summary := parseWaitOutput(t, second.String())
-	if len(msgs) != 0 {
-		t.Fatalf("re-drain surfaced %d already-acked messages, want 0", len(msgs))
+	s := second.String()
+	if n := countMessages(s); n != 0 {
+		t.Fatalf("re-drain surfaced %d already-acked messages, want 0:\n%s", n, s)
 	}
-	if !summary.TimedOut {
-		t.Error("timed_out = false, want true (nothing new)")
+	if !strings.Contains(s, "===== timed out =====") {
+		t.Errorf("expected timed-out footer:\n%s", s)
 	}
 }
 
 func TestWaitBlocksThenWakes(t *testing.T) {
 	dir := seedSpool(t)
 	// Drain the seeded backlog so new/ is empty before we block.
-	if err := runWait(io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 10*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), io.Discard, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 10*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 
 	done := make(chan string, 1)
 	go func() {
 		var out bytes.Buffer
-		_ = runWait(&out, dir, parseSources("irc,forge"), 3*time.Second, 10*time.Millisecond)
+		_ = runWait(context.Background(), &out, io.Discard, dir, parseSources("irc,forge"), 3*time.Second, 10*time.Millisecond)
 		done <- out.String()
 	}()
 
-	// Give the waiter a beat to start blocking, then deliver.
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // let the waiter start blocking
 	sp, err := mailbox.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -147,15 +132,84 @@ func TestWaitBlocksThenWakes(t *testing.T) {
 	}
 
 	select {
-	case out := <-done:
-		msgs, summary := parseWaitOutput(t, out)
-		if len(msgs) != 1 || !strings.Contains(msgs[0].Subject, "woke you") {
-			t.Fatalf("woke with %d messages, want the delivered one", len(msgs))
+	case s := <-done:
+		if countMessages(s) != 1 || !strings.Contains(s, "woke you") {
+			t.Fatalf("woke with wrong output:\n%s", s)
 		}
-		if summary.TimedOut {
-			t.Error("timed_out = true, want false (woke on delivery)")
+		if strings.Contains(s, "timed out") {
+			t.Errorf("reported timeout despite a delivery:\n%s", s)
 		}
 	case <-time.After(4 * time.Second):
 		t.Fatal("wait did not wake on delivery")
+	}
+}
+
+// TestWaitContextCancel: cancelling the context unblocks an idle wait promptly
+// (no infinite silent block — #276).
+func TestWaitContextCancel(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "spool")
+	if _, err := mailbox.Open(dir); err != nil { // empty spool, nothing to drain
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- runWait(ctx, io.Discard, io.Discard, dir, parseSources("irc,forge"), 0 /* block forever */, 10*time.Millisecond)
+	}()
+	time.Sleep(40 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("expected a non-nil error (context cancelled), got nil")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("wait did not unblock on context cancel")
+	}
+}
+
+// TestWaitFailFastMissingSpool: a missing spool errors immediately with the
+// resolved absolute path, rather than blocking forever (#263).
+func TestWaitFailFastMissingSpool(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist", "spool")
+	err := runWait(context.Background(), io.Discard, io.Discard, missing, parseSources("irc,forge"), 0, 10*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected a fail-fast error for a missing spool, got nil")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error should name the resolved absolute path %q, got: %v", missing, err)
+	}
+}
+
+func TestReplayFromCur(t *testing.T) {
+	dir := seedSpool(t)
+	// Drain to move the seeded messages into cur/ (the replay buffer).
+	if err := runWait(context.Background(), io.Discard, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := runReplay(&out, io.Discard, dir, parseSources("irc,forge"), 0 /* all */); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if n := countMessages(s); n != 2 {
+		t.Fatalf("replay surfaced %d messages, want 2:\n%s", n, s)
+	}
+	if !strings.Contains(s, "claude: ping") || !strings.Contains(s, "issue: botfam/botfam#230") {
+		t.Errorf("replay missing verbatim content:\n%s", s)
+	}
+	if !strings.Contains(s, "===== replayed: 2 messages =====") {
+		t.Errorf("replay footer missing/wrong:\n%s", s)
+	}
+
+	// Replay does not ack: new/ stays empty, cur/ still holds them, and a second
+	// replay returns the same set.
+	var again bytes.Buffer
+	if err := runReplay(&again, io.Discard, dir, parseSources("irc,forge"), 0); err != nil {
+		t.Fatal(err)
+	}
+	if countMessages(again.String()) != 2 {
+		t.Errorf("replay is non-destructive: second replay should still show 2:\n%s", again.String())
 	}
 }
