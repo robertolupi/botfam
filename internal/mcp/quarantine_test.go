@@ -39,7 +39,6 @@ func quarantineFam(t *testing.T) (agentDir, mainDir string) {
 // [agent.<name>] worktree the gate is inert and a normal tool dispatches.
 func TestServeGateValidAgentWorktreeServesNormalTools(t *testing.T) {
 	s, _ := newTestServer(t)
-	t.Setenv("COLLAB_ROOT", "")
 
 	wtDir, _ := quarantineFam(t)
 
@@ -63,7 +62,6 @@ func TestServeGateValidAgentWorktreeServesNormalTools(t *testing.T) {
 // resource carries the diagnosis.
 func TestServeGateNonAgentWorktreeQuarantined(t *testing.T) {
 	s, _ := newTestServer(t)
-	t.Setenv("COLLAB_ROOT", "")
 
 	_, mainDir := quarantineFam(t)
 
@@ -132,7 +130,6 @@ func TestServeGateNonAgentWorktreeQuarantined(t *testing.T) {
 // diagnosis probe, remains callable in a quarantined worktree.
 func TestServeGateOrientWorksInQuarantine(t *testing.T) {
 	s, _ := newTestServer(t)
-	t.Setenv("COLLAB_ROOT", "")
 
 	_, mainDir := quarantineFam(t)
 

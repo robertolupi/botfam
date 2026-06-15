@@ -48,11 +48,9 @@ func TestParseActor(t *testing.T) {
 }
 
 func TestResolver(t *testing.T) {
-	// The Resolver getenv falls back to os.Getenv even when Env is non-nil
-	// (known issue L2); pin process env so the test is deterministic.
-	t.Setenv("COLLAB_ACTOR", "")
-	t.Setenv("BOTFAM_FAM", "")
-
+	// A non-nil Env ([]string{} below) is authoritative — getenv no longer falls
+	// back to the process environment (#334 fixed "known issue L2"), so no
+	// t.Setenv pinning is needed for determinism.
 	tempDir, err := os.MkdirTemp("", "botfam-resolver-test")
 	if err != nil {
 		t.Fatal(err)

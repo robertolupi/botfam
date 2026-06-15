@@ -59,6 +59,21 @@ type Inputs struct {
 	Mode        ResolveMode
 	CallActor   string
 	BoundActor  string
+
+	// Resolver, when non-nil, overrides the default git-based identity resolver.
+	// Production leaves it nil (uses famconfig.GitResolver{Env}); tests inject a
+	// fake so they can drive resolution without manipulating the environment or
+	// standing up a git repo (#334).
+	Resolver famconfig.Resolver
+}
+
+// resolver returns the identity resolver to use: the injected one when set,
+// otherwise the default git resolver bound to inputs.Env.
+func (inputs Inputs) resolver() famconfig.Resolver {
+	if inputs.Resolver != nil {
+		return inputs.Resolver
+	}
+	return famconfig.GitResolver{Env: inputs.Env}
 }
 
 type Context struct {
@@ -148,7 +163,7 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 
 			var rootSet []string
 			var rootSetID string
-			if info, err := (famconfig.GitResolver{Env: inputs.Env}).ResolveIdentity(dir); err == nil {
+			if info, err := inputs.resolver().ResolveIdentity(dir); err == nil {
 				rootSet = info.RootSet
 				rootSetID = info.RootSetID
 			}
@@ -173,8 +188,9 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			return c, nil
 		}
 
-		// Use famconfig.GitResolver to resolve walk-up/legacy root and actor name
-		info, err := (famconfig.GitResolver{Env: inputs.Env}).ResolveIdentity(dir)
+		// Resolve walk-up/legacy root and actor name through the (possibly
+		// injected) resolver.
+		info, err := inputs.resolver().ResolveIdentity(dir)
 		if err != nil {
 			if resolveErr == nil {
 				resolveErr = err

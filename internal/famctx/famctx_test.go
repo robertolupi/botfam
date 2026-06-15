@@ -2,11 +2,14 @@ package famctx
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 func gitInit(t *testing.T, dir string) {
@@ -358,3 +361,86 @@ harness = "claude-code"
 	}
 }
 
+// TestResolveWithInjectedResolver proves the Resolver seam (#334): resolution can
+// be driven by an injected fake instead of a real git worktree plus environment.
+// No gitInit and no t.Setenv — the fake supplies the identity directly, and
+// famctx still reads the real fam.toml from the FamDir the fake points at.
+func TestResolveWithInjectedResolver(t *testing.T) {
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+	famTOML := `name = "injfam"
+slug = "inj"
+roster = ["bob"]
+
+[agent.bob]
+harness = "bob-code"
+`
+	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The fake supplies the identity famctx cannot otherwise get without git+env:
+	// FamDir (where the fam.toml lives) and Actor (who we are). It deliberately
+	// returns a BOGUS Name and ActorRole to prove famctx re-derives those from the
+	// real registry rather than parroting the resolver — so the Name/Role/Slug
+	// assertions below are genuine, not self-fulfilling.
+	fake := famconfig.FuncResolver(func(workDir string) (famconfig.RootInfo, error) {
+		return famconfig.RootInfo{
+			FamIdentity: famconfig.FamIdentity{
+				FamDir:    famDir,
+				Name:      "WRONG_SHOULD_BE_OVERRIDDEN",
+				Actor:     "bob",
+				ActorRole: famconfig.RoleUnknown,
+				Source:    famconfig.SourceWorkDir,
+			},
+			RootSet:   []string{"deadbeef"},
+			RootSetID: "deadbeef0000",
+		}, nil
+	})
+
+	ctx, err := Resolve(context.Background(), Inputs{
+		WorkDir:  famDir,
+		Mode:     ModeRegistry,
+		Env:      []string{}, // authoritative empty env: no COLLAB_ACTOR leak
+		Resolver: fake,
+	})
+	if err != nil {
+		t.Fatalf("Resolve with injected resolver failed: %v", err)
+	}
+
+	checks := []struct {
+		name, got, want string
+	}{
+		{"Actor", ctx.Actor, "bob"},
+		{"FamDir", ctx.FamDir, famDir},
+		{"Name", ctx.Name, "injfam"},
+		{"Slug", ctx.Slug, "inj"},
+		{"RootSetID", ctx.RootSetID, "deadbeef0000"},
+		{"ScopedNick", ctx.ScopedNick, "bob-inj"},
+		{"ActorRole", string(ctx.ActorRole), string(RoleAgent)},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %q, want %q", c.name, c.got, c.want)
+		}
+	}
+}
+
+// TestResolveInjectedResolverError shows an injected resolver's error propagates
+// out of Resolve rather than being swallowed.
+func TestResolveInjectedResolverError(t *testing.T) {
+	fake := famconfig.FuncResolver(func(string) (famconfig.RootInfo, error) {
+		return famconfig.RootInfo{}, fmt.Errorf("boom")
+	})
+	_, err := Resolve(context.Background(), Inputs{
+		WorkDir:  t.TempDir(),
+		Mode:     ModeRegistry,
+		Env:      []string{},
+		Resolver: fake,
+	})
+	if err == nil {
+		t.Fatal("expected error from injected resolver, got nil")
+	}
+}
