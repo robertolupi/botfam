@@ -131,7 +131,6 @@ func TestResolveWorkDirRootsPrioritizedOverCWD(t *testing.T) {
 	}
 }
 
-
 // TestResolveWorkDirRootsFallthroughToPWD covers a system-wide mount whose
 // client either has no roots capability or returns nothing addressable: it must
 // fall through to a fam-resolvable PWD (#136).

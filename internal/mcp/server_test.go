@@ -17,7 +17,8 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
-	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/irc"
 )
 
 func newTestServer(t *testing.T) (*server, string) {
@@ -38,7 +39,7 @@ func newTestServer(t *testing.T) (*server, string) {
 // mailbox ingester (#254): it must NOT spawn its polling goroutine without a
 // serving-lifetime context (the direct-callTool unit-test path — a nil ctx here
 // previously panicked) or without a resolved actor. The wait_ingest flag gate
-// is covered by fam.TestWaitIngestEnabled.
+// is covered by ingest.TestWaitIngestEnabled.
 func TestMaybeStartIngestGuards(t *testing.T) {
 	t.Run("nil server ctx (direct callTool): no ingester", func(t *testing.T) {
 		s, root := newTestServer(t)
@@ -451,7 +452,7 @@ func TestIrcReplayTool(t *testing.T) {
 	historyFile := filepath.Join(historyDir, "history.jsonl")
 
 	writeEntry := func(sender, evType, target, body string) {
-		entry := fam.HistoryEntry{
+		entry := irc.HistoryEntry{
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Sender:    sender,
 			Type:      evType,
@@ -663,7 +664,7 @@ func TestWorktreeMcpTools(t *testing.T) {
 func TestMcpResources(t *testing.T) {
 	s, root := newTestServer(t)
 
-	// Make root a mock git repository so fam.RepoPath resolves to it
+	// Make root a mock git repository so famconfig.RepoPath resolves to it
 	initGitRepo(t, root)
 
 	// Save cwd and chdir to root
@@ -734,7 +735,7 @@ func TestMcpResources(t *testing.T) {
 	}
 
 	// 3. Named authority matching the local family still resolves.
-	resolved, err := (fam.Resolver{WorkDir: root}).Resolve()
+	resolved, err := (famconfig.Resolver{WorkDir: root}).Resolve()
 	if err == nil && resolved.Name != "" {
 		req.Params.URI = fmt.Sprintf("botfam://%s/docs/protocol", resolved.Name)
 		if _, err := s.handleReadResource(context.Background(), req); err != nil {
