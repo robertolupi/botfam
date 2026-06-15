@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"sort"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -49,10 +48,7 @@ func NewMcpCmd() *cobra.Command {
 }
 
 func listResourcesCmd(out io.Writer) error {
-	s := &server{
-		envActor: os.Getenv("COLLAB_ACTOR"),
-		lockMode: lockActorEnabled(),
-	}
+	s := &server{}
 	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false))
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
@@ -80,10 +76,7 @@ func listResourcesCmd(out io.Writer) error {
 }
 
 func readResourceCmd(out io.Writer, uri string) error {
-	s := &server{
-		envActor: os.Getenv("COLLAB_ACTOR"),
-		lockMode: lockActorEnabled(),
-	}
+	s := &server{}
 	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false))
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)

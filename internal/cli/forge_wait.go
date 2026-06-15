@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -69,11 +68,9 @@ Requires the token to carry the notification scope (forge-login.sh requests it).
 }
 
 func runForgeWait(out io.Writer, once, markRead bool, interval, timeout time.Duration) error {
-	actor := os.Getenv("COLLAB_ACTOR")
-	if actor == "" {
-		if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
-			actor = info.Actor
-		}
+	var actor string
+	if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
+		actor = info.Actor
 	}
 	client, err := forge.NewClient(".", actor)
 	if err != nil {

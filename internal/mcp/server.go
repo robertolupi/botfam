@@ -38,7 +38,7 @@ const (
 
 // errIdentityRequired signals that no actor identity could be resolved from
 // any source (call arg, bound session, env, worktree directory).
-var errIdentityRequired = errors.New("identity required: pass actor, set COLLAB_ACTOR, or run from a named worktree")
+var errIdentityRequired = errors.New("identity required: pass actor, initialize with workspace roots, or run from a named worktree")
 
 // identityOptionalTools are tools whose handlers never use the calling actor.
 // For these, a missing identity is tolerated; identity conflicts are still
@@ -48,11 +48,18 @@ var identityOptionalTools = map[string]bool{
 	"worktree_sync": true,
 }
 
+// readOnlyTools defines the MCP tools allowed in cross-actor mode.
+// Any tool not listed here is considered mutating and blocked.
+var readOnlyTools = map[string]bool{
+	"orient":     true,
+	"irc_read":   true,
+	"irc_wait":   true,
+	"irc_replay": true,
+}
+
 type server struct {
-	envActor string
-	lockMode bool
-	mcpSrv   *mcpserver.MCPServer
-	ctx      context.Context // server lifetime; cancelled when serveStdio returns
+	mcpSrv *mcpserver.MCPServer
+	ctx    context.Context // server lifetime; cancelled when serveStdio returns
 
 	mu             sync.Mutex
 	actor          string
@@ -63,10 +70,7 @@ type server struct {
 }
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
-	s := &server{
-		envActor: os.Getenv("COLLAB_ACTOR"),
-		lockMode: lockActorEnabled(),
-	}
+	s := &server{}
 	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots())
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
@@ -246,12 +250,18 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		}
 	}
 
-	actor, err := s.resolveActor(argString(args, "actor"), c.Actor)
+	clientActor := s.resolveClientActor(ctx, clientRoots)
+	actor, isCrossActor, err := s.resolveActor(argString(args, "actor"), clientActor, c.Actor, name)
 	if err != nil {
 		if !identityOptionalTools[name] || !errors.Is(err, errIdentityRequired) {
 			return nil, err
 		}
 		actor = ""
+		isCrossActor = false
+	}
+
+	if isCrossActor && !readOnlyTools[name] {
+		return nil, fmt.Errorf("acting in another agent's worktree (executing: %s, target: %s) is read-only; mutating tool '%s' is blocked", actor, c.Actor, name)
 	}
 
 	// Lazily start the mailbox ingester now that an actor + workDir are resolved
@@ -328,7 +338,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, err
 		}
 
-		logPath := filepath.Join(absWorkDir, "scratch", "irc", actor, "log")
+		logPath := filepath.Join(absWorkDir, "scratch", "irc", c.Actor, "log")
 		if _, err := os.Stat(logPath); err != nil {
 			return nil, fmt.Errorf("IRC log not found at %s (is the client running?): %w", logPath, err)
 		}
@@ -351,7 +361,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, err
 		}
 
-		logPath := filepath.Join(absWorkDir, "scratch", "irc", actor, "log")
+		logPath := filepath.Join(absWorkDir, "scratch", "irc", c.Actor, "log")
 		timeoutS := argFloatDefault(args, "timeout_s", 60)
 		if timeoutS <= 0 {
 			timeoutS = 60
@@ -420,56 +430,64 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	return nil, fmt.Errorf("unknown tool %q", name)
 }
 
-func (s *server) resolveActor(callActor string, dirActor string) (string, error) {
+// resolveClientActor resolves the executing client actor by checking the MCP client's workspace roots.
+func (s *server) resolveClientActor(ctx context.Context, clientRoots []string) string {
+	for _, root := range clientRoots {
+		c, err := famctx.Resolve(ctx, famctx.Inputs{
+			WorkDir: root,
+			Mode:    famctx.ModeLocate,
+		})
+		if err == nil && c.Actor != "" {
+			return c.Actor
+		}
+	}
+	return ""
+}
+
+func (s *server) resolveActor(callActor string, clientActor string, dirActor string, toolName string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if dirActor != "" {
-		if callActor != "" && callActor != dirActor {
-			return "", fmt.Errorf("actor %q conflicts with resolved directory actor %q", callActor, dirActor)
-		}
-		if s.envActor != "" && s.envActor != dirActor {
-			return "", fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", s.envActor, dirActor)
-		}
-		if s.actor != "" && s.actor != dirActor {
-			return "", fmt.Errorf("bound session actor %q conflicts with resolved directory actor %q", s.actor, dirActor)
-		}
+
+	// Establish session identity from client roots if not yet bound
+	if s.actor == "" && clientActor != "" {
+		s.actor = clientActor
 	}
-	if s.lockMode {
-		if s.envActor == "" {
-			return "", errors.New("BOTFAM_LOCK_ACTOR is set but COLLAB_ACTOR is empty")
-		}
-		if callActor != "" && callActor != s.envActor {
-			return "", fmt.Errorf("actor %q conflicts with locked COLLAB_ACTOR %q", callActor, s.envActor)
-		}
-		if s.actor == "" {
-			s.actor = s.envActor
-		}
-		return s.actor, nil
+
+	executing := callActor
+	if executing == "" {
+		executing = s.actor
 	}
-	candidate := callActor
-	if candidate == "" {
-		candidate = s.actor
+	if executing == "" {
+		executing = dirActor
 	}
-	if candidate == "" {
-		candidate = s.envActor
+	if executing == "" {
+		return "", false, errIdentityRequired
 	}
-	if candidate == "" {
-		candidate = dirActor
+	if err := validateActorName(executing); err != nil {
+		return "", false, err
 	}
-	if candidate == "" {
-		return "", errIdentityRequired
+
+	// Validate bound session conflicts
+	if s.actor != "" && callActor != "" && callActor != s.actor {
+		return "", false, fmt.Errorf("actor %q conflicts with bound session actor %q", callActor, s.actor)
 	}
-	if err := validateActorName(candidate); err != nil {
-		return "", err
+
+	// Bind session actor if not already bound, and not a blocked mutating call.
+	isCrossActor := dirActor != "" && executing != dirActor
+	isMutating := !readOnlyTools[toolName]
+	if s.actor == "" && !(isCrossActor && isMutating) {
+		s.actor = executing
 	}
-	if s.actor == "" {
-		s.actor = candidate
-		return candidate, nil
+
+	// We re-evaluate isCrossActor against the finalized bound session actor
+	// (or executing fallback) in case s.actor was bound in this call.
+	actorToUse := s.actor
+	if actorToUse == "" {
+		actorToUse = executing
 	}
-	if callActor != "" && callActor != s.actor {
-		return "", fmt.Errorf("actor %q conflicts with bound session actor %q", callActor, s.actor)
-	}
-	return s.actor, nil
+
+	isCrossActor = dirActor != "" && actorToUse != dirActor
+	return actorToUse, isCrossActor, nil
 }
 
 func validateActorName(name string) error {
@@ -570,22 +588,6 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 		}
 		return body, nil
 	}
-}
-
-func lockActorEnabled() bool {
-	if os.Getenv("BOTFAM_LOCK_ACTOR") == "1" {
-		return true
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "botfam", "config")
-	if os.Getenv("XDG_CONFIG_HOME") == "" {
-		path = filepath.Join(home, ".config", "botfam", "config")
-	}
-	b, err := os.ReadFile(path)
-	return err == nil && strings.Contains(string(b), "lock_actor = true")
 }
 
 func argString(args map[string]any, key string) string {

@@ -297,7 +297,7 @@ func discoveryHealth(workDir string, t docs.TemplateData, harness string) []heal
 
 	if t.Actor == "" {
 		checks = append(checks, healthCheck{"actor", "warn",
-			"could not resolve an actor: run from an [agent.<name>] worktree (or set COLLAB_ACTOR)"})
+			"could not resolve an actor: run from an [agent.<name>] worktree or initialize with workspace roots"})
 	} else {
 		checks = append(checks, healthCheck{"actor", "ok", ""})
 	}

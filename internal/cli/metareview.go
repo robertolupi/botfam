@@ -148,11 +148,9 @@ func runMetaReview(num int, opts metaReviewOpts, out io.Writer) error {
 		return err
 	}
 
-	actor := os.Getenv("COLLAB_ACTOR")
-	if actor == "" {
-		if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
-			actor = info.Actor
-		}
+	var actor string
+	if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
+		actor = info.Actor
 	}
 	client, err := forge.NewClient(".", actor)
 	if err != nil {

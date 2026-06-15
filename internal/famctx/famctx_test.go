@@ -327,20 +327,11 @@ harness = "claude-code"
 		t.Errorf("expected unregistered agent refusal under ModeAgentRuntime, got %v", err)
 	}
 
-	// 4. COLLAB_ACTOR conflict
 	bobDir := filepath.Join(famDir, "bob")
 	if err := os.Mkdir(bobDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	gitInit(t, bobDir)
-	_, err = Resolve(context.Background(), Inputs{
-		WorkDir: bobDir,
-		Mode:    ModeAgentRuntime,
-		Env:     []string{"COLLAB_ACTOR=charlie"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "conflicts with resolved directory actor") {
-		t.Errorf("expected COLLAB_ACTOR conflict error, got %v", err)
-	}
 
 	// 5. ScopedNick idempotency and derived paths correctness
 	ctx, err := Resolve(context.Background(), Inputs{

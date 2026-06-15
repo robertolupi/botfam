@@ -106,10 +106,6 @@ func (r GitResolver) ResolveIdentity(workDir string) (RootInfo, error) {
 		}
 	}
 
-	if envActor := getenv(r.Env, "COLLAB_ACTOR"); parsedActor != "" && envActor != "" && envActor != parsedActor {
-		return RootInfo{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, parsedActor)
-	}
-
 	roots, err := gitexec.Lines(workDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		return RootInfo{}, makeNoGitHistoryError()

@@ -155,12 +155,6 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				continue
 			}
 
-			// Validate COLLAB_ACTOR conflict if environment override is present
-			envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
-			if envActor != "" && resolved.Actor != "" && envActor != resolved.Actor {
-				return Context{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, resolved.Actor)
-			}
-
 			var rootSet []string
 			var rootSetID string
 			if info, err := inputs.resolver().ResolveIdentity(dir); err == nil {
@@ -225,20 +219,12 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			// Determine actor and role
 			actor := info.Actor
 			// Bound actor overrides (only for permissive modes)
-			envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
 			if actor == "" {
 				if inputs.CallActor != "" {
 					actor = inputs.CallActor
 				} else if inputs.BoundActor != "" {
 					actor = inputs.BoundActor
-				} else if envActor != "" {
-					actor = envActor
 				}
-			}
-
-			// Validate COLLAB_ACTOR conflict
-			if envActor != "" && info.Actor != "" && envActor != info.Actor {
-				return Context{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, info.Actor)
 			}
 
 			isAgent := false
@@ -307,20 +293,12 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			// Permissive legacy git-history fallback!
 			cSource = SourceGitRoots
 			actor := info.Actor
-			envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
 			if actor == "" {
 				if inputs.CallActor != "" {
 					actor = inputs.CallActor
 				} else if inputs.BoundActor != "" {
 					actor = inputs.BoundActor
-				} else if envActor != "" {
-					actor = envActor
 				}
-			}
-
-			// Validate COLLAB_ACTOR conflict
-			if envActor != "" && info.Actor != "" && envActor != info.Actor {
-				return Context{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, info.Actor)
 			}
 
 			slug := info.Name

@@ -47,10 +47,10 @@ re-exec `os.Args[0]` under `go test`. (The `callBotfamTool` helper in
 ### Lifecycle: kill spawned children in `t.Cleanup`
 
 A temp-binary child started with `cmd.Start()` is **not** bounded by the test
-unless you reap it. A `cmd.Wait()` at the end of the happy path is not enough: a
-`t.Fatalf` (or panic) before that `Wait()` leaves the child orphaned, reparented
-to launchd/init. Run repeatedly, these accumulate (issue #255 found 250 orphaned
-`botfam serve` daemons from `/var/folders/.../T/` test dirs).
+unless you reap it. A `cmd.Wait()` at the end of the happy path is not enough:
+a `t.Fatalf` (or panic) before that `Wait()` leaves the child orphaned,
+reparented to launchd/init. Run repeatedly, these accumulate (issue #255 found
+250 orphaned `botfam serve` daemons from `/var/folders/.../T/` test dirs).
 
 Immediately after `cmd.Start()`, register cleanup that kills and reaps the
 process so it cannot outlive the test on any exit path:

@@ -89,14 +89,9 @@ func extractSession(opts ExtractOptions, out io.Writer) error {
 		snapshotTime = t
 	}
 
-	actor := os.Getenv("BOTFAM_ACTOR")
-	if actor == "" {
-		actor = os.Getenv("COLLAB_ACTOR")
-	}
-	if actor == "" {
-		if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
-			actor = info.Actor
-		}
+	var actor string
+	if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
+		actor = info.Actor
 	}
 
 	client, err := forge.NewClient(".", actor)

@@ -45,13 +45,9 @@ func newTestServer(t *testing.T) (*server, string) {
 
 	t.Setenv("HOME", root)
 	t.Setenv("COLLAB_ACTOR", "")
-	t.Setenv("BOTFAM_LOCK_ACTOR", "")
 	t.Setenv("BOTFAM_TESTING", "1")
 
-	return &server{
-		envActor: "",
-		lockMode: false,
-	}, root
+	return &server{}, root
 }
 
 func writeMockRegistry(t *testing.T, baseDir, workDir string, name string) {
@@ -149,17 +145,26 @@ func TestBoundActorConflictsWithWorkDirActor(t *testing.T) {
 		t.Fatalf("expected bound session actor %q, got %q", "alice", s.actor)
 	}
 
-	// A later call whose work_dir resolves to a different actor must conflict.
-	_, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": bobDir})
-	if err == nil {
-		t.Fatal("expected bound-actor vs work_dir conflict, got nil error")
+	// A later call whose work_dir resolves to a different actor (bob) is cross-actor.
+	// Since irc_read is read-only, it must succeed.
+	if _, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": bobDir}); err != nil {
+		t.Fatalf("cross-actor read-only call to irc_read failed: %v", err)
 	}
-	want := `bound session actor "alice" conflicts with resolved directory actor "bob"`
+
+	// A mutating call like irc_write to bob's work_dir must be blocked.
+	_, err := s.callTool(context.Background(), "irc_write", map[string]any{
+		"work_dir": bobDir,
+		"message":  "hello",
+	})
+	if err == nil {
+		t.Fatal("expected mutating call in cross-actor worktree to be blocked, got nil error")
+	}
+	want := "acting in another agent's worktree (executing: alice, target: bob) is read-only; mutating tool 'irc_write' is blocked"
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("expected error containing %q, got %q", want, err.Error())
 	}
 	if s.actor != "alice" {
-		t.Errorf("bound actor changed after conflict: got %q", s.actor)
+		t.Errorf("bound actor changed: got %q", s.actor)
 	}
 }
 
@@ -233,7 +238,7 @@ func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
 	writeMockRegistry(t, base, aliceDir, "mockfam")
 
 	// Conflicting explicit actor vs directory actor must still be rejected,
-	// even for an identity-optional tool.
+	// even for an identity-optional tool. Since worktree_sync is mutating, it is blocked.
 	_, err := s.callTool(context.Background(), "worktree_sync", map[string]any{
 		"work_dir": aliceDir,
 		"actor":    "bob",
@@ -241,7 +246,8 @@ func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected actor/work_dir conflict for identity-optional tool, got nil error")
 	}
-	if !strings.Contains(err.Error(), `actor "bob" conflicts with resolved directory actor "alice"`) {
+	want := "acting in another agent's worktree (executing: bob, target: alice) is read-only; mutating tool 'worktree_sync' is blocked"
+	if !strings.Contains(err.Error(), want) {
 		t.Errorf("unexpected conflict error: %q", err.Error())
 	}
 
