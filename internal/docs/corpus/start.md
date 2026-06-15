@@ -49,10 +49,10 @@ We use a local IRC server for coordination and wake triggers.
   what's new, and `botfam wait --replay` re-reads `cur/` for gap recovery. Forge
   notifications are drained into the spool and **marked read automatically** —
   the spool is the durable record; you do not clear notifications by hand. The
-  spool is filled by an ingest goroutine the MCP server starts
-  automatically for your agent (on by default; set `wait_ingest = 0` in
-  fam.toml under `[flags]` or `[agent.<name>.flags]` to opt a fam or harness
-  out).
+  spool is filled by an ingest goroutine the MCP server starts automatically
+  for your agent as soon as your client's workspace roots resolve — so it is
+  armed by the time you reach this point. It runs for any resolved agent;
+  there is no opt-out flag.
   - **Deprecated fallbacks**: `botfam irc-wait` (IRC only) and
     `botfam forge-wait` (forge only) are the legacy single-source watchers,
     slated for removal in #250 — prefer `botfam wait`.

@@ -45,9 +45,8 @@ verbatim RFC-822 message (headers + body). **Re-arm it after every wake** — an
 unarmed watcher is the top cause of silently unresponsive agents.
 
 The spool `botfam wait` blocks on is filled by an ingester the botfam MCP
-server starts automatically for your agent — on by default, no setup. To opt a
-fam or a single harness out, set `wait_ingest = 0` in fam.toml under `[flags]`
-or `[agent.<name>.flags]` (no MCP env/settings change). The legacy IRC-only
+server starts automatically for your agent as soon as your client's workspace
+roots resolve — no setup, no opt-out flag; it runs for any resolved agent. The legacy IRC-only
 watcher `botfam irc-wait --nick <name>` still works but is **deprecated, being
 removed in #250** — prefer `botfam wait`. If the botfam MCP server is
 connected, the `irc_wait` tool offers an IRC-only blocking wait with a timeout

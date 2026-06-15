@@ -279,7 +279,7 @@ func ensureSpool(spoolDir string) error {
 	}
 	if _, err := os.Stat(abs); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("wait: spool does not exist: %s (is the ingester running for this agent? check the wait_ingest flag)", abs)
+			return fmt.Errorf("wait: spool does not exist: %s (the MCP-hosted ingester has not created it yet; ensure the botfam MCP server is running for this agent)", abs)
 		}
 		return fmt.Errorf("wait: %w", err)
 	}

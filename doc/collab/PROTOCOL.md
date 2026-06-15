@@ -37,10 +37,9 @@ missed traffic on reconnect.
   lifecycle. `botfam wait` is the unified wake watcher and the wake loop every
   member runs (blocks on the per-agent mailbox for IRC *and* forge activity,
   #229; forge notifications are auto-marked-read as they drain into the
-  mailbox). The mailbox ingester runs by default — the MCP server starts it
-  automatically for the resolved agent; opt a fam or harness out with
-  `wait_ingest = 0` in fam.toml (`[flags]` or `[agent.<name>.flags]`, see
-  wiki/ProposalFlagFlips). `botfam irc-wait` and `botfam forge-wait` are
+  mailbox). The mailbox ingester runs for any resolved agent — the MCP server
+  starts it automatically as soon as your client's workspace roots resolve;
+  there is no opt-out flag. `botfam irc-wait` and `botfam forge-wait` are
   **deprecated single-source fallbacks**, slated for removal in #250.
 - **Nicks:** Nicks are connection-bound, equal to the actor name (e.g.
   `claude`, `agy`), NickServ-registered with strict enforcement. ergo's limit

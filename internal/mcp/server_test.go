@@ -85,11 +85,10 @@ harness = "claude-code"
 	}
 }
 
-// TestMaybeStartIngestGuards locks the early-return guards on the default-on
-// mailbox ingester (#254): it must NOT spawn its polling goroutine without a
+// TestMaybeStartIngestGuards locks the early-return guards on the spool
+// ingester (#254): it must NOT spawn its polling goroutine without a
 // serving-lifetime context (the direct-callTool unit-test path — a nil ctx here
-// previously panicked) or without a resolved actor. The wait_ingest flag gate
-// is covered by ingest.TestWaitIngestEnabled.
+// previously panicked) or without a resolved actor.
 func TestMaybeStartIngestGuards(t *testing.T) {
 	t.Run("nil server ctx (direct callTool): no ingester", func(t *testing.T) {
 		s, root := newTestServer(t)
@@ -106,6 +105,38 @@ func TestMaybeStartIngestGuards(t *testing.T) {
 			t.Fatal("ingester started without an actor")
 		}
 	})
+}
+
+// TestMaybeStartIngestForWorkDirArmsIngester locks the fix for the "no spool"
+// bug: the ingester must be armed when a discovery workDir resolves an actor
+// (the onboarding resources/read path), not only on the first qualifying tool
+// call. A server whose ingester started only from callTool left a fresh session
+// with no spool for `botfam wait` to read.
+func TestMaybeStartIngestForWorkDirArmsIngester(t *testing.T) {
+	s, root := newTestServer(t) // chdir'd into the wt-agy worktree
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.ctx = ctx
+
+	wtDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.maybeStartIngestForWorkDir(ctx, wtDir)
+
+	if !s.ingestStarted {
+		t.Fatal("ingester was not armed from the resolved workDir")
+	}
+	// The goroutine creates the spool at $FAMROOT/spool/$actor.
+	spoolDir := filepath.Join(root, "spool", "agy")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(spoolDir); err == nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("ingester did not create the spool at %s", spoolDir)
 }
 
 func mkdir(t *testing.T, path string) string {

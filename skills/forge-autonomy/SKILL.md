@@ -52,9 +52,8 @@ clearing the forge notification list yourself. A thread that gets new activity
 later re-appears and wakes you again.
 
 The spool is filled by an ingester the botfam MCP server starts automatically
-for your agent — on by default, no setup. To opt a fam or a single harness out,
-set `wait_ingest = 0` in fam.toml under `[flags]` or `[agent.<name>.flags]` (no
-MCP env/settings change). The legacy forge-only watcher `botfam forge-wait`
+for your agent as soon as your client's workspace roots resolve — no setup, no
+opt-out flag; it runs for any resolved agent. The legacy forge-only watcher `botfam forge-wait`
 still works but is **deprecated, being removed in #250** — prefer
 `botfam wait`. (On that legacy path you *do* clear handled items manually with
 `botfam forge-wait --once --mark-read`, then re-arm.)

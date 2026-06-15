@@ -120,7 +120,18 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 		pollers = append(pollers, fp)
 	}
 	ing := ingest.NewIngester(spoolDir, 30*time.Second, pollers...)
-	go func() { _ = ing.Run(s.ctx) }()
+	go func() {
+		// A non-nil Run error with a live server ctx is a real failure (e.g. the
+		// #263 fail-fast on a missing fam root): surface it on stderr (the host's
+		// MCP log) and re-arm so a later roots/tool call can retry, rather than
+		// leaving ingestion silently dead for the server's lifetime.
+		if err := ing.Run(s.ctx); err != nil && s.ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "botfam: ingester for %s stopped: %v\n", actor, err)
+			s.mu.Lock()
+			s.ingestStarted = false
+			s.mu.Unlock()
+		}
+	}()
 }
 
 func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
@@ -194,6 +205,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			wd = "."
 			via = "default"
 		}
+		s.maybeStartIngestForWorkDir(ctx, wd)
 		d := buildDiscoveryData(ctx, wd)
 		d.resolvedVia = via
 		body, err := renderIndexJSON(d)
@@ -639,6 +651,12 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	cwd, resolvedVia := s.resolveDiscoveryWorkDirVia(ctx)
 	localRepoRoot := famconfig.RepoPath(cwd)
 
+	// Arm the spool ingester from the resolved workDir. Onboarding is a
+	// resources/read (botfam:///docs/start), not a tool call, so without this a
+	// freshly-started server never created the spool `botfam wait` reads until
+	// some unrelated tool happened to run.
+	s.maybeStartIngestForWorkDir(ctx, cwd)
+
 	u, err := url.Parse(req.Params.URI)
 	if err != nil {
 		return nil, fmt.Errorf("invalid resource URI %q: %w", req.Params.URI, err)
@@ -882,4 +900,23 @@ func (s *server) requestRootsWithCache(ctx context.Context) (*mcplib.ListRootsRe
 	s.mu.Unlock()
 
 	return res, nil
+}
+
+// maybeStartIngestForWorkDir arms the spool ingester from a resolved discovery
+// workDir, so ingestion begins the moment identity is known — at the documented
+// onboarding step (a resources/read of botfam:///docs/start), not only on the
+// first qualifying tool call. workDir is whatever resolveDiscoveryWorkDirVia
+// settled on (client roots on a system-wide mount, else the server cwd / PWD of
+// the agent's worktree), so this covers both mount styles. It resolves the
+// owning actor and delegates to maybeStartIngest (idempotent per server). Must
+// be called with s.mu unlocked.
+func (s *server) maybeStartIngestForWorkDir(ctx context.Context, workDir string) {
+	if workDir == "" {
+		return
+	}
+	c, err := famctx.Resolve(ctx, famctx.Inputs{WorkDir: workDir, Mode: famctx.ModeLocate})
+	if err != nil || c.Actor == "" {
+		return
+	}
+	s.maybeStartIngest(workDir, c.Actor)
 }
