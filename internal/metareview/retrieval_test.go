@@ -111,6 +111,40 @@ func TestDetectHollowValidation_NonTestFileIgnored(t *testing.T) {
 	}
 }
 
+// TestDetectHollowValidation_IgnoresErrorMessageStrings is the regression for
+// the PR botfam#328 dogfood false positive: test diagnostic strings that merely
+// contain the word "want"/"got" must not be flagged — only real assertion
+// shapes are.
+func TestDetectHollowValidation_IgnoresErrorMessageStrings(t *testing.T) {
+	art := Artifact{
+		Kind: "pr",
+		Diff: "+++ b/internal/metareview/classify_test.go\n" +
+			"+\t\tt.Errorf(\"len: got %d want %d\", len(got), tc.wantLen)\n" +
+			"+\t\tt.Fatalf(\"want 3 kept, got %d\", len(got))\n" +
+			"+\t\tt.Fatalf(\"want error, got %+v\", got)\n",
+	}
+	if cands := detectHollowValidation(art); len(cands) != 0 {
+		t.Errorf("test error-message strings must not be flagged as assertions: %+v", cands)
+	}
+}
+
+// TestDetectHollowValidation_RealAssertionShapes confirms the precise shapes
+// still fire after the tightening.
+func TestDetectHollowValidation_RealAssertionShapes(t *testing.T) {
+	for _, line := range []string{
+		"+\trequire.Equal(t, \"botfam-next\", defaultTarget)",
+		"+\tassert.Equal(t, 42, got)",
+		"+\tif got != \"expected\" {",
+		"+\twant := \"botfam-next\"",
+		"+\t\twant: 42,",
+	} {
+		art := Artifact{Kind: "pr", Diff: "+++ b/x_test.go\n" + line + "\n"}
+		if cands := detectHollowValidation(art); len(cands) == 0 {
+			t.Errorf("expected an assertion candidate for %q", line)
+		}
+	}
+}
+
 func TestDetectSpeculative(t *testing.T) {
 	art := Artifact{Body: "We build the ranker before we have any labelled data."}
 	cands := detectSpeculative(art)

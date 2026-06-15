@@ -108,7 +108,9 @@ func TestEval_ShippedSet(t *testing.T) {
 	if len(cases) < 4 {
 		t.Fatalf("expected a non-trivial set, got %d cases", len(cases))
 	}
-	rep, err := Eval(context.Background(), cases, candidateEchoClassifier{}, nil, io.Discard)
+	// Pass the oracle as the escalation model too, so the hollow-validation case
+	// (escalate-only) is exercised rather than gated out.
+	rep, err := Eval(context.Background(), cases, candidateEchoClassifier{}, candidateEchoClassifier{}, io.Discard)
 	if err != nil {
 		t.Fatalf("Eval: %v", err)
 	}

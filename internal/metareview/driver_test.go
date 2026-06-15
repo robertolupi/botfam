@@ -99,16 +99,20 @@ func TestRun_CleanArtifactSkipsModel(t *testing.T) {
 	}
 }
 
-func TestRun_HollowValidationClampedLowWithoutEscalation(t *testing.T) {
-	iss := &forge.Issue{Number: 9, Title: "pr", Body: "test change", PullRequest: &struct {
+func hollowPR() *forge.Issue {
+	return &forge.Issue{Number: 9, Title: "pr", Body: "test change", PullRequest: &struct {
 		URL string `json:"url"`
 	}{URL: "u"}}
+}
+
+func TestRun_HollowValidationSkippedWithoutEscalation(t *testing.T) {
 	f := &fakeForge{
-		issue: iss,
+		issue: hollowPR(),
 		diff:  "+++ b/internal/foo/foo_test.go\n+\trequire.Equal(t, 42, got)\n",
 	}
-	// Local model "confirms" at high confidence; the driver must clamp it to low
-	// because no escalation model is configured.
+	// The local model would "confirm" it, but with no escalation model the
+	// driver must drop the hollow-validation candidate entirely (it can't be
+	// told from an ordinary assertion) — never even shown it.
 	local := &fakeClassifier{ret: []Suggestion{
 		{Label: LabelHollowValidation, Evidence: "foo_test.go re-asserts 42", Confidence: "high"},
 	}}
@@ -119,8 +123,39 @@ func TestRun_HollowValidationClampedLowWithoutEscalation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if len(res.Suggestions) != 1 || res.Suggestions[0].Confidence != "low" {
-		t.Fatalf("hollow-validation must be clamped to low confidence without escalation: %+v", res.Suggestions)
+	if len(res.Suggestions) != 0 {
+		t.Fatalf("hollow-validation must be skipped without escalation, got %+v", res.Suggestions)
+	}
+	if local.gotPrompt != "" {
+		t.Error("local model must not even be asked about an escalate-only candidate")
+	}
+}
+
+func TestRun_HollowValidationSurfacedWithEscalation(t *testing.T) {
+	f := &fakeForge{
+		issue: hollowPR(),
+		diff:  "+++ b/internal/foo/foo_test.go\n+\trequire.Equal(t, 42, got)\n",
+	}
+	local := &fakeClassifier{}
+	escalate := &fakeClassifier{ret: []Suggestion{
+		{Label: LabelHollowValidation, Evidence: "foo_test.go re-asserts 42", Confidence: "high"},
+	}}
+	var out bytes.Buffer
+	res, err := Run(context.Background(), Options{
+		Number: 9, Forge: f, Corpus: fakeCorpus{}, Local: local, Escalate: escalate, Out: &out,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Suggestions) != 1 || res.Suggestions[0].Label != LabelHollowValidation {
+		t.Fatalf("with escalation, hollow-validation should surface: %+v", res.Suggestions)
+	}
+	// Escalation keeps the strong model's own confidence (not clamped).
+	if res.Suggestions[0].Confidence != "high" {
+		t.Errorf("escalated suggestion should keep its confidence, got %q", res.Suggestions[0].Confidence)
+	}
+	if escalate.gotPrompt == "" {
+		t.Error("escalation model should have been asked")
 	}
 }
 

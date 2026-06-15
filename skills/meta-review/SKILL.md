@@ -28,9 +28,11 @@ cross-artifact visibility", not on context concerns).
    one advisory comment below. Code never leaves the box; output is reproducible
    (temperature 0 + a fixed `--seed`); a wrong suggestion is cheap because the
    output is advisory. Mechanical risks (`phase-inversion`, `superseded`) run on
-   the local `--ollama` model; judgment-heavy risks (`hollow-validation`,
-   `speculative`) route to `--escalate` when set, else the local model with
-   confidence forced low — **never silently trusted**. High-confidence labels
+   the local `--ollama` model; `speculative` routes to `--escalate` when set,
+   else the local model at low confidence. `hollow-validation` runs **only** when
+   `--escalate` is set — the deterministic pass cannot distinguish it from an
+   ordinary literal assertion, so without a stronger model it is skipped rather
+   than surfaced as noise (**never silently trusted**). High-confidence labels
    are applied only with `--apply-labels` (additive); otherwise it is
    comment-only. Because it is read-only it dodges the worktree-isolation
    hazard ([#304](http://gitea:3000/botfam/botfam/issues/304)) and runs on any

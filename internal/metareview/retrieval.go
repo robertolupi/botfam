@@ -33,7 +33,14 @@ type Candidate struct {
 	Label    string // one of the per-artifact labels
 	Evidence string // cited evidence the driver found
 	Triage   string // suggested triage/* (may be empty)
-	Escalate bool   // route to the stronger model — judgment-heavy (hollow-validation, speculative)
+	Escalate bool   // judgment-heavy: prefer the stronger --escalate model
+	// EscalateOnly candidates are dropped entirely when no --escalate model is
+	// configured (not surfaced at low confidence). hollow-validation is the case:
+	// the deterministic pass cannot distinguish it from an ordinary literal
+	// assertion, so without a strong model to do the real reasoning it is pure
+	// noise (PR botfam#328 dogfood). speculative, which fires on specific cues,
+	// is not EscalateOnly — it still runs locally at low confidence.
+	EscalateOnly bool
 }
 
 // pathRefRe matches a backtick- or paren-delimited repo path: a token with at
@@ -169,9 +176,14 @@ func detectSuperseded(art Artifact, corpus Corpus) []Candidate {
 	return cands
 }
 
-// hollowAssertRe matches an added test line asserting a string/numeric literal
-// — the shape most prone to re-asserting what the impl emits (skill #295 scar).
-var hollowAssertRe = regexp.MustCompile(`(?m)^\+.*\b(?:assert|expect|want|Equal|require)\b.*["0-9]`)
+// hollowAssertRe matches an added test line that *asserts a literal* — the
+// shape most prone to re-asserting what the impl emits (skill #295 scar). It
+// targets concrete assertion shapes, not the bare words: a testify
+// require/assert call, an `if got != <literal>` guard, or a table-test
+// `want := <literal>` binding. This deliberately excludes diagnostic strings
+// like t.Errorf("...want %d...") where the word only appears inside a message
+// (the dogfood false positive on PR botfam#328).
+var hollowAssertRe = regexp.MustCompile(`(?:require|assert)\.\w+\(|\bif\s+\w[\w.]*\s*!=\s*["0-9]|\b(?:want|expected)\w*\s*[:=]+\s*["0-9]`)
 
 // detectHollowValidation extracts added test assertions as LOW-confidence,
 // escalate-only candidates. The driver never trusts these silently: the model
@@ -191,11 +203,15 @@ func detectHollowValidation(art Artifact) []Candidate {
 		if !strings.HasSuffix(file, "_test.go") {
 			continue
 		}
+		if !strings.HasPrefix(ln, "+") { // only added lines
+			continue
+		}
 		if hollowAssertRe.MatchString(ln) {
 			cands = append(cands, Candidate{
-				Label:    LabelHollowValidation,
-				Evidence: "in `" + file + "`, assertion may re-assert what the impl emits: " + condense(strings.TrimPrefix(ln, "+")),
-				Escalate: true,
+				Label:        LabelHollowValidation,
+				Evidence:     "in `" + file + "`, assertion may re-assert what the impl emits: " + condense(strings.TrimPrefix(ln, "+")),
+				Escalate:     true,
+				EscalateOnly: true,
 			})
 			if len(cands) >= 3 { // cap noise — a few examples are enough for the model
 				break

@@ -32,9 +32,11 @@ Read-only except for that one comment (and, with --apply-labels, additive
 high-confidence risk/* labels). Code never leaves the box: classification runs
 on a local model. Output is reproducible (temperature 0 + fixed --seed).
 
-Mechanical risks (phase-inversion, superseded) run on the local --ollama model;
-judgment-heavy risks (hollow-validation, speculative) route to --escalate when
-set, else the local model with confidence forced low — never silently trusted.
+Mechanical risks (phase-inversion, superseded) run on the local --ollama model.
+speculative routes to --escalate when set, else the local model at low
+confidence. hollow-validation runs ONLY when --escalate is set: the deterministic
+pass cannot tell it from an ordinary literal assertion, so without a stronger
+model to do the real reasoning it is skipped rather than surfaced as noise.
 
   --ollama MODEL    local model that confirms+phrases (default gpt-oss:20b)
   --escalate MODEL  stronger local model for judgment-heavy risks (optional)

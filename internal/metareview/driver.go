@@ -108,11 +108,17 @@ func Assess(ctx context.Context, art Artifact, corpus Corpus, local, escalate Cl
 		}
 		suggestions = append(suggestions, s...)
 	}
+	clf, clamp := escalate, false
+	if clf == nil {
+		// No escalation model: run the judgment risks on the local model at low
+		// confidence, but drop the EscalateOnly ones (hollow-validation) — the
+		// local model can't tell them from ordinary literal assertions, so
+		// without a strong model they are noise, not signal (PR botfam#328
+		// dogfood). speculative (cue-based) still runs locally.
+		clf, clamp = local, true
+		judgment = dropEscalateOnly(judgment)
+	}
 	if len(judgment) > 0 {
-		clf, clamp := escalate, false
-		if clf == nil {
-			clf, clamp = local, true
-		}
 		s, err := confirm(ctx, clf, art, judgment)
 		if err != nil {
 			// A judgment-model failure must not block the mechanical findings;
@@ -157,6 +163,18 @@ func partition(cands []Candidate) (mechanical, judgment []Candidate) {
 		}
 	}
 	return mechanical, judgment
+}
+
+// dropEscalateOnly removes candidates that must not be surfaced without an
+// escalation model (hollow-validation).
+func dropEscalateOnly(cands []Candidate) []Candidate {
+	out := cands[:0:0]
+	for _, c := range cands {
+		if !c.EscalateOnly {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // confirm builds the prompt for a candidate set and runs the classifier,
