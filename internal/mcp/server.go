@@ -38,7 +38,7 @@ const (
 
 // errIdentityRequired signals that no actor identity could be resolved from
 // any source (call arg, bound session, env, worktree directory).
-var errIdentityRequired = errors.New("identity required: pass actor, set COLLAB_ACTOR, or run from a named worktree")
+var errIdentityRequired = errors.New("identity required: pass actor, initialize with workspace roots, or run from a named worktree")
 
 // identityOptionalTools are tools whose handlers never use the calling actor.
 // For these, a missing identity is tolerated; identity conflicts are still
@@ -58,9 +58,8 @@ var readOnlyTools = map[string]bool{
 }
 
 type server struct {
-	lockMode bool
-	mcpSrv   *mcpserver.MCPServer
-	ctx      context.Context // server lifetime; cancelled when serveStdio returns
+	mcpSrv *mcpserver.MCPServer
+	ctx    context.Context // server lifetime; cancelled when serveStdio returns
 
 	mu             sync.Mutex
 	actor          string
@@ -71,9 +70,7 @@ type server struct {
 }
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
-	s := &server{
-		lockMode: lockActorEnabled(),
-	}
+	s := &server{}
 	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots())
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
@@ -482,7 +479,8 @@ func (s *server) resolveActor(callActor string, clientActor string, dirActor str
 		s.actor = executing
 	}
 
-	// If bound actor changed or is set, compute isCrossActor against it
+	// We re-evaluate isCrossActor against the finalized bound session actor
+	// (or executing fallback) in case s.actor was bound in this call.
 	actorToUse := s.actor
 	if actorToUse == "" {
 		actorToUse = executing
@@ -590,22 +588,6 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 		}
 		return body, nil
 	}
-}
-
-func lockActorEnabled() bool {
-	if os.Getenv("BOTFAM_LOCK_ACTOR") == "1" {
-		return true
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "botfam", "config")
-	if os.Getenv("XDG_CONFIG_HOME") == "" {
-		path = filepath.Join(home, ".config", "botfam", "config")
-	}
-	b, err := os.ReadFile(path)
-	return err == nil && strings.Contains(string(b), "lock_actor = true")
 }
 
 func argString(args map[string]any, key string) string {
