@@ -341,3 +341,37 @@ func TestResolveFam(t *testing.T) {
 		t.Error("expected refusal for the base/main checkout")
 	}
 }
+
+func TestFamScopedNick(t *testing.T) {
+	cases := []struct{ actor, slug, want string }{
+		{"claude", "botfam", "claude-botfam"},
+		{"agy", "dc", "agy-dc"},
+		{"claude-botfam", "botfam", "claude-botfam"}, // idempotent, no double-suffix
+		{"claude", "", "claude"},                     // no slug → bare actor
+		{"", "botfam", ""},                           // no actor → bare (empty)
+	}
+	for _, tc := range cases {
+		if got := FamScopedNick(tc.actor, tc.slug); got != tc.want {
+			t.Errorf("FamScopedNick(%q, %q) = %q, want %q", tc.actor, tc.slug, got, tc.want)
+		}
+	}
+}
+
+func TestFlagFromMap(t *testing.T) {
+	flags := map[string]any{"on": int64(1), "off": false, "bad": "treu"}
+
+	if v, err := FlagFromMap(flags, "on", false); err != nil || !v {
+		t.Errorf("on => (%v,%v), want (true,nil)", v, err)
+	}
+	if v, err := FlagFromMap(flags, "off", true); err != nil || v {
+		t.Errorf("off => (%v,%v), want (false,nil)", v, err)
+	}
+	// Absent flag returns the supplied default, no error.
+	if v, err := FlagFromMap(flags, "absent", true); err != nil || !v {
+		t.Errorf("absent => (%v,%v), want (true,nil)", v, err)
+	}
+	// Set-but-unparseable value errors and returns the default.
+	if v, err := FlagFromMap(flags, "bad", true); err == nil || !v {
+		t.Errorf("bad => (%v,%v), want (true, error)", v, err)
+	}
+}
