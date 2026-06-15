@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mailbox"
 	"github.com/spf13/cobra"
 )
@@ -60,17 +63,45 @@ headers + body) under a banner, and moves the batch to cur/ — the move is the
 ack. With --replay it instead dumps the cur/ replay buffer (no ack) for gap
 recovery.
 
-This command only reads the spool; a background ingester (hosted in the botfam
-MCP server) is what fills it.`,
-		Args:          cobra.NoArgs,
+With a single positional issue/PR number — "botfam wait 123" (a bare integer,
+no '#': '#' starts a shell comment) — it ignores the spool and polls that one
+issue/PR's timeline, returning on the next event (comment, review, close, or a
+silent force-push that emits no notification). Use it to watch a specific PR a
+peer is reviewing.
+
+This command only reads the spool (or, with a number, polls one issue/PR); a
+background ingester (hosted in the botfam MCP server) is what fills the spool.`,
+		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if pollMs <= 0 {
 				return fmt.Errorf("--poll-ms: must be > 0")
 			}
 			if timeoutS < 0 {
 				return fmt.Errorf("--timeout: invalid seconds %d", timeoutS)
+			}
+
+			// `botfam wait N` — watch a single issue/PR for new timeline events
+			// (incl. silent pushes that produce no notification), instead of the
+			// spool. A bare integer, no '#': '#' starts a shell comment.
+			if len(args) == 1 {
+				num, err := strconv.Atoi(strings.TrimPrefix(args[0], "#"))
+				if err != nil || num <= 0 {
+					return fmt.Errorf("wait: argument must be an issue/PR number, got %q", args[0])
+				}
+				rf, err := famconfig.ResolveFam(workDir)
+				if err != nil {
+					return fmt.Errorf("wait: %w", err)
+				}
+				client, err := forge.NewClient(workDir, rf.Actor)
+				if err != nil {
+					return fmt.Errorf("wait: %w", err)
+				}
+				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+				defer stop()
+				return runWatchItem(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), client, rf.Repository, num,
+					time.Duration(timeoutS)*time.Second, time.Duration(pollMs)*time.Millisecond)
 			}
 			if spoolDir == "" {
 				p, err := SpoolDir(workDir)
@@ -108,6 +139,88 @@ MCP server) is what fills it.`,
 	c.Flags().BoolVar(&all, "all", false, "disable do-not-disturb: surface every forge event, not just those directed at you (assignee/@-mention)")
 	c.Flags().StringVar(&sinceStr, "since", "", "with --replay, only messages newer than this duration ago (e.g. 1h); default all")
 	return c
+}
+
+// timelineClient is the slice of the forge client the per-item watcher needs;
+// an interface so it is testable with a fake.
+type timelineClient interface {
+	GetIssueTimeline(issueNum int) ([]*forge.TimelineEvent, error)
+}
+
+// runWatchItem polls one issue/PR's timeline and returns when a new event
+// appears (a comment, review, close, or a silent force-push — none of which a
+// notification watermark reliably catches). It baselines the current events on
+// entry so it fires only on what happens *after* you start watching, and honors
+// --timeout / ctx cancellation. Best-effort: a transient fetch error is retried
+// on the next tick rather than ending the watch.
+func runWatchItem(ctx context.Context, out, errw io.Writer, tc timelineClient, repo string, num int, timeout, poll time.Duration) error {
+	fmt.Fprintf(errw, "wait: watching %s#%d (timeout=%s, poll=%s)\n", repo, num, durOrBlock(timeout), poll)
+
+	seen, err := timelineIDs(tc, num)
+	if err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
+
+	var deadline time.Time
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+	t := time.NewTicker(poll)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			evs, err := tc.GetIssueTimeline(num)
+			if err != nil {
+				continue // transient; keep watching
+			}
+			var fresh []*forge.TimelineEvent
+			for _, e := range evs {
+				if !seen[e.ID] {
+					seen[e.ID] = true
+					fresh = append(fresh, e)
+				}
+			}
+			if len(fresh) > 0 {
+				for i, e := range fresh {
+					emitItemEvent(out, i+1, len(fresh), repo, num, e)
+				}
+				fmt.Fprintf(out, "===== woke: %d %s on %s#%d =====\n", len(fresh), plural(len(fresh)), repo, num)
+				return nil
+			}
+			if timeout > 0 && !time.Now().Before(deadline) {
+				fmt.Fprintln(out, "===== timed out =====")
+				return nil
+			}
+		}
+	}
+}
+
+func timelineIDs(tc timelineClient, num int) (map[int64]bool, error) {
+	evs, err := tc.GetIssueTimeline(num)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[int64]bool, len(evs))
+	for _, e := range evs {
+		ids[e.ID] = true
+	}
+	return ids, nil
+}
+
+func emitItemEvent(out io.Writer, n, total int, repo string, num int, e *forge.TimelineEvent) {
+	who := "forge"
+	if e.User != nil && e.User.Login != "" {
+		who = e.User.Login
+	}
+	fmt.Fprintf(out, "===== event %d/%d · %s#%d =====\n", n, total, repo, num)
+	fmt.Fprintf(out, "%s by %s\n", e.Type, who)
+	if b := strings.TrimSpace(e.Body); b != "" {
+		fmt.Fprintf(out, "\n%s\n", b)
+	}
+	fmt.Fprintln(out)
 }
 
 func parseSources(s string) map[string]bool {

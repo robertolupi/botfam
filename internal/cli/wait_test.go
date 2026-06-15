@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mailbox"
 )
 
@@ -283,5 +284,65 @@ func TestReplayFromCur(t *testing.T) {
 	}
 	if countMessages(again.String()) != 2 {
 		t.Errorf("replay is non-destructive: second replay should still show 2:\n%s", again.String())
+	}
+}
+
+// fakeTimeline serves canned timelines per GetIssueTimeline call, advancing
+// through the list so the watcher sees the set grow.
+type fakeTimeline struct {
+	calls   int
+	perCall [][]*forge.TimelineEvent
+}
+
+func (f *fakeTimeline) GetIssueTimeline(int) ([]*forge.TimelineEvent, error) {
+	i := f.calls
+	if i >= len(f.perCall) {
+		i = len(f.perCall) - 1
+	}
+	f.calls++
+	return f.perCall[i], nil
+}
+
+func ev(id int64, typ, user, body string) *forge.TimelineEvent {
+	e := &forge.TimelineEvent{ID: id, Type: typ, Body: body}
+	if user != "" {
+		e.User = &struct {
+			Login string `json:"login"`
+		}{Login: user}
+	}
+	return e
+}
+
+func TestWatchItemWakesOnNewEvent(t *testing.T) {
+	// Baseline has event 1; a later poll adds event 2 (a close) → wake on it.
+	tc := &fakeTimeline{perCall: [][]*forge.TimelineEvent{
+		{ev(1, "comment", "rlupi", "first")},                              // baseline
+		{ev(1, "comment", "rlupi", "first"), ev(2, "close", "rlupi", "")}, // new event appears
+	}}
+	var out bytes.Buffer
+	if err := runWatchItem(context.Background(), &out, io.Discard, tc, "botfam/botfam", 123, 2*time.Second, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "event 1/1 · botfam/botfam#123") || !strings.Contains(s, "close by rlupi") {
+		t.Fatalf("did not surface the new close event:\n%s", s)
+	}
+	if strings.Contains(s, "first") {
+		t.Errorf("re-surfaced the baseline event:\n%s", s)
+	}
+	if !strings.Contains(s, "===== woke: 1 message on botfam/botfam#123 =====") {
+		t.Errorf("missing woke footer:\n%s", s)
+	}
+}
+
+func TestWatchItemTimesOut(t *testing.T) {
+	// Timeline never changes → time out, no false wake.
+	tc := &fakeTimeline{perCall: [][]*forge.TimelineEvent{{ev(1, "comment", "rlupi", "x")}}}
+	var out bytes.Buffer
+	if err := runWatchItem(context.Background(), &out, io.Discard, tc, "botfam/botfam", 123, 60*time.Millisecond, 10*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "===== timed out =====") {
+		t.Errorf("expected timeout, got:\n%s", out.String())
 	}
 }
