@@ -2,7 +2,9 @@ package ingest
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/robertolupi/botfam/internal/forge"
@@ -88,51 +90,61 @@ func itoa(i int) string {
 	return string(b)
 }
 
-func forgeEvents(t *testing.T, mboxPath string) []mailbox.Event {
+// forgeMessages reads the forge messages delivered to the spool's new/ box, in
+// delivery order.
+func forgeMessages(t *testing.T, spoolDir string) []*mailbox.Message {
 	t.Helper()
-	evs, _, err := mailbox.ReadFrom(mboxPath, 0)
+	sp, err := mailbox.Open(spoolDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []mailbox.Event
-	for _, e := range evs {
-		if e.Source == mailbox.SourceForge {
-			out = append(out, e)
+	ents, err := sp.ListNew()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []*mailbox.Message
+	for _, e := range ents {
+		m, err := sp.Read(e)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Source == mailbox.SourceForge {
+			out = append(out, m)
 		}
 	}
 	return out
 }
 
-func drainOnce(t *testing.T, fc *fakeForge) (mboxPath string) {
+func drainOnce(t *testing.T, fc *fakeForge) (spoolDir string) {
 	t.Helper()
-	mboxPath = filepath.Join(t.TempDir(), "claude.mailbox")
-	w, err := mailbox.OpenWriter(mboxPath)
+	spoolDir = filepath.Join(t.TempDir(), "spool")
+	sp, err := mailbox.Open(spoolDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := NewForgePoller(fc, fc.repo)
-	err = p.Poll(w, &mailbox.Cursors{})
-	w.Close()
-	if err != nil {
+	if err := p.Poll(sp, &mailbox.Cursors{}); err != nil {
 		t.Fatalf("Poll: %v", err)
 	}
-	return mboxPath
+	return spoolDir
 }
 
 func TestForgePollerDrainsRepo(t *testing.T) {
 	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", 3, 1, 2)}
-	mboxPath := drainOnce(t, fc)
+	spoolDir := drainOnce(t, fc)
 
-	evs := forgeEvents(t, mboxPath)
-	if len(evs) != 3 {
-		t.Fatalf("surfaced %d events, want 3", len(evs))
+	msgs := forgeMessages(t, spoolDir)
+	if len(msgs) != 3 {
+		t.Fatalf("surfaced %d messages, want 3", len(msgs))
 	}
-	// Ascending id within the drained page.
-	if evs[0].NotifID != 1 || evs[1].NotifID != 2 || evs[2].NotifID != 3 {
-		t.Errorf("surfaced ids %d,%d,%d, want 1,2,3", evs[0].NotifID, evs[1].NotifID, evs[2].NotifID)
-	}
-	if evs[0].Number != 1 {
-		t.Errorf("number = %d, want 1 (parsed from URL)", evs[0].Number)
+	// Ascending id within the drained page: delivery order is the sort order.
+	for i, want := range []int{1, 2, 3} {
+		if !strings.Contains(msgs[i].Subject, fmt.Sprintf("#%d", want)) {
+			t.Errorf("message %d subject = %q, want artifact ref #%d", i, msgs[i].Subject, want)
+		}
+		if !strings.HasSuffix(msgs[i].Body, fmt.Sprintf("/issues/%d", want)) {
+			t.Errorf("message %d body = %q, want url ending /issues/%d", i, msgs[i].Body, want)
+		}
 	}
 	if len(fc.marked) != 3 {
 		t.Errorf("marked %d threads read, want 3", len(fc.marked))
@@ -150,11 +162,11 @@ func TestForgePollerDrainsAcrossPages(t *testing.T) {
 		ids = append(ids, id)
 	}
 	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", ids...)}
-	mboxPath := drainOnce(t, fc)
+	spoolDir := drainOnce(t, fc)
 
-	evs := forgeEvents(t, mboxPath)
-	if len(evs) != 120 {
-		t.Fatalf("surfaced %d events, want all 120", len(evs))
+	msgs := forgeMessages(t, spoolDir)
+	if len(msgs) != 120 {
+		t.Fatalf("surfaced %d messages, want all 120", len(msgs))
 	}
 	if len(fc.marked) != 120 {
 		t.Errorf("marked %d, want 120", len(fc.marked))
@@ -165,33 +177,37 @@ func TestForgePollerDrainsAcrossPages(t *testing.T) {
 }
 
 func TestForgePollerAtLeastOnceOnMarkError(t *testing.T) {
-	// Append happens before the upstream ack, so if mark-read fails the thread is
-	// already durably in the mailbox (re-surfaced later, never lost).
+	// Deliver happens before the upstream ack, so if mark-read fails the thread is
+	// already durably in the spool (re-surfaced later, never lost).
 	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", 5), markErr: errors.New("no write:notification scope")}
-	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
-	w, _ := mailbox.OpenWriter(mboxPath)
+	spoolDir := filepath.Join(t.TempDir(), "spool")
+	sp, err := mailbox.Open(spoolDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p := NewForgePoller(fc, fc.repo)
-	err := p.Poll(w, &mailbox.Cursors{})
-	w.Close()
-	if err == nil {
+	if err := p.Poll(sp, &mailbox.Cursors{}); err == nil {
 		t.Fatal("expected Poll to surface the mark-read error")
 	}
-	if evs := forgeEvents(t, mboxPath); len(evs) != 1 || evs[0].NotifID != 5 {
-		t.Errorf("event not durably appended before the failed ack: %+v", evs)
+	msgs := forgeMessages(t, spoolDir)
+	if len(msgs) != 1 || !strings.Contains(msgs[0].Subject, "#5") {
+		t.Errorf("message not durably delivered before the failed ack: %+v", msgs)
 	}
 }
 
 func TestForgePollerListError(t *testing.T) {
 	fc := &fakeForge{repo: "botfam/botfam", listErr: errors.New("boom")}
-	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
-	w, _ := mailbox.OpenWriter(mboxPath)
-	defer w.Close()
+	spoolDir := filepath.Join(t.TempDir(), "spool")
+	sp, err := mailbox.Open(spoolDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p := NewForgePoller(fc, fc.repo)
-	if err := p.Poll(w, &mailbox.Cursors{}); err == nil {
+	if err := p.Poll(sp, &mailbox.Cursors{}); err == nil {
 		t.Fatal("expected Poll to surface the list error")
 	}
-	if len(forgeEvents(t, mboxPath)) != 0 {
-		t.Error("surfaced events despite a list error")
+	if len(forgeMessages(t, spoolDir)) != 0 {
+		t.Error("surfaced messages despite a list error")
 	}
 }
 
@@ -206,12 +222,13 @@ func TestForgePollerDrainCapErrors(t *testing.T) {
 		ids = append(ids, id)
 	}
 	fc := &fakeForge{repo: "botfam/botfam", unread: repoNotifs("botfam/botfam", ids...), neverAck: true}
-	mboxPath := filepath.Join(t.TempDir(), "claude.mailbox")
-	w, _ := mailbox.OpenWriter(mboxPath)
+	spoolDir := filepath.Join(t.TempDir(), "spool")
+	sp, err := mailbox.Open(spoolDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	p := NewForgePoller(fc, fc.repo)
-	err := p.Poll(w, &mailbox.Cursors{})
-	w.Close()
-	if err == nil {
+	if err := p.Poll(sp, &mailbox.Cursors{}); err == nil {
 		t.Fatal("expected the drain cap to error when the unread set never shrinks")
 	}
 	if fc.listCalls != 3 {

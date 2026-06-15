@@ -87,10 +87,10 @@ type Context struct {
 	Agent famconfig.AgentConfig
 	Flags map[string]any
 
-	MailboxPath string
-	IRCLogDir   string
-	TokenPath   string
-	ScopedNick  string
+	SpoolDir   string
+	IRCLogDir  string
+	TokenPath  string
+	ScopedNick string
 
 	RootSet     []string
 	RootSetID   string
@@ -172,7 +172,7 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				WorkDir:      dir,
 				Agent:        resolved.Agent,
 				Flags:        resolved.Flags,
-				MailboxPath:  filepath.Join(resolved.FamDir, resolved.Actor+".mailbox"),
+				SpoolDir:     filepath.Join(resolved.FamDir, "spool", resolved.Actor),
 				IRCLogDir:    filepath.Join(resolved.WorktreeRoot, "scratch", "irc", resolved.Actor),
 				TokenPath:    resolved.TokenPath,
 				ScopedNick:   famconfig.FamScopedNick(resolved.Actor, resolved.Slug),
@@ -273,7 +273,7 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				WorkDir:      dir,
 				Agent:        agent,
 				Flags:        famconfig.ResolveFlags(reg, actor),
-				MailboxPath:  filepath.Join(evalRoot, actor+".mailbox"),
+				SpoolDir:     filepath.Join(evalRoot, "spool", actor),
 				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
 				TokenPath:    tokenPath,
 				ScopedNick:   famconfig.FamScopedNick(actor, slug),
@@ -321,7 +321,7 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				WorktreeRoot: gitRoot(dir),
 				WorkDir:      dir,
 				Flags:        nil,
-				MailboxPath:  filepath.Join(evalRoot, actor+".mailbox"),
+				SpoolDir:     filepath.Join(evalRoot, "spool", actor),
 				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
 				ScopedNick:   famconfig.FamScopedNick(actor, slug),
 				RootSet:      info.RootSet,

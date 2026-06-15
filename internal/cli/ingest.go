@@ -6,7 +6,7 @@ import (
 	"github.com/robertolupi/botfam/internal/ingest"
 )
 
-// The mailbox ingester now lives in the dependency-free internal/ingest leaf
+// The spool ingester now lives in the dependency-free internal/ingest leaf
 // (#311). cli keeps this thin adapter over the leaf for its command builders
 // (internal/mcp calls the leaf directly).
 
@@ -20,8 +20,8 @@ type Ingester = ingest.Ingester
 type ForgeClient = ingest.ForgeClient
 
 // NewIngester re-exports ingest.NewIngester.
-func NewIngester(mailboxPath string, interval time.Duration, pollers ...Poller) *Ingester {
-	return ingest.NewIngester(mailboxPath, interval, pollers...)
+func NewIngester(spoolDir string, interval time.Duration, pollers ...Poller) *Ingester {
+	return ingest.NewIngester(spoolDir, interval, pollers...)
 }
 
 // NewIRCPoller re-exports ingest.NewIRCPoller.
@@ -38,7 +38,7 @@ func ForgePollerFor(workDir, actor string) (Poller, error) {
 }
 
 // IngestParams re-exports ingest.IngestParams.
-func IngestParams(workDir string) (mailboxPath, ircLogPath, matchNick string, err error) {
+func IngestParams(workDir string) (spoolDir, ircLogPath, matchNick string, err error) {
 	return ingest.IngestParams(workDir)
 }
 

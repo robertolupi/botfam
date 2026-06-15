@@ -13,82 +13,82 @@ import (
 	"github.com/robertolupi/botfam/internal/mailbox"
 )
 
-// Poller is one edge-triggered event source feeding a mailbox. Poll must append
+// Poller is one edge-triggered event source feeding a spool. Poll must deliver
 // only events strictly past the cursor and advance the cursor in place.
 type Poller interface {
 	Name() string
-	Poll(w *mailbox.Writer, c *mailbox.Cursors) error
+	Poll(s *mailbox.Spool, c *mailbox.Cursors) error
 }
 
-// seeder is an optional Poller capability: on a brand-new mailbox (no prior
+// seeder is an optional Poller capability: on a brand-new spool (no prior
 // cursor) SeedEOF positions the cursor at the source's current end so the first
-// run does not dump the entire pre-existing backlog into the mailbox.
+// run does not dump the entire pre-existing backlog into the spool.
 type seeder interface {
 	SeedEOF(c *mailbox.Cursors)
 }
 
-// Ingester is the single writer that fills one agent's mailbox. It is meant to
-// run as a background goroutine for the lifetime of its host (the botfam MCP
-// server); it holds an advisory flock so that, across multiple harnesses of one
-// agent, exactly one instance writes while the others stand by.
+// Ingester is the single writer that fills one agent's spool. It is meant to run
+// as a background goroutine for the lifetime of its host (the botfam MCP server);
+// it holds an advisory flock so that, across multiple harnesses of one agent,
+// exactly one instance writes while the others stand by. (The flock guards the
+// single-writer constraint, not delivery itself — delivery is lock-free via the
+// spool's tmp/->new/ atomic rename.)
 type Ingester struct {
-	mailboxPath string
-	lockPath    string
-	interval    time.Duration
-	pollers     []Poller
+	spoolDir string
+	interval time.Duration
+	pollers  []Poller
 }
 
-// NewIngester builds an ingester for mailboxPath that polls its sources every
-// interval.
-func NewIngester(mailboxPath string, interval time.Duration, pollers ...Poller) *Ingester {
+// NewIngester builds an ingester for the spool at spoolDir that polls its sources
+// every interval.
+func NewIngester(spoolDir string, interval time.Duration, pollers ...Poller) *Ingester {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
 	return &Ingester{
-		mailboxPath: mailboxPath,
-		lockPath:    mailboxPath + ".lock",
-		interval:    interval,
-		pollers:     pollers,
+		spoolDir: spoolDir,
+		interval: interval,
+		pollers:  pollers,
 	}
 }
 
-// Run acquires the writer lock (parking until it is free or ctx is done), opens
-// the mailbox, does one synchronous poll immediately (so events that arrived
-// while the host was down surface within milliseconds, not after a full poll
-// interval), then polls on the interval until ctx is cancelled.
+// Run opens the spool, acquires the writer lock (parking until it is free or ctx
+// is done), does one synchronous poll immediately (so events that arrived while
+// the host was down surface within milliseconds, not after a full poll interval),
+// then polls on the interval until ctx is cancelled.
 func (in *Ingester) Run(ctx context.Context) error {
-	lock, err := acquireWriterLock(ctx, in.lockPath, in.interval)
+	sp, err := mailbox.Open(in.spoolDir)
+	if err != nil {
+		return err
+	}
+
+	// The lock lives inside the (now-created) spool dir so the writer-lock
+	// acquisition never races the spool-dir creation.
+	lock, err := acquireWriterLock(ctx, filepath.Join(in.spoolDir, "lock"), in.interval)
 	if err != nil {
 		return err
 	}
 	defer lock.release()
 
-	_, hadMeta, err := mailbox.LastMeta(in.mailboxPath)
+	fresh := !sp.HasCursors()
+	cur, err := sp.ReadCursors()
 	if err != nil {
 		return err
 	}
-
-	w, err := mailbox.OpenWriter(in.mailboxPath)
-	if err != nil {
-		return err
-	}
-	defer w.Close()
-
-	cur := w.Cursors()
-	if !hadMeta {
-		// Fresh mailbox: start each source at its current end, like `wait`'s
-		// default-EOF, so we don't ingest the whole historical backlog.
+	if fresh {
+		// Fresh spool: start each source at its current end, like `wait`'s
+		// default behavior, so we don't ingest the whole historical backlog.
 		for _, p := range in.pollers {
 			if s, ok := p.(seeder); ok {
 				s.SeedEOF(&cur)
 			}
 		}
-		if _, err := w.Checkpoint(cur); err != nil {
+		if err := sp.WriteCursors(cur); err != nil {
 			return err
 		}
 	}
 
-	in.pollOnce(w, &cur) // cold-start catch-up before the ticker
+	in.pollOnce(sp, &cur) // cold-start catch-up before the ticker
 
 	t := time.NewTicker(in.interval)
 	defer t.Stop()
@@ -97,7 +97,7 @@ func (in *Ingester) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.C:
-			in.pollOnce(w, &cur)
+			in.pollOnce(sp, &cur)
 		}
 	}
 }
@@ -105,13 +105,13 @@ func (in *Ingester) Run(ctx context.Context) error {
 // pollOnce runs every source once and checkpoints the cursors if any advanced.
 // A poller error is skipped (best effort): one source failing must not stall the
 // others or kill the ingester.
-func (in *Ingester) pollOnce(w *mailbox.Writer, cur *mailbox.Cursors) {
+func (in *Ingester) pollOnce(sp *mailbox.Spool, cur *mailbox.Cursors) {
 	before := *cur
 	for _, p := range in.pollers {
-		_ = p.Poll(w, cur)
+		_ = p.Poll(sp, cur)
 	}
 	if *cur != before {
-		_, _ = w.Checkpoint(*cur)
+		_ = sp.WriteCursors(*cur)
 	}
 }
 
@@ -163,12 +163,12 @@ func (p *ircPoller) Name() string { return mailbox.SourceIRC }
 
 func (p *ircPoller) SeedEOF(c *mailbox.Cursors) {
 	if fi, err := os.Stat(p.logPath); err == nil {
-		c.IRCLogOffset = fi.Size()
+		c.IRCOffset = fi.Size()
 	}
 }
 
-func (p *ircPoller) Poll(w *mailbox.Writer, c *mailbox.Cursors) error {
-	lines, next, err := irc.ReadIrcLog(p.logPath, c.IRCLogOffset, 1000)
+func (p *ircPoller) Poll(s *mailbox.Spool, c *mailbox.Cursors) error {
+	lines, next, err := irc.ReadIrcLog(p.logPath, c.IRCOffset, 1000)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // log not created yet
@@ -180,13 +180,20 @@ func (p *ircPoller) Poll(w *mailbox.Writer, c *mailbox.Cursors) error {
 			continue
 		}
 		target, nick, text := parseIRCLine(line)
-		if _, err := w.Append(mailbox.Event{
-			Source: mailbox.SourceIRC, Target: target, Nick: nick, Text: text,
+		// Subject is the line text (capped/sanitized by Message.Encode); the body
+		// keeps the full raw line so nothing is lost on a parse miss.
+		if _, err := s.Deliver(&mailbox.Message{
+			Source:  mailbox.SourceIRC,
+			From:    nick,
+			To:      target,
+			Kind:    "message",
+			Subject: text,
+			Body:    line,
 		}); err != nil {
 			return err
 		}
 	}
-	c.IRCLogOffset = next
+	c.IRCOffset = next
 	return nil
 }
 
@@ -209,17 +216,18 @@ func parseIRCLine(line string) (target, nick, text string) {
 	return target, nick, text
 }
 
-// IngestParams resolves the mailbox path, IRC log path, and fam-scoped match
-// nick for the agent owning workDir, so a host can construct an Ingester.
-func IngestParams(workDir string) (mailboxPath, ircLogPath, matchNick string, err error) {
+// IngestParams resolves the spool directory, IRC log path, and fam-scoped match
+// nick for the agent owning workDir, so a host can construct an Ingester. The
+// spool lives at $FAMROOT/spool/$agent (proposal-event-delivery-redesign §3).
+func IngestParams(workDir string) (spoolDir, ircLogPath, matchNick string, err error) {
 	rf, err := famconfig.ResolveFam(workDir)
 	if err != nil {
 		return "", "", "", err
 	}
-	mailboxPath = filepath.Join(rf.FamDir, rf.Actor+".mailbox")
+	spoolDir = filepath.Join(rf.FamDir, "spool", rf.Actor)
 	ircLogPath = filepath.Join(rf.WorktreeRoot, "scratch", "irc", rf.Actor, "log")
 	matchNick = famconfig.FamScopedNick(rf.Actor, rf.Slug)
-	return mailboxPath, ircLogPath, matchNick, nil
+	return spoolDir, ircLogPath, matchNick, nil
 }
 
 // WaitIngestEnabled reports whether the mailbox ingester (the source `botfam

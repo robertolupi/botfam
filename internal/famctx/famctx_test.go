@@ -344,8 +344,8 @@ harness = "claude-code"
 	if ctx.ScopedNick != "bob-mf" {
 		t.Errorf("expected ScopedNick bob-mf, got %q", ctx.ScopedNick)
 	}
-	if ctx.MailboxPath != filepath.Join(famDir, "bob.mailbox") {
-		t.Errorf("expected MailboxPath under famDir, got %q", ctx.MailboxPath)
+	if ctx.SpoolDir != filepath.Join(famDir, "spool", "bob") {
+		t.Errorf("expected SpoolDir under famDir, got %q", ctx.SpoolDir)
 	}
 	if ctx.IRCLogDir != filepath.Join(bobDir, "scratch", "irc", "bob") {
 		t.Errorf("expected IRCLogDir under worktree root, got %q", ctx.IRCLogDir)
