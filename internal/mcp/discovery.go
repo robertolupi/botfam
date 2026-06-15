@@ -272,7 +272,8 @@ func resolveWorkDir(ctx context.Context, cwd, pwd string, requestRoots rootsRequ
 
 // famResolvable reports whether dir sits inside a fam (a fam.toml is reachable).
 func famResolvable(dir string) bool {
-	return famconfig.FamSlug(famconfig.LoadFamRegistry(dir)) != ""
+	c, err := famctx.Resolve(context.Background(), famctx.Inputs{WorkDir: dir, Mode: famctx.ModeLocate})
+	return err == nil && c.Slug != ""
 }
 
 // fileURIToPath turns a file:// root URI into a local path, or "" if not a

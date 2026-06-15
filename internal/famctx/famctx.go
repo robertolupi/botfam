@@ -134,6 +134,53 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 	var resolveErr error
 
 	for i, dir := range candidateDirs {
+		var cSource Source = sources[i]
+
+		if inputs.Mode == ModeAgentRuntime {
+			resolved, err := famconfig.ResolveFam(dir)
+			if err != nil {
+				if resolveErr == nil {
+					resolveErr = err
+				}
+				continue
+			}
+
+			// Validate COLLAB_ACTOR conflict if environment override is present
+			envActor := lookupEnv(inputs.Env, "COLLAB_ACTOR")
+			if envActor != "" && resolved.Actor != "" && envActor != resolved.Actor {
+				return Context{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, resolved.Actor)
+			}
+
+			var rootSet []string
+			var rootSetID string
+			if info, err := (famconfig.Resolver{WorkDir: dir, Env: inputs.Env}).Resolve(); err == nil {
+				rootSet = info.RootSet
+				rootSetID = info.RootSetID
+			}
+
+			c := Context{
+				FamDir:       resolved.FamDir,
+				FamTOMLPath:  filepath.Join(resolved.FamDir, "fam.toml"),
+				Name:         resolved.Name,
+				Slug:         resolved.Slug,
+				Registry:     resolved.Registry,
+				WorktreeRoot: resolved.WorktreeRoot,
+				WorkDir:      dir,
+				Source:       cSource,
+				Actor:        resolved.Actor,
+				ActorRole:    RoleAgent,
+				Agent:        resolved.Agent,
+				Flags:        resolved.Flags,
+				MailboxPath:  filepath.Join(resolved.FamDir, resolved.Actor+".mailbox"),
+				IRCLogDir:    filepath.Join(resolved.WorktreeRoot, "scratch", "irc", resolved.Actor),
+				TokenPath:    resolved.TokenPath,
+				ScopedNick:   famconfig.FamScopedNick(resolved.Actor, resolved.Slug),
+				RootSet:      rootSet,
+				RootSetID:    rootSetID,
+			}
+			return c, nil
+		}
+
 		// Use famconfig.Resolver to resolve walk-up/legacy root and actor name
 		info, err := (famconfig.Resolver{WorkDir: dir, Env: inputs.Env}).Resolve()
 		if err != nil {
@@ -152,14 +199,13 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 		var reg famconfig.Registry
 		var role ActorRole = RoleUnknown
 		var agent famconfig.AgentConfig
-		var cSource Source = sources[i]
 		var cFamTOMLPath string
 
 		if fileExists(tomlPath) {
 			cFamTOMLPath = tomlPath
 			reg, err = famconfig.ReadRegistry(tomlPath)
 			if err != nil {
-				if inputs.Mode == ModeAgentRuntime || inputs.Mode == ModeRegistry {
+				if inputs.Mode == ModeRegistry {
 					return Context{}, fmt.Errorf("no readable fam.toml at %s: run `botfam setup`; if it persists, report to your operator (%v)", tomlPath, err)
 				}
 				if resolveErr == nil {
@@ -207,16 +253,6 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				}
 				if gitRoot != "" && gitRoot == evalRoot {
 					role = RoleBase
-				}
-			}
-
-			// Enforce ModeAgentRuntime checks
-			if inputs.Mode == ModeAgentRuntime {
-				if isUser {
-					return Context{}, fmt.Errorf("worktree %q is a [user.%s] (human) checkout; the botfam runtime only runs in [agent.<name>] worktrees — report to your operator", actor, actor)
-				}
-				if !isAgent {
-					return Context{}, fmt.Errorf("worktree %q is not a declared [agent.<name>] in %s (base checkout or unknown agent); the runtime refuses to start here — report to your operator", actor, tomlPath)
 				}
 			}
 
