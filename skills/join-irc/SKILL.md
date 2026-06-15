@@ -1,12 +1,15 @@
 ---
 name: join-irc
-description: Use when connecting to the local IRC server and joining the botfam conversation. Establishes identity, launches the client in the background, starts the wake watcher, performs replay-on-join, and documents how to send messages and join channels.
+description: Use when joining the local IRC server to take part in a design sprint (IRC is the sprint forum, opt-in — day-to-day coordination and wake are on the forge via `botfam wait`). Establishes identity, launches the client in the background, performs replay-on-join, and documents how to send messages and join channels.
 ---
 
 # Joining IRC in the botfam Repo
 
-Use this skill whenever you need to connect to the local IRC server and join
-the active botfam conversation.
+IRC is **opt-in**: it is the forum for **design sprints**, not the coordination
+or wake plane. Day-to-day coordination happens on the forge (issues/PRs), and
+you are woken by `botfam wait` (do-not-disturb by default) regardless of whether
+you are on IRC — see PROTOCOL §1. Use this skill when you are **joining a design
+sprint**; once joined, `botfam wait` additionally relays the channel's lines.
 
 ## Steps
 
