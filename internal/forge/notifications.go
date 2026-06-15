@@ -13,15 +13,11 @@ type Notification struct {
 	Unread  bool   `json:"unread"`
 	Updated string `json:"updated_at"` // RFC-3339; the event time, not the subject's creation
 	Subject struct {
-		Title string `json:"title"`
-		URL   string `json:"url"`
-		// LatestCommentURL is the API URL of the comment that triggered this
-		// notification, when the event is a comment (empty for a bare open). It is
-		// what lets the ingester tell a new comment from the issue/PR itself.
-		LatestCommentURL string `json:"latest_comment_url"`
-		HTMLURL          string `json:"html_url"`
-		Type             string `json:"type"` // Issue | Pull | Commit | Repository
-		State            string `json:"state"`
+		Title   string `json:"title"`
+		URL     string `json:"url"`
+		HTMLURL string `json:"html_url"`
+		Type    string `json:"type"` // Issue | Pull | Commit | Repository
+		State   string `json:"state"`
 	} `json:"subject"`
 	Repository struct {
 		FullName string `json:"full_name"`
@@ -85,37 +81,6 @@ type SubjectContent struct {
 	User    struct {
 		Login string `json:"login"`
 	} `json:"user"`
-}
-
-// Comment is a single issue/PR comment fetched from a notification's
-// latest_comment_url, so the ingester can surface who said what without a second
-// hop at read time.
-type Comment struct {
-	Body    string `json:"body"`
-	HTMLURL string `json:"html_url"`
-	User    struct {
-		Login string `json:"login"`
-	} `json:"user"`
-}
-
-// GetComment fetches a single comment by its API URL (a notification's
-// latest_comment_url), re-basing the path onto this client's BaseURL/token like
-// GetSubject so it works regardless of the forge's configured ROOT_URL.
-func (c *Client) GetComment(apiURL string) (*Comment, error) {
-	const marker = "/api/v1/"
-	i := strings.Index(apiURL, marker)
-	if i < 0 {
-		return nil, fmt.Errorf("unexpected comment url %q", apiURL)
-	}
-	b, err := c.request("GET", apiURL[i+len(marker):], nil)
-	if err != nil {
-		return nil, err
-	}
-	var cm Comment
-	if err := json.Unmarshal(b, &cm); err != nil {
-		return nil, fmt.Errorf("decode comment: %w", err)
-	}
-	return &cm, nil
 }
 
 // GetSubject fetches the content behind a notification's subject API URL so the

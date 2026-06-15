@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mailbox"
@@ -23,18 +24,18 @@ type fakeForge struct {
 	listErr   error
 	markErr   error
 	neverAck  bool
-	// Canned enrichment content keyed by API URL; empty maps make GetSubject/
-	// GetComment return (nil, nil) so the poller falls back to a URL-only body.
-	subjects map[string]*forge.SubjectContent
-	comments map[string]*forge.Comment
+	// Canned enrichment content; empty maps make GetIssueTimeline/GetSubject
+	// return nothing so the poller falls back to a URL-only body.
+	timelines map[int][]*forge.TimelineEvent // keyed by issue/PR number
+	subjects  map[string]*forge.SubjectContent
+}
+
+func (f *fakeForge) GetIssueTimeline(issueNum int) ([]*forge.TimelineEvent, error) {
+	return f.timelines[issueNum], nil
 }
 
 func (f *fakeForge) GetSubject(apiURL string) (*forge.SubjectContent, error) {
 	return f.subjects[apiURL], nil
-}
-
-func (f *fakeForge) GetComment(apiURL string) (*forge.Comment, error) {
-	return f.comments[apiURL], nil
 }
 
 func (f *fakeForge) ListUnreadRepoNotifications(repo string) ([]forge.Notification, error) {
@@ -248,40 +249,40 @@ func TestForgePollerDrainCapErrors(t *testing.T) {
 	}
 }
 
-func TestForgePollerEnrichesCommentAndSubject(t *testing.T) {
-	// One comment event (latest_comment_url set) and one bare open event.
-	var comment, opened forge.Notification
-	comment.ID = 1
-	comment.Repository.FullName = "botfam/botfam"
-	comment.Subject.Type = "Issue"
-	comment.Subject.Title = "Test issue 2"
-	comment.Subject.State = "open"
-	comment.Subject.URL = "http://gitea:3000/api/v1/repos/botfam/botfam/issues/350"
-	comment.Subject.HTMLURL = "http://gitea:3000/botfam/botfam/issues/350"
-	comment.Subject.LatestCommentURL = "http://gitea:3000/api/v1/repos/botfam/botfam/issues/comments/9"
-	comment.Updated = "2026-06-15T20:57:27Z"
+func TestForgePollerNamesTimelineEvents(t *testing.T) {
+	mkNotif := func(id int64, num int, title, state string) forge.Notification {
+		var n forge.Notification
+		n.ID = id
+		n.Repository.FullName = "botfam/botfam"
+		n.Subject.Type = "Issue"
+		n.Subject.Title = title
+		n.Subject.State = state
+		n.Subject.URL = fmt.Sprintf("http://gitea:3000/api/v1/repos/botfam/botfam/issues/%d", num)
+		n.Subject.HTMLURL = fmt.Sprintf("http://gitea:3000/botfam/botfam/issues/%d", num)
+		return n
+	}
+	user := func(login string) *struct {
+		Login string `json:"login"`
+	} {
+		return &struct {
+			Login string `json:"login"`
+		}{Login: login}
+	}
 
-	opened.ID = 2
-	opened.Repository.FullName = "botfam/botfam"
-	opened.Subject.Type = "Issue"
-	opened.Subject.Title = "Fresh issue"
-	opened.Subject.State = "open"
-	opened.Subject.URL = "http://gitea:3000/api/v1/repos/botfam/botfam/issues/351"
-	opened.Subject.HTMLURL = "http://gitea:3000/botfam/botfam/issues/351"
+	commented := mkNotif(1, 350, "Test issue 2", "open")
+	closed := mkNotif(2, 350, "Test issue 2", "closed")
 
 	fc := &fakeForge{
 		repo:   "botfam/botfam",
-		unread: []forge.Notification{comment, opened},
-		comments: map[string]*forge.Comment{
-			comment.Subject.LatestCommentURL: {
-				Body:    "please run date",
-				HTMLURL: "http://gitea:3000/botfam/botfam/issues/350#issuecomment-9",
-				User:    struct{ Login string `json:"login"` }{Login: "rlupi"},
+		unread: []forge.Notification{commented, closed},
+		timelines: map[int][]*forge.TimelineEvent{
+			// drainOnce delivers both in one pass; the newest event of the thread
+			// is whatever we put last. The two notifications share issue 350, so we
+			// only key once — the close happened most recently.
+			350: {
+				{Type: "comment", User: user("rlupi"), Body: "please run date", CreatedAt: "2026-06-15T20:57:27Z"},
+				{Type: "close", User: user("rlupi"), CreatedAt: "2026-06-15T21:11:19Z"},
 			},
-		},
-		subjects: map[string]*forge.SubjectContent{
-			opened.Subject.URL: {Title: "Fresh issue", Body: "do the thing", State: "open",
-				User: struct{ Login string `json:"login"` }{Login: "rlupi"}},
 		},
 	}
 
@@ -290,28 +291,51 @@ func TestForgePollerEnrichesCommentAndSubject(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("delivered %d messages, want 2", len(msgs))
 	}
-	c, o := msgs[0], msgs[1]
+	// Both notifications resolve to the same thread whose newest event is the
+	// close — so both name "closed", not "commented" (the bug we're fixing: a
+	// close must not render as a stale comment).
+	for i, m := range msgs {
+		if m.Kind != "issue_closed" {
+			t.Errorf("msg %d Kind = %q, want issue_closed", i, m.Kind)
+		}
+		if m.From != "rlupi" {
+			t.Errorf("msg %d From = %q, want rlupi", i, m.From)
+		}
+		if !strings.Contains(m.Body, "rlupi closed") {
+			t.Errorf("msg %d body should name the close event: %q", i, m.Body)
+		}
+		if m.Subject != `issue_closed: botfam/botfam#350 "Test issue 2"` {
+			t.Errorf("msg %d Subject = %q", i, m.Subject)
+		}
+		if m.Date.Format(time.RFC3339) != "2026-06-15T21:11:19Z" {
+			t.Errorf("msg %d Date = %v, want the close event time", i, m.Date)
+		}
+	}
+}
 
-	if c.Kind != "issue_comment" {
-		t.Errorf("comment Kind = %q, want issue_comment", c.Kind)
-	}
-	if c.From != "rlupi" {
-		t.Errorf("comment From = %q, want rlupi", c.From)
-	}
-	if !strings.Contains(c.Body, "please run date") {
-		t.Errorf("comment body missing comment text: %q", c.Body)
-	}
-	if c.Subject != `issue_comment: botfam/botfam#350 "Test issue 2"` {
-		t.Errorf("comment Subject = %q", c.Subject)
-	}
-	if c.Date.IsZero() {
-		t.Error("comment Date should be the event time, not zero")
-	}
+func TestForgePollerFallsBackToSubject(t *testing.T) {
+	// No timeline for the thread → fall back to the issue/PR subject body.
+	var n forge.Notification
+	n.ID = 1
+	n.Repository.FullName = "botfam/botfam"
+	n.Subject.Type = "Issue"
+	n.Subject.Title = "Fresh issue"
+	n.Subject.State = "open"
+	n.Subject.URL = "http://gitea:3000/api/v1/repos/botfam/botfam/issues/351"
+	n.Subject.HTMLURL = "http://gitea:3000/botfam/botfam/issues/351"
 
-	if o.Kind != "issue" {
-		t.Errorf("open Kind = %q, want issue", o.Kind)
+	sc := &forge.SubjectContent{Title: "Fresh issue", Body: "do the thing", State: "open"}
+	sc.User.Login = "rlupi"
+	fc := &fakeForge{
+		repo:     "botfam/botfam",
+		unread:   []forge.Notification{n},
+		subjects: map[string]*forge.SubjectContent{n.Subject.URL: sc},
 	}
-	if !strings.Contains(o.Body, "do the thing") || o.From != "rlupi" {
-		t.Errorf("open event not enriched from subject: From=%q body=%q", o.From, o.Body)
+	msgs := forgeMessages(t, drainOnce(t, fc))
+	if len(msgs) != 1 {
+		t.Fatalf("delivered %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Kind != "issue" || msgs[0].From != "rlupi" || !strings.Contains(msgs[0].Body, "do the thing") {
+		t.Errorf("subject fallback not applied: Kind=%q From=%q body=%q", msgs[0].Kind, msgs[0].From, msgs[0].Body)
 	}
 }

@@ -19,12 +19,14 @@ type ForgeClient interface {
 	// repo (owner/repo).
 	ListUnreadRepoNotifications(repo string) ([]forge.Notification, error)
 	MarkNotificationRead(id int64) error
-	// GetSubject fetches the issue/PR behind a notification subject (title, body,
-	// state, author); GetComment fetches the comment at a notification's
-	// latest_comment_url. Both enrich the spool body so `botfam wait` shows what
-	// happened — best-effort: the poller falls back to a URL-only body on error.
+	// GetIssueTimeline returns the thread's typed event log (comment/close/
+	// reopen/merge/review/…); its newest entry is what triggered the notification,
+	// so the poller can name the actual event + actor without remembering prior
+	// state. GetSubject fetches the issue/PR itself as a fallback. Both enrich the
+	// spool body so `botfam wait` shows what happened — best-effort: the poller
+	// falls back to a URL-only body on error.
+	GetIssueTimeline(issueNum int) ([]*forge.TimelineEvent, error)
 	GetSubject(apiURL string) (*forge.SubjectContent, error)
-	GetComment(apiURL string) (*forge.Comment, error)
 }
 
 // maxForgeDrainPages caps a single Poll's drain so a thread that refuses to ack
@@ -87,12 +89,16 @@ func (p *forgePoller) Poll(s *mailbox.Spool, _ *mailbox.Cursors) error {
 }
 
 // buildMessage turns a forge notification into a spool message, enriched so
-// `botfam wait` shows what happened — not just that something did. It refines
-// the Kind (issue vs issue_comment / pull vs pull_comment / pull_review), sets
-// From to the actor who acted, dates the message at the event time, and fills
-// the body with the actual content (comment or issue/PR body + state). The
-// content fetch is best-effort: on any error it falls back to the URL-only body
-// (the prior behavior), so enrichment never breaks at-least-once delivery.
+// `botfam wait` shows *what happened* — not just that something did. A single
+// notification is a stateless snapshot (current state + latest comment), so it
+// can't name the transition; the issue/PR *timeline* can. We read the newest
+// timeline event (the one that triggered the notification) and name it: Kind
+// `issue_closed` / `pull_merged` / `issue_comment` / `pull_review` …, From the
+// actor who acted, Date the event time, and Body the event line (+ comment/
+// review text). Best-effort: on any error or a non-issue/PR subject it falls
+// back to GetSubject, then to a bare URL (the prior behavior), so enrichment
+// never breaks at-least-once delivery. (Surfacing *every* event since last seen
+// — not just the newest — needs a per-thread watermark; that's #169.)
 func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 	url := n.Subject.HTMLURL
 	if url == "" {
@@ -102,26 +108,28 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 	kind := base
 	from := mailbox.SourceForge
 	body := ""
+	date := parseForgeTime(n.Updated)
 
-	// A comment event carries latest_comment_url; fetch the comment so the body
-	// shows who said what.
-	if cu := n.Subject.LatestCommentURL; cu != "" {
-		if c, err := p.client.GetComment(cu); err == nil && c != nil && c.Body != "" {
-			kind = base + "_comment"
-			if c.User.Login != "" {
-				from = c.User.Login
+	if num := numberFromURL(url); num > 0 {
+		if evs, err := p.client.GetIssueTimeline(int(num)); err == nil && len(evs) > 0 {
+			ev := evs[len(evs)-1] // timeline is ascending; newest triggered this
+			suffix, verb := timelineVerb(ev.Type)
+			kind = base + "_" + suffix
+			if ev.User != nil && ev.User.Login != "" {
+				from = ev.User.Login
 			}
-			link := c.HTMLURL
-			if link == "" {
-				link = url
+			if t := parseForgeTime(ev.CreatedAt); !t.IsZero() {
+				date = t
 			}
-			body = fmt.Sprintf("%s commented on %s [%s]:\n\n%s\n\n%s",
-				from, url, n.Subject.State, c.Body, link)
+			body = fmt.Sprintf("%s %s %s [%s]", from, verb, url, n.Subject.State)
+			if txt := strings.TrimSpace(ev.Body); txt != "" {
+				body += ":\n\n" + txt
+			}
+			body += "\n\n" + url
 		}
 	}
 
-	// Otherwise (or if the comment fetch failed) fetch the issue/PR itself.
-	if body == "" {
+	if body == "" { // timeline unavailable (no number, error, empty, non-issue/PR)
 		if sc, err := p.client.GetSubject(n.Subject.URL); err == nil && sc != nil {
 			if sc.User.Login != "" {
 				from = sc.User.Login
@@ -141,7 +149,35 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 		Kind:    kind,
 		Subject: forgeSubject(n, url, kind),
 		Body:    body,
-		Date:    parseForgeTime(n.Updated),
+		Date:    date,
+	}
+}
+
+// timelineVerb maps a Gitea timeline event type to a (Kind suffix, human verb)
+// so the message names the actual event. Unknown types pass through verbatim so
+// a new Gitea event type degrades to something legible rather than vanishing.
+func timelineVerb(t string) (kind, verb string) {
+	switch t {
+	case "comment":
+		return "comment", "commented on"
+	case "close":
+		return "closed", "closed"
+	case "reopen":
+		return "reopened", "reopened"
+	case "merge_pull":
+		return "merged", "merged"
+	case "review":
+		return "review", "reviewed"
+	case "review_request":
+		return "review_requested", "requested review on"
+	case "label", "unlabel":
+		return "labeled", "updated labels on"
+	case "assignees":
+		return "assigned", "updated assignees on"
+	case "pull_push":
+		return "pushed", "pushed to"
+	default:
+		return t, t + " on"
 	}
 }
 
