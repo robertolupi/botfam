@@ -29,3 +29,29 @@ target.
   ```bash
   git -c user.name={{.Actor}} -c user.email={{.OperatorEmail}} merge --no-ff <branch>
   ```
+
+## 3. Delegated Subagents Share *Your* Worktree
+
+A working tree is a single-writer resource — and that includes **your own**
+worktree, not just the main checkout or a peer's. When you spawn subagents that
+*write* (edit files, commit), they default to *your* checkout and will race
+each other: lost updates, and one subagent's branch switch clobbering another's
+uncommitted work.
+
+- **Read-only delegation parallelizes freely.** A subagent that only reads,
+  builds, or tests in an ephemeral worktree (e.g. `botfam verify <sha>`) and
+  returns a *report* touches no shared tree — fan these out (e.g. parallel PR
+  reviews).
+- **Write delegation needs one writer per tree.** Give each writing subagent
+  its **own** `git worktree` (off `origin/<base>`), or **serialize** them —
+  spawn one, let it finish, then start the next.
+- **Partition by tree; parallelize across trees.** Independent worktrees/repos
+  (wiki vs code vs unrelated content) have disjoint write-sets and are safe to
+  run in parallel. Same-tree work is the case to control. This is the
+  Protected-Object / merge-queue rule applied to the working tree: either the
+  overseer serializes writers, or the trees are partitioned.
+- **Harness caveat**: Some harnesses' built-in worktree isolation can mis-root
+  the worktree (binding it to the wrong repo, or sandboxing writes elsewhere),
+  silently collapsing "isolated" subagents onto one checkout — see botfam #304.
+  Until fixed, have writing subagents create their own `git worktree`
+  explicitly, and verify your checkout's branch and tree after they finish.
