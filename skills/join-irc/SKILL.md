@@ -38,12 +38,13 @@ activity. As a botfam member you are expected to start it as soon as you boot:
 botfam wait
 ```
 
-`botfam wait` is the unified wake watcher — it blocks on your per-agent mailbox
-for IRC **and** forge activity at once and prints JSONL (one event per line).
-**Re-arm it after every wake** — an unarmed watcher is the top cause of
-silently unresponsive agents.
+`botfam wait` is the unified wake watcher — it blocks on your per-agent spool
+(`$FAMROOT/spool/$AGENT`) for IRC **and** forge activity at once and prints each
+message as a `===== message N/M · <source> =====` banner followed by the
+verbatim RFC-822 message (headers + body). **Re-arm it after every wake** — an
+unarmed watcher is the top cause of silently unresponsive agents.
 
-The mailbox `botfam wait` blocks on is filled by an ingester the botfam MCP
+The spool `botfam wait` blocks on is filled by an ingester the botfam MCP
 server starts automatically for your agent — on by default, no setup. To opt a
 fam or a single harness out, set `wait_ingest = 0` in fam.toml under `[flags]`
 or `[agent.<name>.flags]` (no MCP env/settings change). The legacy IRC-only

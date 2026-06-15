@@ -1,12 +1,15 @@
 package cli
 
 import (
-	"encoding/json"
+	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/robertolupi/botfam/internal/mailbox"
@@ -36,6 +39,8 @@ func NewWaitCmd() *cobra.Command {
 		spoolDir string
 		workDir  string
 		pollMs   int
+		replay   bool
+		sinceStr string
 	)
 	c := &cobra.Command{
 		Use:   "wait",
@@ -43,9 +48,10 @@ func NewWaitCmd() *cobra.Command {
 		Long: `Block on this agent's spool ($FAMROOT/spool/$AGENT) and print the messages
 that wake it, then exit — the single wake point unifying irc-wait and forge-wait.
 
-It drains the spool's new/ box (undelivered messages), prints each, and moves it
-to cur/ — the move is the ack. Output is JSONL: one object per surfaced message,
-then a trailing {"source":"meta", ...} summary line.
+It drains the spool's new/ box (all of it, preserving cross-source coalescing),
+prints each message verbatim (RFC-822 headers + body) under a banner, and moves
+it to cur/ — the move is the ack. With --replay it instead dumps the cur/ replay
+buffer (no ack) for gap recovery.
 
 This command only reads the spool; a background ingester (hosted in the botfam
 MCP server) is what fills it.`,
@@ -66,7 +72,23 @@ MCP server) is what fills it.`,
 				}
 				spoolDir = p
 			}
-			return runWait(cmd.OutOrStdout(), spoolDir, parseSources(sources),
+			var since time.Duration
+			if sinceStr != "" {
+				d, err := time.ParseDuration(sinceStr)
+				if err != nil {
+					return fmt.Errorf("--since: %w", err)
+				}
+				since = d
+			}
+
+			out, errw := cmd.OutOrStdout(), cmd.ErrOrStderr()
+			if replay {
+				return runReplay(out, errw, spoolDir, parseSources(sources), since)
+			}
+			// Cancellable: SIGINT/SIGTERM unblock the wait loop cleanly (#276).
+			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return runWait(ctx, out, errw, spoolDir, parseSources(sources),
 				time.Duration(timeoutS)*time.Second, time.Duration(pollMs)*time.Millisecond)
 		},
 	}
@@ -75,6 +97,8 @@ MCP server) is what fills it.`,
 	c.Flags().StringVar(&spoolDir, "spool", "", "path to the spool directory (overrides fam resolution)")
 	c.Flags().StringVar(&workDir, "work-dir", ".", "worktree to resolve the agent/spool from")
 	c.Flags().IntVar(&pollMs, "poll-ms", 500, "poll interval in milliseconds")
+	c.Flags().BoolVar(&replay, "replay", false, "dump the cur/ replay buffer (read messages) instead of waiting; no ack")
+	c.Flags().StringVar(&sinceStr, "since", "", "with --replay, only messages newer than this duration ago (e.g. 1h); default all")
 	return c
 }
 
@@ -88,53 +112,50 @@ func parseSources(s string) map[string]bool {
 	return m
 }
 
-// waitSummary is the trailing line every `wait` invocation emits (even on
-// timeout) so the caller can tell why it returned and re-arm cleanly.
-type waitSummary struct {
-	Source   string `json:"source"` // always "meta"
-	Woke     string `json:"woke,omitempty"`
-	Count    int    `json:"count"`
-	TimedOut bool   `json:"timed_out"`
+// drainedMsg is one message read from the spool: the verbatim file bytes plus
+// the parsed Source (for the banner / source filter) and its spool entry.
+type drainedMsg struct {
+	entry  mailbox.Entry
+	raw    []byte
+	source string
 }
 
-// emittedMessage is the JSON projection of a surfaced spool message. The body is
-// included (unlike the future notification nudge) — `botfam wait` returns the
-// whole message so the agent can act without a second lookup.
-type emittedMessage struct {
-	Source  string `json:"source"`
-	From    string `json:"from,omitempty"`
-	To      string `json:"to,omitempty"`
-	Subject string `json:"subject,omitempty"`
-	Kind    string `json:"kind,omitempty"`
-	Seq     int64  `json:"seq,omitempty"`
-	Date    string `json:"date,omitempty"`
-	Body    string `json:"body,omitempty"`
+// readEntry reads an entry's verbatim bytes and parses its Source. A parse error
+// is non-fatal (the raw bytes are still emitted) — a message is never dropped to
+// a header parse miss.
+func readEntry(sp *mailbox.Spool, e mailbox.Entry) (drainedMsg, error) {
+	raw, err := os.ReadFile(e.Path())
+	if err != nil {
+		return drainedMsg{}, err
+	}
+	d := drainedMsg{entry: e, raw: raw}
+	if m, err := mailbox.ParseMessage(raw); err == nil {
+		d.source = m.Source
+	}
+	return d, nil
 }
 
-func runWait(out io.Writer, dir string, want map[string]bool, timeout, poll time.Duration) error {
+// runWait blocks until new/ has at least one message in a wanted source, drains
+// all of new/ (acking each to cur/), and prints the wanted messages under
+// banners. It fails fast if the spool itself is absent (#263 — a missing spool
+// is a misconfiguration, never something to wait on forever), and unblocks on
+// ctx cancellation or the timeout.
+func runWait(ctx context.Context, out, errw io.Writer, spoolDir string, want map[string]bool, timeout, poll time.Duration) error {
+	if err := ensureSpool(spoolDir); err != nil {
+		return err
+	}
+	sp, err := mailbox.Open(spoolDir)
+	if err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
+	fmt.Fprintf(errw, "wait: watching %s (timeout=%s, poll=%s)\n",
+		filepath.Join(sp.Dir(), "new"), durOrBlock(timeout), poll)
+
 	var deadline time.Time
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
 	}
 	expired := func() bool { return timeout > 0 && !time.Now().Before(deadline) }
-
-	// Wait for the spool to exist (it may not yet on a cold start).
-	for {
-		if _, err := os.Stat(dir); err == nil {
-			break
-		} else if !os.IsNotExist(err) {
-			return fmt.Errorf("wait: %w", err)
-		}
-		if expired() {
-			return emitSummary(out, waitSummary{TimedOut: true})
-		}
-		time.Sleep(poll)
-	}
-
-	sp, err := mailbox.Open(dir)
-	if err != nil {
-		return fmt.Errorf("wait: %w", err)
-	}
 
 	for {
 		ents, err := sp.ListNew()
@@ -142,66 +163,164 @@ func runWait(out io.Writer, dir string, want map[string]bool, timeout, poll time
 			return fmt.Errorf("wait: %w", err)
 		}
 
-		var surfaced []*mailbox.Message
+		// Read the whole new/ snapshot first (no ack yet) so a crash mid-drain
+		// re-delivers the batch rather than losing it (at-least-once).
+		var shown []drainedMsg
 		for _, e := range ents {
-			m, rerr := sp.Read(e)
+			d, rerr := readEntry(sp, e)
 			if rerr != nil {
-				_ = sp.Ack(e) // drop an unreadable message rather than spin on it
+				_ = sp.Ack(e) // unreadable: drop rather than spin on it
 				continue
 			}
-			// Ack (move new/->cur/) every drained message so coalesced traffic is
-			// consumed in one wake; only the wanted sources are surfaced.
-			if err := sp.Ack(e); err != nil {
-				return fmt.Errorf("wait: %w", err)
+			if len(want) == 0 || want[d.source] {
+				shown = append(shown, d)
 			}
-			if len(want) > 0 && !want[m.Source] {
-				continue
-			}
-			surfaced = append(surfaced, m)
 		}
 
-		if len(surfaced) > 0 {
-			for _, m := range surfaced {
-				if err := emitMessage(out, m); err != nil {
-					return err
+		if len(shown) > 0 {
+			// Write all surfaced output BEFORE acking: if a write fails (broken
+			// stdout / errored redirect), return without acking so the batch stays
+			// in new/ and the next wait re-delivers it — at-least-once, dup over
+			// loss. Acking before a confirmed write would silently drop the wake.
+			for i, d := range shown {
+				if err := emitBanner(out, i+1, len(shown), d.source, d.raw); err != nil {
+					return fmt.Errorf("wait: %w", err)
 				}
 			}
-			return emitSummary(out, waitSummary{Woke: surfaced[0].Source, Count: len(surfaced)})
+			if _, err := fmt.Fprintf(out, "===== woke: %d %s =====\n", len(shown), plural(len(shown))); err != nil {
+				return fmt.Errorf("wait: %w", err)
+			}
+			// Output is durably written: now consume the whole drained batch
+			// (wanted + filtered-out) so coalesced traffic isn't re-surfaced.
+			for _, e := range ents {
+				if err := sp.Ack(e); err != nil {
+					return fmt.Errorf("wait: %w", err)
+				}
+			}
+			return nil
 		}
+		// Nothing wanted surfaced: consume any filtered-out drained entries (no
+		// output was written, so there's nothing to lose) and keep waiting.
+		for _, e := range ents {
+			_ = sp.Ack(e)
+		}
+
 		if expired() {
-			return emitSummary(out, waitSummary{TimedOut: true})
+			if _, err := fmt.Fprintln(out, "===== timed out ====="); err != nil {
+				return fmt.Errorf("wait: %w", err)
+			}
+			return nil
 		}
-		time.Sleep(poll)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
 	}
 }
 
-func emitMessage(out io.Writer, m *mailbox.Message) error {
-	em := emittedMessage{
-		Source:  m.Source,
-		From:    m.From,
-		To:      m.To,
-		Subject: m.Subject,
-		Kind:    m.Kind,
-		Seq:     m.Seq,
-		Body:    m.Body,
-	}
-	if !m.Date.IsZero() {
-		em.Date = m.Date.UTC().Format(time.RFC3339)
-	}
-	b, err := json.Marshal(em)
-	if err != nil {
+// runReplay dumps the cur/ replay buffer (already-acked messages) for gap
+// recovery: it never acks and never blocks. With since > 0 it skips messages
+// whose file is older than that.
+func runReplay(out, errw io.Writer, spoolDir string, want map[string]bool, since time.Duration) error {
+	if err := ensureSpool(spoolDir); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(out, "%s\n", b)
-	return err
+	sp, err := mailbox.Open(spoolDir)
+	if err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
+	fmt.Fprintf(errw, "wait: replaying %s\n", filepath.Join(sp.Dir(), "cur"))
+
+	ents, err := sp.ListCur()
+	if err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
+	var cutoff time.Time
+	if since > 0 {
+		cutoff = time.Now().Add(-since)
+	}
+
+	var shown []drainedMsg
+	for _, e := range ents {
+		if !cutoff.IsZero() {
+			fi, err := os.Stat(e.Path())
+			if err != nil || fi.ModTime().Before(cutoff) {
+				continue
+			}
+		}
+		d, rerr := readEntry(sp, e)
+		if rerr != nil {
+			continue
+		}
+		if len(want) == 0 || want[d.source] {
+			shown = append(shown, d)
+		}
+	}
+	for i, d := range shown {
+		if err := emitBanner(out, i+1, len(shown), d.source, d.raw); err != nil {
+			return fmt.Errorf("wait: %w", err)
+		}
+	}
+	if _, err := fmt.Fprintf(out, "===== replayed: %d %s =====\n", len(shown), plural(len(shown))); err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
+	return nil
 }
 
-func emitSummary(out io.Writer, s waitSummary) error {
-	s.Source = "meta"
-	b, err := json.Marshal(s)
+// ensureSpool fail-fasts (#263) when the spool directory is absent: that is a
+// misconfiguration (wrong fam, ingester never ran), not something to block on.
+// The error names the resolved absolute path so the silent-hang class is
+// diagnosable at a glance.
+func ensureSpool(spoolDir string) error {
+	abs, err := filepath.Abs(spoolDir)
 	if err != nil {
+		abs = spoolDir
+	}
+	if _, err := os.Stat(abs); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("wait: spool does not exist: %s (is the ingester running for this agent? check the wait_ingest flag)", abs)
+		}
+		return fmt.Errorf("wait: %w", err)
+	}
+	return nil
+}
+
+// emitBanner prints one message: a legible banner naming its position and source,
+// then the verbatim spool bytes (with a guaranteed trailing newline + blank
+// separator so concatenated messages stay readable). It returns the first write
+// error so the caller can refuse to ack output that never reached the consumer.
+func emitBanner(out io.Writer, n, total int, source string, raw []byte) error {
+	if source == "" {
+		source = "?"
+	}
+	if _, err := fmt.Fprintf(out, "===== message %d/%d · %s =====\n", n, total, source); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(out, "%s\n", b)
-	return err
+	if _, err := out.Write(raw); err != nil {
+		return err
+	}
+	if !bytes.HasSuffix(raw, []byte("\n")) {
+		if _, err := fmt.Fprintln(out); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "message"
+	}
+	return "messages"
+}
+
+func durOrBlock(d time.Duration) string {
+	if d <= 0 {
+		return "block"
+	}
+	return d.String()
 }

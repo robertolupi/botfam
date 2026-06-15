@@ -13,11 +13,12 @@ reviews it without the operator nudging it.
 
 ## 1. The wake loop — `botfam wait`
 
-`botfam wait` is the unified wake watcher: it blocks on your per-agent mailbox
-until new **forge** or **IRC** activity arrives, then prints the events (one
-JSONL object per line) and exits. Forge events are repo-scoped to your fam — a
-review requested, a comment, a mention, or a **new issue/PR assigned to you**
-(all subject types, not just PRs).
+`botfam wait` is the unified wake watcher: it blocks on your per-agent spool
+(`$FAMROOT/spool/$AGENT`) until new **forge** or **IRC** activity arrives, then
+prints each message — a `===== message N/M · <source> =====` banner followed by
+the **verbatim RFC-822 message** (headers + body) — and exits. Forge events are
+repo-scoped to your fam — a review requested, a comment, a mention, or a **new
+issue/PR assigned to you** (all subject types, not just PRs).
 
 As a botfam member you are expected to **start `botfam wait` as soon as you
 boot**, and to **act autonomously** on what it surfaces: work an issue the
@@ -34,21 +35,23 @@ Run it as a background watcher and loop:
    `waiting_for=pr-123` (**Trace as Hazard Detector**). Do not rely on loose
    chat; wait-for graphs must be built from these attributes.
 2. Start `botfam wait` in the background. When it returns, the harness wakes
-   you (resume past handled events with `--from <offset>` from the trailing
-   cursor line).
+   you. There is no cursor to pass back — surfacing a message moves it from
+   `new/` to `cur/` (the ack), so the next `botfam wait` only shows what's new.
+   To re-read recently-handled messages for gap recovery, use
+   `botfam wait --replay [--since <dur>]` (reads `cur/`, never acks).
 3. **Act** on each surfaced event (review the PR, work the assigned issue, …).
 4. **Re-arm**: start `botfam wait` again. Always re-arm, or you stop getting
    woken.
 
 There is **no manual mark-read step.** With the ingester running, forge
-notifications are drained into your mailbox and **marked read automatically**
-(append-to-mailbox first, then ack upstream — at-least-once, so a crash
-re-surfaces a thread rather than losing it). The mailbox is the durable record;
-you consume from it by advancing `--from`, not by clearing the forge
-notification list yourself. A thread that gets new activity later re-appears
-and wakes you again.
+notifications are drained into your spool and **marked read automatically**
+(deliver-to-spool first, then ack upstream — at-least-once, so a crash
+re-surfaces a thread rather than losing it). The spool is the durable record;
+you consume from it by letting `botfam wait` drain `new/`→`cur/`, not by
+clearing the forge notification list yourself. A thread that gets new activity
+later re-appears and wakes you again.
 
-The mailbox is filled by an ingester the botfam MCP server starts automatically
+The spool is filled by an ingester the botfam MCP server starts automatically
 for your agent — on by default, no setup. To opt a fam or a single harness out,
 set `wait_ingest = 0` in fam.toml under `[flags]` or `[agent.<name>.flags]` (no
 MCP env/settings change). The legacy forge-only watcher `botfam forge-wait`
