@@ -264,9 +264,14 @@ windows fill, we design for failure recovery rather than trying to recover
 in-place:
 
 - **Let It Crash**: Do not write complex, defensive error-recovery code inside
-  an agent. If context-fullness (computed out-of-band by the harness)
-  approaches the crash threshold, or if the agent stalls/loops, let it
-  crash/exit immediately.
+  an agent. Similarly, for agent actions: if the botfam harness or tooling
+  itself fails to work, and you are not acting as a designated debugger (e.g.,
+  developing a feature or explicitly instructed by the operator), do not search
+  for or implement ad-hoc workarounds. Instead, let the execution fail, make
+  the problem visible by filing a Gitea issue, and wait for human instruction.
+  If context-fullness (computed out-of-band by the harness) approaches the
+  crash threshold, or if the agent stalls or loops, let it crash/exit
+  immediately.
 - **Handover Snapshot**: Before crashing (or at regular progress milestones),
   the agent must write a compact **Handover Snapshot** to the control plane
   (the Gitea forge issue or PR comment). The snapshot's distilled reasoning
