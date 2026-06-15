@@ -7,10 +7,7 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
-// Resolver and RootInfo now live in the dependency-free famconfig leaf (#311) so
-// internal/cli and internal/mcp resolve fam identity without importing each
-// other. These aliases keep the cli command builders unaffected by the move.
-type Resolver = famconfig.Resolver
+type GitResolver = famconfig.GitResolver
 
 type RootInfo = famconfig.RootInfo
 

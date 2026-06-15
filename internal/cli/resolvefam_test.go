@@ -164,7 +164,7 @@ func TestResolverBareNameActor(t *testing.T) {
 
 	agy := filepath.Join(famDir, "agy")
 	gitInit(t, agy)
-	info, err := (Resolver{WorkDir: agy}).Resolve()
+	info, err := (GitResolver{}).ResolveIdentity(agy)
 	if err != nil {
 		t.Fatalf("Resolve(agy): %v", err)
 	}
@@ -174,7 +174,7 @@ func TestResolverBareNameActor(t *testing.T) {
 
 	main := filepath.Join(famDir, "main")
 	gitInit(t, main)
-	info2, err := (Resolver{WorkDir: main}).Resolve()
+	info2, err := (GitResolver{}).ResolveIdentity(main)
 	if err != nil {
 		t.Fatalf("Resolve(main): %v", err)
 	}
@@ -225,7 +225,7 @@ func TestForgeIdentityParity(t *testing.T) {
 		t.Fatalf("forge.NewClient: %v", err)
 	}
 	// 3. whoami / orient.
-	info, err := (Resolver{WorkDir: wt}).Resolve()
+	info, err := (GitResolver{}).ResolveIdentity(wt)
 	if err != nil {
 		t.Fatalf("Resolver.Resolve: %v", err)
 	}
@@ -264,8 +264,8 @@ func TestForgeIdentityParity(t *testing.T) {
 	if rf.Name != info.Name {
 		t.Errorf("fam name diverges: ResolveFam=%q Resolver=%q", rf.Name, info.Name)
 	}
-	if info.Root != rf.FamDir {
-		t.Errorf("root/famDir diverges: Resolver.Root=%q ResolveFam.FamDir=%q", info.Root, rf.FamDir)
+	if info.FamDir != rf.FamDir {
+		t.Errorf("root/famDir diverges: Resolver.FamDir=%q ResolveFam.FamDir=%q", info.FamDir, rf.FamDir)
 	}
 }
 
@@ -280,7 +280,7 @@ func TestResolverLegacyNoFamTOML(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	info, err := (Resolver{WorkDir: wt}).Resolve()
+	info, err := (GitResolver{}).ResolveIdentity(wt)
 	if err != nil {
 		t.Fatalf("Resolve with no fam.toml should fall back, got: %v", err)
 	}

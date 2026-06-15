@@ -72,15 +72,41 @@ type Registry struct {
 	WikiProjections []string `toml:"wiki_projections,omitempty"`
 }
 
+type ActorRole string
+
+const (
+	RoleAgent   ActorRole = "agent"
+	RoleUser    ActorRole = "user"
+	RoleBase    ActorRole = "base"
+	RoleUnknown ActorRole = "unknown"
+)
+
+type Source string
+
+const (
+	SourceWorkDir     Source = "work_dir"
+	SourceClientRoots Source = "client_roots"
+	SourcePWD         Source = "pwd"
+	SourceGitRoots    Source = "git_roots"
+)
+
+// FamIdentity holds the core identity components for a resolved family.
+type FamIdentity struct {
+	FamDir      string
+	FamTOMLPath string
+	Name        string
+	Actor       string
+	ActorRole   ActorRole
+	Source      Source
+}
+
 // ResolvedFam is the single canonical identity for a worktree, resolved from
 // `<fam-dir>/fam.toml`. Every consumer (forge client, discovery health,
 // channels, pass-files) goes through ResolveFam so they cannot disagree about
 // which fam/token/url applies — the root cause of #183.
 type ResolvedFam struct {
-	Name         string
+	FamIdentity
 	Slug         string
-	Actor        string
-	FamDir       string
 	WorktreeRoot string
 	ForgeURL     string
 	Repository   string
@@ -239,10 +265,15 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 	}
 
 	return ResolvedFam{
-		Name:         reg.Name,
+		FamIdentity: FamIdentity{
+			FamDir:      famDir,
+			FamTOMLPath: tomlPath,
+			Name:        reg.Name,
+			Actor:       actor,
+			ActorRole:   RoleAgent,
+			Source:      SourceWorkDir,
+		},
 		Slug:         FamSlug(reg),
-		Actor:        actor,
-		FamDir:       famDir,
 		WorktreeRoot: root,
 		ForgeURL:     reg.ForgeURL,
 		Repository:   reg.Repository,

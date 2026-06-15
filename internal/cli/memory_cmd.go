@@ -36,7 +36,7 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 	if err != nil {
 		return nil, "", "", err
 	}
-	info, err := (Resolver{WorkDir: wd}).Resolve()
+	info, err := (GitResolver{}).ResolveIdentity(wd)
 	if err != nil {
 		return nil, "", "", err
 	}

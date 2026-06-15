@@ -2,7 +2,9 @@ package cli
 
 import (
 	"io"
+	"path/filepath"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/spf13/cobra"
 )
@@ -48,5 +50,8 @@ func NewWorktreeCmd() *cobra.Command {
 
 // EnsureMembership re-exports provision.EnsureMembership.
 func EnsureMembership(root string, workDir string) error {
-	return provision.EnsureMembership(root, workDir)
+	return provision.EnsureMembership(famconfig.FamIdentity{
+		FamDir:      root,
+		FamTOMLPath: filepath.Join(root, "fam.toml"),
+	}, workDir)
 }

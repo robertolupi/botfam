@@ -103,7 +103,7 @@ func TestDefaultHistoryPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotInfo, err := (Resolver{WorkDir: wt, Env: []string{"HOME=" + homeDir}}).Resolve()
+	gotInfo, err := (GitResolver{Env: []string{"HOME=" + homeDir}}).ResolveIdentity(wt)
 	if err != nil {
 		t.Fatal(err)
 	}

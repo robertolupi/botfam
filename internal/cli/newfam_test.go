@@ -45,11 +45,11 @@ func TestNewfam(t *testing.T) {
 	}
 
 	// Check if the registry fam.toml was written correctly
-	info, err := (Resolver{WorkDir: mainDir}).Resolve()
+	info, err := (GitResolver{}).ResolveIdentity(mainDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	regPath := filepath.Join(info.Root, "fam.toml")
+	regPath := filepath.Join(info.FamDir, "fam.toml")
 	reg, err := ReadRegistry(regPath)
 	if err != nil {
 		t.Fatalf("failed to read registry at %s: %v", regPath, err)

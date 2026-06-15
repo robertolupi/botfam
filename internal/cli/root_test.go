@@ -73,28 +73,26 @@ func TestResolver(t *testing.T) {
 	}
 
 	// Resolve from main checkout directory
-	rMain := Resolver{
-		WorkDir: gitDir,
-		Env:     []string{},
+	rMain := GitResolver{
+		Env: []string{},
 	}
-	infoMain, err := rMain.Resolve()
+	infoMain, err := rMain.ResolveIdentity(gitDir)
 	if err != nil {
 		t.Fatalf("resolve from main checkout failed: %v", err)
 	}
 
 	// Resolve from worktree directory
-	rWt := Resolver{
-		WorkDir: wtDir,
-		Env:     []string{},
+	rWt := GitResolver{
+		Env: []string{},
 	}
-	infoWt, err := rWt.Resolve()
+	infoWt, err := rWt.ResolveIdentity(wtDir)
 	if err != nil {
 		t.Fatalf("resolve from worktree failed: %v", err)
 	}
 
 	// Assert they both resolved to the same root path!
-	if infoMain.Root != infoWt.Root {
-		t.Errorf("split brain! main resolved to %q, worktree resolved to %q", infoMain.Root, infoWt.Root)
+	if infoMain.FamDir != infoWt.FamDir {
+		t.Errorf("split brain! main resolved to %q, worktree resolved to %q", infoMain.FamDir, infoWt.FamDir)
 	}
 
 	// Assert actor parsing only happened in the worktree
@@ -112,11 +110,10 @@ func TestResolver(t *testing.T) {
 	}
 
 	// Resolve from the nested subdirectory inside the worktree
-	rSub := Resolver{
-		WorkDir: nestedSubDir,
-		Env:     []string{},
+	rSub := GitResolver{
+		Env: []string{},
 	}
-	infoSub, err := rSub.Resolve()
+	infoSub, err := rSub.ResolveIdentity(nestedSubDir)
 	if err != nil {
 		t.Fatalf("resolve from nested subdirectory failed: %v", err)
 	}
@@ -134,11 +131,10 @@ func TestResolver(t *testing.T) {
 	if err := os.Mkdir(nonGitDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	rNonGit := Resolver{
-		WorkDir: nonGitDir,
-		Env:     []string{},
+	rNonGit := GitResolver{
+		Env: []string{},
 	}
-	_, err = rNonGit.Resolve()
+	_, err = rNonGit.ResolveIdentity(nonGitDir)
 	if err == nil {
 		t.Fatal("expected resolve outside git repository to fail")
 	}
@@ -171,16 +167,15 @@ harness = "test-harness"
 	}
 	initGitRepo(t, wtBobDir)
 
-	rUnified := Resolver{
-		WorkDir: wtBobDir,
-		Env:     []string{},
+	rUnified := GitResolver{
+		Env: []string{},
 	}
-	infoUnified, err := rUnified.Resolve()
+	infoUnified, err := rUnified.ResolveIdentity(wtBobDir)
 	if err != nil {
 		t.Fatalf("resolve under unified layout failed: %v", err)
 	}
-	if infoUnified.Root != unifiedDir {
-		t.Errorf("expected unified root %q, got %q", unifiedDir, infoUnified.Root)
+	if infoUnified.FamDir != unifiedDir {
+		t.Errorf("expected unified root %q, got %q", unifiedDir, infoUnified.FamDir)
 	}
 	if infoUnified.Name != "my-unified-fam" {
 		t.Errorf("expected unified name %q, got %q", "my-unified-fam", infoUnified.Name)

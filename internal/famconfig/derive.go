@@ -20,11 +20,11 @@ const (
 // Registry, which makes every derivation below fall back to the legacy
 // botfam defaults.
 func LoadFamRegistry(workDir string) Registry {
-	info, err := (Resolver{WorkDir: workDir}).Resolve()
-	if err != nil || info.Root == "" {
+	info, err := (GitResolver{}).ResolveIdentity(workDir)
+	if err != nil || info.FamDir == "" {
 		return Registry{}
 	}
-	reg, err := ReadRegistry(filepath.Join(info.Root, "fam.toml"))
+	reg, err := ReadRegistry(filepath.Join(info.FamDir, "fam.toml"))
 	if err != nil {
 		return Registry{}
 	}
@@ -89,15 +89,15 @@ func FamLedgerDirName(reg Registry) string {
 // root can be resolved; a missing or unreadable fam.toml only drops the
 // name derivation back to the legacy ledger directory.
 func DefaultHistoryPath(workDir string) (string, error) {
-	info, err := (Resolver{WorkDir: workDir}).Resolve()
-	if err != nil || info.Root == "" {
+	info, err := (GitResolver{}).ResolveIdentity(workDir)
+	if err != nil || info.FamDir == "" {
 		return "", errors.New("family root could not be resolved")
 	}
-	reg, err := ReadRegistry(filepath.Join(info.Root, "fam.toml"))
+	reg, err := ReadRegistry(filepath.Join(info.FamDir, "fam.toml"))
 	if err != nil {
 		reg = Registry{}
 	}
-	return filepath.Join(info.Root, FamLedgerDirName(reg), "history.jsonl"), nil
+	return filepath.Join(info.FamDir, FamLedgerDirName(reg), "history.jsonl"), nil
 }
 
 // DefaultPassFile returns the IRC pass file to use for actor when --pass-file

@@ -2,18 +2,20 @@ package provision
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
-// EnsureMembership verifies that workDir's repository belongs to the fam rooted
-// at root. The fam.toml must be readable and one of the repo's git object
+// EnsureMembership verifies that workDir's repository belongs to the fam.
+// The fam.toml must be readable and one of the repo's git object
 // stores must be registered in object_stores — else membership is refused.
-func EnsureMembership(root string, workDir string) error {
-	reg, err := famconfig.ReadRegistry(filepath.Join(root, "fam.toml"))
+func EnsureMembership(id famconfig.FamIdentity, workDir string) error {
+	if id.FamTOMLPath == "" {
+		return fmt.Errorf("no fam.toml resolved; refusing unverified membership")
+	}
+	reg, err := famconfig.ReadRegistry(id.FamTOMLPath)
 	if err != nil {
-		return fmt.Errorf("fam root %s is not set up or readable; run botfam setup", root)
+		return fmt.Errorf("fam root %s is not set up or readable; run botfam setup", id.FamDir)
 	}
 	stores, err := famconfig.GitObjectStores(workDir)
 	if err != nil {
@@ -22,7 +24,7 @@ func EnsureMembership(root string, workDir string) error {
 	if hasAny(reg.ObjectStores, stores) {
 		return nil
 	}
-	return fmt.Errorf("repo object store is not registered for fam root %s; refusing unverified membership", root)
+	return fmt.Errorf("repo object store is not registered for fam root %s; refusing unverified membership", id.FamDir)
 }
 
 func hasAny(a, b []string) bool {
