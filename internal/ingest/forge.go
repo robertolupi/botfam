@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
@@ -18,6 +19,12 @@ type ForgeClient interface {
 	// repo (owner/repo).
 	ListUnreadRepoNotifications(repo string) ([]forge.Notification, error)
 	MarkNotificationRead(id int64) error
+	// GetSubject fetches the issue/PR behind a notification subject (title, body,
+	// state, author); GetComment fetches the comment at a notification's
+	// latest_comment_url. Both enrich the spool body so `botfam wait` shows what
+	// happened — best-effort: the poller falls back to a URL-only body on error.
+	GetSubject(apiURL string) (*forge.SubjectContent, error)
+	GetComment(apiURL string) (*forge.Comment, error)
 }
 
 // maxForgeDrainPages caps a single Poll's drain so a thread that refuses to ack
@@ -64,18 +71,8 @@ func (p *forgePoller) Poll(s *mailbox.Spool, _ *mailbox.Cursors) error {
 		// Ascending id for a stable surfacing order within a page.
 		sort.Slice(ns, func(i, j int) bool { return ns[i].ID < ns[j].ID })
 		for _, n := range ns {
-			url := n.Subject.HTMLURL
-			if url == "" {
-				url = n.Subject.URL
-			}
 			// Spool deliver first, then ack: at-least-once, never lose a thread.
-			if _, err := s.Deliver(&mailbox.Message{
-				Source:  mailbox.SourceForge,
-				From:    mailbox.SourceForge,
-				Kind:    strings.ToLower(n.Subject.Type),
-				Subject: forgeSubject(n, url),
-				Body:    url,
-			}); err != nil {
+			if _, err := s.Deliver(p.buildMessage(n)); err != nil {
 				return err
 			}
 			if err := p.client.MarkNotificationRead(n.ID); err != nil {
@@ -89,17 +86,96 @@ func (p *forgePoller) Poll(s *mailbox.Spool, _ *mailbox.Cursors) error {
 	return fmt.Errorf("forge: repo %s unread did not drain after %d pages (notification ack failing?)", p.repo, maxForgeDrainPages)
 }
 
+// buildMessage turns a forge notification into a spool message, enriched so
+// `botfam wait` shows what happened — not just that something did. It refines
+// the Kind (issue vs issue_comment / pull vs pull_comment / pull_review), sets
+// From to the actor who acted, dates the message at the event time, and fills
+// the body with the actual content (comment or issue/PR body + state). The
+// content fetch is best-effort: on any error it falls back to the URL-only body
+// (the prior behavior), so enrichment never breaks at-least-once delivery.
+func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
+	url := n.Subject.HTMLURL
+	if url == "" {
+		url = n.Subject.URL
+	}
+	base := strings.ToLower(n.Subject.Type) // issue | pull | commit | repository
+	kind := base
+	from := mailbox.SourceForge
+	body := ""
+
+	// A comment event carries latest_comment_url; fetch the comment so the body
+	// shows who said what.
+	if cu := n.Subject.LatestCommentURL; cu != "" {
+		if c, err := p.client.GetComment(cu); err == nil && c != nil && c.Body != "" {
+			kind = base + "_comment"
+			if c.User.Login != "" {
+				from = c.User.Login
+			}
+			link := c.HTMLURL
+			if link == "" {
+				link = url
+			}
+			body = fmt.Sprintf("%s commented on %s [%s]:\n\n%s\n\n%s",
+				from, url, n.Subject.State, c.Body, link)
+		}
+	}
+
+	// Otherwise (or if the comment fetch failed) fetch the issue/PR itself.
+	if body == "" {
+		if sc, err := p.client.GetSubject(n.Subject.URL); err == nil && sc != nil {
+			if sc.User.Login != "" {
+				from = sc.User.Login
+			}
+			body = fmt.Sprintf("%s by %s [%s]:\n\n%s\n\n%s",
+				capitalize(base), from, sc.State, strings.TrimSpace(sc.Body), url)
+		}
+	}
+
+	if body == "" {
+		body = url // last-resort fallback: bare URL, as before
+	}
+
+	return &mailbox.Message{
+		Source:  mailbox.SourceForge,
+		From:    from,
+		Kind:    kind,
+		Subject: forgeSubject(n, url, kind),
+		Body:    body,
+		Date:    parseForgeTime(n.Updated),
+	}
+}
+
 // forgeSubject renders the §4 per-source Subject template for a forge
 // notification: `<kind>: <repo>#<number> "<title>"`. The artifact ref is a fine
-// priority cue; the URL stays in the body, never the Subject (proposal §4).
-func forgeSubject(n forge.Notification, url string) string {
+// priority cue; the URL/content stay in the body, never the Subject (proposal §4).
+func forgeSubject(n forge.Notification, url, kind string) string {
 	repo := n.Repository.FullName
 	num := numberFromURL(url)
-	kind := strings.ToLower(n.Subject.Type)
 	if num > 0 {
 		return fmt.Sprintf("%s: %s#%d %q", kind, repo, num, n.Subject.Title)
 	}
 	return fmt.Sprintf("%s: %s %q", kind, repo, n.Subject.Title)
+}
+
+// capitalize upper-cases the first byte of an ASCII word (issue -> Issue).
+func capitalize(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// parseForgeTime parses a forge RFC-3339 timestamp, returning the zero time on
+// failure (Message.Encode then defaults Date to now).
+func parseForgeTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // numberFromURL extracts the trailing issue/PR number from a subject URL, or 0.

@@ -23,6 +23,18 @@ type fakeForge struct {
 	listErr   error
 	markErr   error
 	neverAck  bool
+	// Canned enrichment content keyed by API URL; empty maps make GetSubject/
+	// GetComment return (nil, nil) so the poller falls back to a URL-only body.
+	subjects map[string]*forge.SubjectContent
+	comments map[string]*forge.Comment
+}
+
+func (f *fakeForge) GetSubject(apiURL string) (*forge.SubjectContent, error) {
+	return f.subjects[apiURL], nil
+}
+
+func (f *fakeForge) GetComment(apiURL string) (*forge.Comment, error) {
+	return f.comments[apiURL], nil
 }
 
 func (f *fakeForge) ListUnreadRepoNotifications(repo string) ([]forge.Notification, error) {
@@ -233,5 +245,73 @@ func TestForgePollerDrainCapErrors(t *testing.T) {
 	}
 	if fc.listCalls != 3 {
 		t.Errorf("list calls = %d, want 3 (the cap)", fc.listCalls)
+	}
+}
+
+func TestForgePollerEnrichesCommentAndSubject(t *testing.T) {
+	// One comment event (latest_comment_url set) and one bare open event.
+	var comment, opened forge.Notification
+	comment.ID = 1
+	comment.Repository.FullName = "botfam/botfam"
+	comment.Subject.Type = "Issue"
+	comment.Subject.Title = "Test issue 2"
+	comment.Subject.State = "open"
+	comment.Subject.URL = "http://gitea:3000/api/v1/repos/botfam/botfam/issues/350"
+	comment.Subject.HTMLURL = "http://gitea:3000/botfam/botfam/issues/350"
+	comment.Subject.LatestCommentURL = "http://gitea:3000/api/v1/repos/botfam/botfam/issues/comments/9"
+	comment.Updated = "2026-06-15T20:57:27Z"
+
+	opened.ID = 2
+	opened.Repository.FullName = "botfam/botfam"
+	opened.Subject.Type = "Issue"
+	opened.Subject.Title = "Fresh issue"
+	opened.Subject.State = "open"
+	opened.Subject.URL = "http://gitea:3000/api/v1/repos/botfam/botfam/issues/351"
+	opened.Subject.HTMLURL = "http://gitea:3000/botfam/botfam/issues/351"
+
+	fc := &fakeForge{
+		repo:   "botfam/botfam",
+		unread: []forge.Notification{comment, opened},
+		comments: map[string]*forge.Comment{
+			comment.Subject.LatestCommentURL: {
+				Body:    "please run date",
+				HTMLURL: "http://gitea:3000/botfam/botfam/issues/350#issuecomment-9",
+				User:    struct{ Login string `json:"login"` }{Login: "rlupi"},
+			},
+		},
+		subjects: map[string]*forge.SubjectContent{
+			opened.Subject.URL: {Title: "Fresh issue", Body: "do the thing", State: "open",
+				User: struct{ Login string `json:"login"` }{Login: "rlupi"}},
+		},
+	}
+
+	spoolDir := drainOnce(t, fc)
+	msgs := forgeMessages(t, spoolDir)
+	if len(msgs) != 2 {
+		t.Fatalf("delivered %d messages, want 2", len(msgs))
+	}
+	c, o := msgs[0], msgs[1]
+
+	if c.Kind != "issue_comment" {
+		t.Errorf("comment Kind = %q, want issue_comment", c.Kind)
+	}
+	if c.From != "rlupi" {
+		t.Errorf("comment From = %q, want rlupi", c.From)
+	}
+	if !strings.Contains(c.Body, "please run date") {
+		t.Errorf("comment body missing comment text: %q", c.Body)
+	}
+	if c.Subject != `issue_comment: botfam/botfam#350 "Test issue 2"` {
+		t.Errorf("comment Subject = %q", c.Subject)
+	}
+	if c.Date.IsZero() {
+		t.Error("comment Date should be the event time, not zero")
+	}
+
+	if o.Kind != "issue" {
+		t.Errorf("open Kind = %q, want issue", o.Kind)
+	}
+	if !strings.Contains(o.Body, "do the thing") || o.From != "rlupi" {
+		t.Errorf("open event not enriched from subject: From=%q body=%q", o.From, o.Body)
 	}
 }
