@@ -22,6 +22,7 @@ import (
 
 	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/ingest"
 	"github.com/robertolupi/botfam/internal/irc"
 	"github.com/robertolupi/botfam/internal/provision"
@@ -198,7 +199,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			wd = "."
 			via = "default"
 		}
-		d := buildDiscoveryData(wd)
+		d := buildDiscoveryData(ctx, wd)
 		d.resolvedVia = via
 		body, err := renderIndexJSON(d)
 		if err != nil {
@@ -212,28 +213,40 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	if workDir == "" || (workDir == "." && err == nil && cwd == "/") {
 		workDir = s.resolveDiscoveryWorkDir(ctx)
 	}
-	info, err := (famconfig.Resolver{WorkDir: workDir, Env: os.Environ()}).Resolve()
+	var clientRoots []string
+	if s.mcpSrv != nil {
+		if res, err := s.requestRootsWithCache(ctx); err == nil && res != nil {
+			for _, r := range res.Roots {
+				if p := fileURIToPath(r.URI); p != "" {
+					clientRoots = append(clientRoots, p)
+				}
+			}
+		}
+	}
+
+	c, err := famctx.Resolve(ctx, famctx.Inputs{
+		WorkDir:     workDir,
+		Env:         os.Environ(),
+		PWD:         os.Getenv("PWD"),
+		ClientRoots: clientRoots,
+		Mode:        famctx.ModeRegistry,
+		CallActor:   argString(args, "actor"),
+	})
 	if err != nil {
 		return nil, err
 	}
-	// Fail-closed serve gate (#191, proposal-unified-fam-config §4.6): if this is
-	// a migrated fam (a fam.toml exists at the fam dir) but ResolveFam refuses the
-	// worktree — the base/main checkout, a [user.<name>] human checkout, or an
-	// unknown agent — quarantine it. Every tool except orient (handled above) is
-	// refused and pointed at botfam:///problem, where the agent is told to report
-	// to its operator rather than self-fix. An un-migrated fam (no fam.toml) is not
-	// gated: it falls back to the legacy content-hash membership check, which is
-	// also what proves membership for a fam ResolveFam doesn't yet understand.
-	if _, rfErr := famconfig.ResolveFam(workDir); rfErr != nil {
-		if famTomlPresent(workDir) {
-			return nil, quarantineError(rfErr)
+
+	// Fail-closed serve gate
+	if c.ActorRole != famctx.RoleAgent {
+		if famTomlPresent(c.WorkDir) {
+			return nil, quarantineError(fmt.Errorf("strict agent runtime required: resolved role is %s (actor: %s)", c.ActorRole, c.Actor))
 		}
-		if err := provision.EnsureMembership(info.Root, workDir); err != nil {
+		if err := provision.EnsureMembership(c.FamDir, c.WorkDir); err != nil {
 			return nil, err
 		}
 	}
 
-	actor, err := s.resolveActor(argString(args, "actor"), info.Actor)
+	actor, err := s.resolveActor(argString(args, "actor"), c.Actor)
 	if err != nil {
 		if !identityOptionalTools[name] || !errors.Is(err, errIdentityRequired) {
 			return nil, err
@@ -351,7 +364,10 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		// appear under the fam-scoped nick (claude-botfam) in the log — match on
 		// the scoped nick or the wait wakes on its own traffic (#137; matches the
 		// `botfam irc-wait` CLI fix).
-		matchNick := famconfig.FamScopedNick(actor, famconfig.FamSlug(famconfig.LoadFamRegistry(absWorkDir)))
+		matchNick := c.ScopedNick
+		if actor != c.Actor {
+			matchNick = famconfig.FamScopedNick(actor, c.Slug)
+		}
 		lines, nextOffset, timedOut, err := irc.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
 		if err != nil {
 			return nil, err
@@ -363,16 +379,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	}
 
 	if name == "irc_replay" {
-		absWorkDir, err := filepath.Abs(workDir)
-		if err != nil {
-			return nil, err
-		}
-
-		historyPath, err := famconfig.DefaultHistoryPath(absWorkDir)
-		if err != nil {
-			return nil, err
-		}
-
+		historyPath := filepath.Join(c.FamDir, famconfig.FamLedgerDirName(c.Registry), "history.jsonl")
 		since := argString(args, "since")
 		channelsStr := argString(args, "channels")
 
@@ -387,8 +394,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			}
 		} else {
 			// default to main + ccrep channels
-			reg := famconfig.LoadFamRegistry(absWorkDir)
-			mainChan, ccrepChan := famconfig.FamChannels(reg)
+			mainChan, ccrepChan := famconfig.FamChannels(c.Registry)
 			if mainChan != "" {
 				filterChans = append(filterChans, mainChan)
 			}
@@ -397,7 +403,10 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			}
 		}
 
-		matchNick := famconfig.FamScopedNick(actor, famconfig.FamSlug(famconfig.LoadFamRegistry(absWorkDir)))
+		matchNick := c.ScopedNick
+		if actor != c.Actor {
+			matchNick = famconfig.FamScopedNick(actor, c.Slug)
+		}
 		lines, nextOffset, err := irc.ReplayHistory(historyPath, actor, matchNick, since, filterChans)
 		if err != nil {
 			return nil, err
@@ -627,7 +636,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	add("botfam:///wiki", "botfam live wiki index", "text/markdown")
 	add("botfam:///wiki/index.json", "botfam live wiki index (json)", "application/json")
 	// Fam-declared wiki projections (#120), advertised from the local registry.
-	for _, proj := range buildDiscoveryData(".").projections {
+	for _, proj := range buildDiscoveryData(context.Background(), ".").projections {
 		add("botfam:///"+proj.Name, "botfam projection: "+proj.Name, "text/markdown")
 		add("botfam:///"+proj.Name+".json", "botfam projection: "+proj.Name, "application/json")
 	}
@@ -653,9 +662,8 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	} else {
 		// Named authority. Resolve the local family first so a name/slug that
 		// refers to this fam never scans ~/.botfam.
-		localInfo, errInfo := (famconfig.Resolver{WorkDir: cwd}).Resolve()
-		localReg := famconfig.LoadFamRegistry(cwd)
-		if (errInfo == nil && u.Host == localInfo.Name) || u.Host == localReg.Name || u.Host == localReg.Slug {
+		localCtx, errCtx := famctx.Resolve(ctx, famctx.Inputs{WorkDir: cwd, Mode: famctx.ModeLocate})
+		if (errCtx == nil && u.Host == localCtx.Name) || u.Host == localCtx.Registry.Name || u.Host == localCtx.Slug {
 			targetRepoRoot = localRepoRoot
 		} else {
 			// Cross-fam: search ~/.botfam/ for a family matching name or slug.
@@ -699,7 +707,7 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	if targetRepoRoot != localRepoRoot {
 		dataWorkDir = targetRepoRoot
 	}
-	d := buildDiscoveryData(dataWorkDir)
+	d := buildDiscoveryData(ctx, dataWorkDir)
 	d.resolvedVia = resolvedVia
 
 	path := filepath.Clean(u.Path)
@@ -724,7 +732,7 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		// Quarantine diagnosis (#191 §4.6): the ResolveFam result for this fam's
 		// work dir, rendered as a "report to your operator" surface. Healthy
 		// worktrees get a "no problem" body so the resource is never misleading.
-		return problemResource(req.Params.URI, dataWorkDir, path == "/problem.json")
+		return problemResource(ctx, req.Params.URI, dataWorkDir, path == "/problem.json")
 	case path == "/tools":
 		return markdownResource(req.Params.URI, renderToolsMarkdown(s)), nil
 	case path == "/tools.json":
