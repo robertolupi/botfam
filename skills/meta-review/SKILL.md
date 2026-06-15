@@ -47,6 +47,34 @@ cross-artifact visibility", not on context concerns).
 
 Both honour the independence rule: neither sees the primary review's verdict.
 
+## Two trigger points — pre-submission and post-review
+
+This pass is triggered at review completion (STEP 2), but its logic depends only
+on `{artifact ref, corpus index}` — never on the primary review's verdict — so it
+can run **before** a PR is opened just as well as after. The `submitting-a-pr`
+skill runs it as the author's **pre-PR gate**; the primary reviewer runs it as
+the **post-review backstop**. Same independent checklist, two timings.
+
+The split among the four per-artifact risks is by **detection cost, not timing** —
+all four are diff-derivable:
+
+- **Mechanical (cheap, local/deterministic):** `phase-inversion` and `superseded`
+  have concrete retrieval signals (a referenced artifact absent from the tree; a
+  decision marked superseded in `Lineage`). The pre-PR gate and the `--ollama`
+  driver both catch these inline.
+- **Needs a strong model (escalate-only):** `hollow-validation` cannot be told
+  apart from an ordinary literal assertion by the deterministic pass, so it runs
+  only under `--escalate` / the spawned subagent — **never silently trusted**.
+  `speculative` is borderline (flag only when plainly visible).
+
+So nothing here is "post-review only." Pre-submission catches the mechanical risks
+cheaply in the author's own context; the isolated post-review pass remains the
+cold-eyes backstop for what author bias misses and for the escalate-only risks.
+(`risk/fragmentation` as a *cross-backlog* panorama stays in the batch tier
+[#301](http://gitea:3000/botfam/botfam/issues/301); its *single-artifact* form — a
+PR adding a parallel impl of a concept the tree already has a canonical home for —
+is catchable here and at the pre-PR gate.)
+
 ## Input contract
 
 You are given exactly:
