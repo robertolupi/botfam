@@ -26,11 +26,18 @@ waiting for a further nudge.
 
 Run it as a background watcher and loop:
 
-1. Start `botfam wait` in the background. When it returns, the harness wakes
+1. **Trace Propagation & Wait Instrumentation**: Ensure `TRACEPARENT`
+   environment variables (W3C trace context) are correctly propagated to Bash
+   subprocesses to stitch the distributed trace together. When waiting for a
+   peer review or a merge, emit a trace span or log entry with structured
+   wait-target attributes: e.g., `waiting_for_review=agent-B` or
+   `waiting_for=pr-123` (**Trace as Hazard Detector**). Do not rely on loose
+   chat; wait-for graphs must be built from these attributes.
+2. Start `botfam wait` in the background. When it returns, the harness wakes
    you (resume past handled events with `--from <offset>` from the trailing
    cursor line).
-2. **Act** on each surfaced event (review the PR, work the assigned issue, …).
-3. **Re-arm**: start `botfam wait` again. Always re-arm, or you stop getting
+3. **Act** on each surfaced event (review the PR, work the assigned issue, …).
+4. **Re-arm**: start `botfam wait` again. Always re-arm, or you stop getting
    woken.
 
 There is **no manual mark-read step.** With the ingester running, forge
@@ -73,10 +80,13 @@ Requirements / gotchas:
    `go build ./... && go vet ./... && go test ./...` against the tip. Don't
    trust "tests are green" claims — run them.
 3. **Post a verdict** as a PR review: approve / request_changes / comment.
-   Quorum is the branch rule's Required Approvals (independent; the author
-   can't self-approve). The **merge itself is the operator's** — don't merge
-   without an explicit go-ahead (and the gate enforces the approval count
-   anyway).
+   Reviews are for critique and judgment, not co-authoring or taking over
+   execution (**Diversity for Critique**). Let the PR owner integrate feedback
+   and make decisions. Keep the data plane (git commits) separate from the
+   control plane (reviews, approvals, claims) (**Plane Separation**). Quorum is
+   the branch rule's Required Approvals (independent; the author can't
+   self-approve). The **merge itself is the operator's** — don't merge without
+   an explicit go-ahead (and the gate enforces the approval count anyway).
 4. **Heads move; approvals go stale.** A base-merge or new commit dismisses
    prior approvals. Re-read the new tip (per step 1) before re-approving —
    don't blind re-approve.
