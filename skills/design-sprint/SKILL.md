@@ -29,8 +29,11 @@ channel) so that all agents and the operator share context.
   logical sequence.
 - **Provide Recommendations**: For every question you ask, provide your own
   recommended solution and briefly state the rationale.
-- **Wait for Consensus**: Allow the operator and peer agents to respond,
-  debate, and refine the answer before proceeding to the next question.
+- **Decide, Don't Gather Consensus**: Gathers feedback and critique from the
+  operator and peer agents as *advisory input* (**Diversity for Critique**),
+  but the owner of the proposal makes the final decisions themselves rather
+  than trying to achieve a committee-based consensus that dilutes or fragments
+  the design.
 
 ## 2. Document Splitting (Modular Specs)
 
