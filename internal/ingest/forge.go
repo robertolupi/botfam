@@ -30,25 +30,27 @@ type ForgeClient interface {
 }
 
 // forgePoller surfaces Gitea notifications as forge events using a **read-only
-// id watermark** (#169): each poll lists the repo's unread threads and delivers
-// only those with a notification id past the high-water mark, then advances the
-// mark. It never marks notifications read — forge state stays canonical and
-// unmutated (the spool, not the forge's read-flag, is this agent's record).
+// updated_at watermark** (#169): each poll lists the repo's unread threads and
+// delivers only those whose notification updated_at is past the high-water mark,
+// then advances the mark. It never marks notifications read — forge state stays
+// canonical and unmutated (the spool, not the forge's read-flag, is this agent's
+// record).
 //
-// On the first run for a spool it *seeds* — adopts the current high-water id and
-// delivers nothing — so a fresh start (or the existing backlog you can see as
-// "N unread" in the forge UI) doesn't flood the spool. ForgeSeeded (distinct
-// from a 0 watermark) marks that baseline so the first real notification after a
-// quiet start still delivers.
+// On the first run for a spool (or migrating a legacy id watermark) it *seeds* —
+// adopts the current high-water updated_at, or now if nothing is unread, and
+// delivers nothing — so a fresh start (or the existing backlog you see as "N
+// unread" in the forge UI) doesn't flood the spool.
 //
-// Why this is safe vs the #251 review (which rejected an id-high-water cursor
-// over an *offset*-paginated list): there is no offset here. Notification ids
-// are stable and monotonic, so the watermark is a content identity, not a
-// position that shifts as the list mutates — the skip hazard #251 worried about
-// doesn't arise. A thread with new activity re-appears with a higher id and is
-// re-delivered (the #253 updated-thread case still works). At-least-once holds:
-// the watermark only advances after delivery, so a crash mid-poll re-surfaces
-// undelivered threads next poll.
+// Why updated_at, not the notification id: Gitea **reuses a thread's
+// notification id** across activity and only bumps updated_at, so an id
+// watermark silently skips an updated thread (new comment/assignee/close) — the
+// #253 updated-thread case. updated_at bumps on every event, so the thread
+// re-surfaces and re-delivers. This is also why the #251 review's id-high-water
+// hazard doesn't apply: the cursor is a timestamp, not a list position. Within a
+// poll we deliver against the entry watermark and advance once at the end, so
+// several events in the same second aren't lost; advancing only past delivered
+// events keeps it at-least-once across a mid-poll crash. (Same-second events
+// split across two polls are the one accepted edge.)
 type forgePoller struct {
 	client ForgeClient
 	repo   string // owner/repo
@@ -64,40 +66,67 @@ func NewForgePoller(client ForgeClient, repo, login string) Poller {
 
 func (p *forgePoller) Name() string { return mailbox.SourceForge }
 
+// minForgeWatermark is the floor below which ForgeWatermark is treated as unset
+// (fresh 0, or a legacy notification-id watermark) and re-seeded. ~year 2001 in
+// Unix seconds — far below any real notification timestamp, far above any id.
+const minForgeWatermark int64 = 1_000_000_000
+
 func (p *forgePoller) Poll(s *mailbox.Spool, c *mailbox.Cursors) error {
 	ns, err := p.client.ListUnreadRepoNotifications(p.repo)
 	if err != nil {
 		return err
 	}
-	maxID := c.ForgeWatermark
-	for _, n := range ns {
-		if n.ID > maxID {
-			maxID = n.ID
+	// Seed / migrate: adopt the current high-water updated_at (or now, if nothing
+	// is unread) and deliver nothing, so the pre-existing backlog — and any legacy
+	// id watermark from the earlier #352 cut — never floods the spool.
+	if c.ForgeWatermark < minForgeWatermark {
+		var maxU int64
+		for _, n := range ns {
+			if u := forgeUpdatedUnix(n); u > maxU {
+				maxU = u
+			}
 		}
-	}
-	// Seed once: adopt the current high-water id and deliver nothing, so the
-	// pre-existing backlog never floods the spool. Seeded is tracked separately
-	// from the watermark so a seed that finds zero unread (watermark stays 0)
-	// still delivers the first real notification later.
-	if !c.ForgeSeeded {
-		c.ForgeWatermark = maxID
-		c.ForgeSeeded = true
+		if maxU < minForgeWatermark { // nothing unread to anchor on → start from now
+			maxU = time.Now().Unix()
+		}
+		c.ForgeWatermark = maxU
 		return nil
 	}
-	// Deliver only threads past the watermark, oldest-first so order is stable
-	// and the mark advances monotonically. Advance only after a successful
-	// deliver (at-least-once); a mid-poll error leaves the watermark for retry.
-	sort.Slice(ns, func(i, j int) bool { return ns[i].ID < ns[j].ID })
+	// Deliver every thread updated after the watermark (Gitea bumps updated_at on
+	// each new comment/assignee/close, so updated threads re-surface — an id
+	// watermark would skip them). Deliver against the poll-entry watermark so
+	// several events in the same second aren't lost, then advance once at the end
+	// (only past delivered events; a mid-poll error leaves the watermark for
+	// retry — at-least-once).
+	start := c.ForgeWatermark
+	var maxU int64
+	sort.Slice(ns, func(i, j int) bool { return forgeUpdatedUnix(ns[i]) < forgeUpdatedUnix(ns[j]) })
 	for _, n := range ns {
-		if n.ID <= c.ForgeWatermark {
+		u := forgeUpdatedUnix(n)
+		if u <= start {
 			continue // already seen
 		}
 		if _, err := s.Deliver(p.buildMessage(n)); err != nil {
 			return err
 		}
-		c.ForgeWatermark = n.ID
+		if u > maxU {
+			maxU = u
+		}
+	}
+	if maxU > c.ForgeWatermark {
+		c.ForgeWatermark = maxU
 	}
 	return nil
+}
+
+// forgeUpdatedUnix is a notification's updated_at as a Unix second, or now when
+// it is missing/unparseable (so such an event is delivered, never silently
+// dropped by the watermark).
+func forgeUpdatedUnix(n forge.Notification) int64 {
+	if t := parseForgeTime(n.Updated); !t.IsZero() {
+		return t.Unix()
+	}
+	return time.Now().Unix()
 }
 
 // buildMessage turns a forge notification into a spool message, enriched so
@@ -134,6 +163,9 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 				directed = true // assigned to me
 				break
 			}
+		}
+		if !directed && strings.Contains(subj.Body, "@"+p.login) {
+			directed = true // @-mentioned in the issue/PR description
 		}
 	}
 

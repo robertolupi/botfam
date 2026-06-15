@@ -17,13 +17,15 @@ const cursorsFile = "cursors.json"
 // Cursors are the upstream positions the ingester checkpoints so it can resume
 // tailing after a restart without re-dumping or skipping events. IRCOffset is
 // the byte offset into the IRC client log; ForgeWatermark is the high-water
-// notification id and ForgeSeeded records that the forge source has adopted its
-// baseline (#169) — the seeded flag is distinct from a 0 watermark so the first
-// real notification after a quiet start is delivered, not mistaken for the seed.
+// notification **updated_at** as a Unix timestamp (seconds). It is a timestamp,
+// not a notification id, because Gitea reuses a thread's notification id across
+// activity and only bumps updated_at — so an id watermark silently skips an
+// updated thread (new comment/assignee/close), while an updated_at watermark
+// re-surfaces it (#169). A value below ~year-2001 (including 0, fresh, and any
+// legacy id watermark) is treated as unset and re-seeded.
 type Cursors struct {
 	IRCOffset      int64 `json:"irc_offset"`
 	ForgeWatermark int64 `json:"forge_watermark"`
-	ForgeSeeded    bool  `json:"forge_seeded"`
 }
 
 // HasCursors reports whether a cursors.json exists yet. The ingester uses its

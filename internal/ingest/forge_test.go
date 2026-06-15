@@ -43,6 +43,15 @@ func (f *fakeForge) GetSubject(apiURL string) (*forge.SubjectContent, error) {
 	return f.subjects[apiURL], nil
 }
 
+// forgeBase anchors deterministic notification updated_at timestamps: a notif
+// with id N is updated at forgeBase+N seconds, so higher id == later updated_at
+// (the watermark keys on updated_at, not id).
+var forgeBase = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// pastWM is a watermark just above the "unset/legacy" floor — a poll with this
+// watermark delivers all notif()s (which are dated in 2026, well after it).
+const pastWM = minForgeWatermark + 1
+
 func notif(id int64, repo, typ, url string) forge.Notification {
 	var n forge.Notification
 	n.ID = id
@@ -50,6 +59,7 @@ func notif(id int64, repo, typ, url string) forge.Notification {
 	n.Subject.Type = typ
 	n.Subject.Title = "t"
 	n.Subject.HTMLURL = url
+	n.Updated = forgeBase.Add(time.Duration(id) * time.Second).Format(time.RFC3339)
 	return n
 }
 
@@ -108,7 +118,7 @@ func pollSeeded(t *testing.T, fc *fakeForge) (spoolDir string) {
 		t.Fatal(err)
 	}
 	p := NewForgePoller(fc, fc.repo, "") // login "" → fail-open (directed=true)
-	if err := p.Poll(sp, &mailbox.Cursors{ForgeSeeded: true}); err != nil {
+	if err := p.Poll(sp, &mailbox.Cursors{ForgeWatermark: pastWM}); err != nil {
 		t.Fatalf("Poll: %v", err)
 	}
 	return spoolDir
@@ -124,16 +134,16 @@ func TestForgePollerSeedsThenDelivers(t *testing.T) {
 	p := NewForgePoller(fc, fc.repo, "")
 	cur := &mailbox.Cursors{} // fresh: not yet seeded
 
-	// First poll seeds the watermark to the current high-water id and delivers
-	// nothing (no backlog flood).
+	// First poll seeds the watermark to the current high-water updated_at and
+	// delivers nothing (no backlog flood).
 	if err := p.Poll(sp, cur); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(forgeMessages(t, spoolDir)); n != 0 {
 		t.Fatalf("seed poll delivered %d, want 0 (backlog must not flood)", n)
 	}
-	if !cur.ForgeSeeded || cur.ForgeWatermark != 3 {
-		t.Fatalf("after seed: seeded=%v watermark=%d, want true/3", cur.ForgeSeeded, cur.ForgeWatermark)
+	if want := forgeBase.Add(3 * time.Second).Unix(); cur.ForgeWatermark != want {
+		t.Fatalf("after seed: watermark=%d, want %d (max updated_at of unread)", cur.ForgeWatermark, want)
 	}
 
 	// A newer notification arrives → delivered; watermark advances.
@@ -145,8 +155,8 @@ func TestForgePollerSeedsThenDelivers(t *testing.T) {
 	if len(msgs) != 1 || !strings.Contains(msgs[0].Subject, "#5") {
 		t.Fatalf("want only the new #5 delivered, got %+v", msgs)
 	}
-	if cur.ForgeWatermark != 5 {
-		t.Errorf("watermark = %d, want 5", cur.ForgeWatermark)
+	if want := forgeBase.Add(5 * time.Second).Unix(); cur.ForgeWatermark != want {
+		t.Errorf("watermark = %d, want %d", cur.ForgeWatermark, want)
 	}
 
 	// Re-poll with no new activity → nothing re-delivered (dedup).
@@ -170,10 +180,14 @@ func TestForgePollerSeedEmptyThenDelivers(t *testing.T) {
 	if err := p.Poll(sp, cur); err != nil { // seed on empty
 		t.Fatal(err)
 	}
-	if !cur.ForgeSeeded || cur.ForgeWatermark != 0 {
-		t.Fatalf("empty seed: seeded=%v watermark=%d, want true/0", cur.ForgeSeeded, cur.ForgeWatermark)
+	if cur.ForgeWatermark < minForgeWatermark {
+		t.Fatalf("empty seed should set a real timestamp watermark, got %d", cur.ForgeWatermark)
 	}
-	fc.unread = repoNotifs("botfam/botfam", 1)
+	// A notification updated after the seed is delivered (the empty seed didn't
+	// swallow the first real one).
+	future := notif(1, "botfam/botfam", "Issue", "http://gitea:3000/botfam/botfam/issues/1")
+	future.Updated = time.Unix(cur.ForgeWatermark+10, 0).UTC().Format(time.RFC3339)
+	fc.unread = []forge.Notification{future}
 	if err := p.Poll(sp, cur); err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +204,7 @@ func TestForgePollerListError(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := NewForgePoller(fc, fc.repo, "")
-	if err := p.Poll(sp, &mailbox.Cursors{ForgeSeeded: true}); err == nil {
+	if err := p.Poll(sp, &mailbox.Cursors{ForgeWatermark: pastWM}); err == nil {
 		t.Fatal("expected Poll to surface the list error")
 	}
 	if len(forgeMessages(t, spoolDir)) != 0 {
@@ -330,7 +344,7 @@ func TestForgePollerMarksDirected(t *testing.T) {
 	spoolDir := filepath.Join(t.TempDir(), "spool")
 	sp, _ := mailbox.Open(spoolDir)
 	p := NewForgePoller(fc, fc.repo, "claude-bot")
-	if err := p.Poll(sp, &mailbox.Cursors{ForgeSeeded: true}); err != nil {
+	if err := p.Poll(sp, &mailbox.Cursors{ForgeWatermark: pastWM}); err != nil {
 		t.Fatal(err)
 	}
 	got := map[string]bool{} // subject ref -> directed
