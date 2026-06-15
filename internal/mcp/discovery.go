@@ -16,6 +16,7 @@ import (
 
 	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/skills"
 	"github.com/robertolupi/botfam/internal/wiki"
@@ -153,34 +154,29 @@ type discoveryData struct {
 // buildDiscoveryData resolves the fam-specific runtime config for workDir. It
 // never fails: unresolved fields stay empty (rendered as <placeholders>) and
 // are surfaced as health warnings.
-func buildDiscoveryData(workDir string) discoveryData {
+func buildDiscoveryData(ctx context.Context, workDir string) discoveryData {
 	var d discoveryData
 
 	var reg famconfig.Registry
 	var harness string
-	// Prefer the unified resolver: it reads the canonical <fam-dir>/fam.toml and
-	// validates the worktree basename against the roster (the wt- prefix is
-	// retired). It succeeds only in an [agent.<name>] worktree of a migrated fam.
-	if rf, err := famconfig.ResolveFam(workDir); err == nil {
-		d.tmpl.Actor = rf.Actor
-		harness = rf.Agent.Harness
-		reg = rf.Registry
-		d.tmpl.Fam = rf.Slug
+
+	c, err := famctx.Resolve(ctx, famctx.Inputs{
+		WorkDir: workDir,
+		Mode:    famctx.ModeRegistry,
+	})
+	if err == nil {
+		d.tmpl.Actor = c.Actor
+		reg = c.Registry
+		d.tmpl.Fam = c.Slug
 		if d.tmpl.Fam == "" {
-			d.tmpl.Fam = rf.Name
+			d.tmpl.Fam = c.Name
 		}
-	} else {
-		// Legacy / soft fallback: un-migrated fam, or a base/user worktree where
-		// the runtime resolver fails closed. Surface what we can for display.
-		if info, e := (famconfig.Resolver{WorkDir: workDir}).Resolve(); e == nil {
-			d.tmpl.Actor = info.Actor
-			d.tmpl.Fam = info.Name
+		if c.ActorRole == famctx.RoleAgent {
+			harness = c.Agent.Harness
 		}
-		reg = famconfig.LoadFamRegistry(workDir)
-		if slug := famconfig.FamSlug(reg); slug != "" {
-			d.tmpl.Fam = slug
-		}
+		d.resolvedVia = string(c.Source)
 	}
+
 	d.tmpl.MainChannel, d.tmpl.CcrepChannel = famconfig.FamChannels(reg)
 	d.tmpl.IntegrationBranch = famconfig.FamBranch(reg)
 	d.tmpl.ForgeURL = reg.Origin

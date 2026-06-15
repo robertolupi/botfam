@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/mailbox"
 	"github.com/spf13/cobra"
 )
@@ -18,7 +17,7 @@ import (
 // the agent owning workDir, resolved through famconfig so the writer (ingester)
 // and the reader (`botfam wait`) always agree on the path.
 func MailboxPath(workDir string) (string, error) {
-	rf, err := famconfig.ResolveFam(workDir)
+	rf, err := ResolveFam(workDir)
 	if err != nil {
 		return "", err
 	}

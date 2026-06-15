@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 )
 
 // famTomlPresent reports whether workDir belongs to a migrated fam: a fam.toml
@@ -119,8 +121,8 @@ func renderProblemJSON(workDir string, cause error) ([]byte, error) {
 
 // problemResource builds the MCP resource contents for botfam:///problem and
 // botfam:///problem.json from the resolve result for workDir.
-func problemResource(uri, workDir string, wantJSON bool) ([]mcplib.ResourceContents, error) {
-	_, cause := famconfig.ResolveFam(workDir)
+func problemResource(ctx context.Context, uri, workDir string, wantJSON bool) ([]mcplib.ResourceContents, error) {
+	_, cause := famctx.Resolve(ctx, famctx.Inputs{WorkDir: workDir, Mode: famctx.ModeAgentRuntime})
 	if wantJSON {
 		body, err := renderProblemJSON(workDir, cause)
 		if err != nil {

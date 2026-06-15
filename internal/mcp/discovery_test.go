@@ -163,7 +163,7 @@ func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d := buildDiscoveryData(wt)
+	d := buildDiscoveryData(context.Background(), wt)
 	if d.tmpl.Fam != "myfam" {
 		t.Errorf("Fam = %q, want %q (registry name must win over the resolver id)", d.tmpl.Fam, "myfam")
 	}
