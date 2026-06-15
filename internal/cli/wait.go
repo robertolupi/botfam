@@ -41,6 +41,7 @@ func NewWaitCmd() *cobra.Command {
 		pollMs   int
 		replay   bool
 		sinceStr string
+		all      bool
 	)
 	c := &cobra.Command{
 		Use:   "wait",
@@ -48,10 +49,16 @@ func NewWaitCmd() *cobra.Command {
 		Long: `Block on this agent's spool ($FAMROOT/spool/$AGENT) and print the messages
 that wake it, then exit — the single wake point unifying irc-wait and forge-wait.
 
-It drains the spool's new/ box (all of it, preserving cross-source coalescing),
-prints each message verbatim (RFC-822 headers + body) under a banner, and moves
-it to cur/ — the move is the ack. With --replay it instead dumps the cur/ replay
-buffer (no ack) for gap recovery.
+By default it runs in do-not-disturb: forge events wake you only when they are
+directed at you (you are an assignee, or @-mentioned in the latest comment).
+Non-directed forge events are still drained to cur/ (see --replay) but do not
+disturb you. IRC is always relayed — you control exposure by joining/parting the
+channel. Pass --all to surface every forge event regardless.
+
+It drains the spool's new/ box, prints each surfaced message verbatim (RFC-822
+headers + body) under a banner, and moves the batch to cur/ — the move is the
+ack. With --replay it instead dumps the cur/ replay buffer (no ack) for gap
+recovery.
 
 This command only reads the spool; a background ingester (hosted in the botfam
 MCP server) is what fills it.`,
@@ -88,7 +95,7 @@ MCP server) is what fills it.`,
 			// Cancellable: SIGINT/SIGTERM unblock the wait loop cleanly (#276).
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return runWait(ctx, out, errw, spoolDir, parseSources(sources),
+			return runWait(ctx, out, errw, spoolDir, parseSources(sources), !all,
 				time.Duration(timeoutS)*time.Second, time.Duration(pollMs)*time.Millisecond)
 		},
 	}
@@ -98,6 +105,7 @@ MCP server) is what fills it.`,
 	c.Flags().StringVar(&workDir, "work-dir", ".", "worktree to resolve the agent/spool from")
 	c.Flags().IntVar(&pollMs, "poll-ms", 500, "poll interval in milliseconds")
 	c.Flags().BoolVar(&replay, "replay", false, "dump the cur/ replay buffer (read messages) instead of waiting; no ack")
+	c.Flags().BoolVar(&all, "all", false, "disable do-not-disturb: surface every forge event, not just those directed at you (assignee/@-mention)")
 	c.Flags().StringVar(&sinceStr, "since", "", "with --replay, only messages newer than this duration ago (e.g. 1h); default all")
 	return c
 }
@@ -115,9 +123,10 @@ func parseSources(s string) map[string]bool {
 // drainedMsg is one message read from the spool: the verbatim file bytes plus
 // the parsed Source (for the banner / source filter) and its spool entry.
 type drainedMsg struct {
-	entry  mailbox.Entry
-	raw    []byte
-	source string
+	entry    mailbox.Entry
+	raw      []byte
+	source   string
+	directed bool
 }
 
 // readEntry reads an entry's verbatim bytes and parses its Source. A parse error
@@ -131,6 +140,7 @@ func readEntry(sp *mailbox.Spool, e mailbox.Entry) (drainedMsg, error) {
 	d := drainedMsg{entry: e, raw: raw}
 	if m, err := mailbox.ParseMessage(raw); err == nil {
 		d.source = m.Source
+		d.directed = m.Directed
 	}
 	return d, nil
 }
@@ -140,7 +150,7 @@ func readEntry(sp *mailbox.Spool, e mailbox.Entry) (drainedMsg, error) {
 // banners. It fails fast if the spool itself is absent (#263 — a missing spool
 // is a misconfiguration, never something to wait on forever), and unblocks on
 // ctx cancellation or the timeout.
-func runWait(ctx context.Context, out, errw io.Writer, spoolDir string, want map[string]bool, timeout, poll time.Duration) error {
+func runWait(ctx context.Context, out, errw io.Writer, spoolDir string, want map[string]bool, directedOnly bool, timeout, poll time.Duration) error {
 	if err := ensureSpool(spoolDir); err != nil {
 		return err
 	}
@@ -172,9 +182,18 @@ func runWait(ctx context.Context, out, errw io.Writer, spoolDir string, want map
 				_ = sp.Ack(e) // unreadable: drop rather than spin on it
 				continue
 			}
-			if len(want) == 0 || want[d.source] {
-				shown = append(shown, d)
+			if len(want) != 0 && !want[d.source] {
+				continue // source not selected
 			}
+			// Do-not-disturb (the default): forge events only wake me when they're
+			// directed at me (assignee / @-mention). IRC is always relayed — I
+			// control exposure by joining/parting the channel. Non-directed forge
+			// events are still drained below (kept in cur/ for --replay), just not
+			// surfaced. --all turns this off.
+			if directedOnly && d.source == mailbox.SourceForge && !d.directed {
+				continue
+			}
+			shown = append(shown, d)
 		}
 
 		if len(shown) > 0 {

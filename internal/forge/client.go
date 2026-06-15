@@ -354,6 +354,24 @@ func (c *Client) request(method, path string, body []byte) ([]byte, error) {
 	return respBytes, nil
 }
 
+// AuthLogin returns the login of the token's owner (GET /user) — e.g. "claude-bot"
+// — so callers can recognize when an issue/PR is assigned to, or mentions, this
+// agent. The actor name ("claude") is not the forge username, so it must be
+// resolved from the forge, not assumed.
+func (c *Client) AuthLogin() (string, error) {
+	b, err := c.request("GET", "user", nil)
+	if err != nil {
+		return "", err
+	}
+	var u struct {
+		Login string `json:"login"`
+	}
+	if err := json.Unmarshal(b, &u); err != nil {
+		return "", fmt.Errorf("decode user: %w", err)
+	}
+	return u.Login, nil
+}
+
 func (c *Client) GetPR(prNum int) (*PullRequest, error) {
 	path := fmt.Sprintf("repos/%s/%s/pulls/%d", c.Owner, c.Repo, prNum)
 	b, err := c.request("GET", path, nil)

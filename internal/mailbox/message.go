@@ -43,6 +43,7 @@ const (
 	hdrKind        = "Kind"
 	hdrSeq         = "Seq"
 	hdrDate        = "Date"
+	hdrDirected    = "Directed"
 	hdrTraceparent = "Traceparent"
 )
 
@@ -66,6 +67,7 @@ type Message struct {
 	Kind        string    // event subtype (drives interrupt-vs-can-wait)
 	Seq         int64     // per-source monotonic counter (gap detection)
 	Date        time.Time // UTC timestamp; defaults to now on encode if zero
+	Directed    bool      // event is addressed to the mailbox owner (assignee/mention) — drives `botfam wait`'s DND default
 	Traceparent string    // W3C trace context (reserved, M5)
 	Body        string    // full content / URL / payload
 }
@@ -96,6 +98,9 @@ func (m *Message) Encode() []byte {
 		date = time.Now()
 	}
 	put(hdrDate, date.UTC().Format(time.RFC3339))
+	if m.Directed {
+		put(hdrDirected, "true")
+	}
 	put(hdrTraceparent, sanitizeHeaderValue(m.Traceparent, maxValueLen))
 	b.WriteString("\r\n")
 	b.WriteString(m.Body)
@@ -151,6 +156,7 @@ func ParseMessage(b []byte) (*Message, error) {
 		Subject:     msg.Header.Get(hdrSubject),
 		Source:      msg.Header.Get(hdrSource),
 		Kind:        msg.Header.Get(hdrKind),
+		Directed:    msg.Header.Get(hdrDirected) == "true",
 		Traceparent: msg.Header.Get(hdrTraceparent),
 		Body:        string(body),
 	}

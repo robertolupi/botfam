@@ -80,6 +80,9 @@ type SubjectContent struct {
 	User    struct {
 		Login string `json:"login"`
 	} `json:"user"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
 }
 
 // GetSubject fetches the content behind a notification's subject API URL so the

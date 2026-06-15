@@ -46,7 +46,7 @@ func countMessages(out string) int {
 func TestWaitDrainsExistingEvents(t *testing.T) {
 	dir := seedSpool(t)
 	var out bytes.Buffer
-	if err := runWait(context.Background(), &out, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &out, io.Discard, dir, parseSources("irc,forge"), false, 2*time.Second, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	s := out.String()
@@ -66,10 +66,54 @@ func TestWaitDrainsExistingEvents(t *testing.T) {
 	}
 }
 
+// TestWaitDND: with do-not-disturb (the default), a non-directed forge event is
+// drained but does not wake; an IRC line always does. A directed forge event
+// wakes. --all (directedOnly=false) surfaces everything.
+func TestWaitDND(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "spool")
+	sp, err := mailbox.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A non-directed forge event + an IRC line.
+	if _, err := sp.Deliver(&mailbox.Message{Source: mailbox.SourceForge, Subject: "issue: x#1", Body: "u", Directed: false}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.Deliver(&mailbox.Message{Source: mailbox.SourceIRC, From: "agy", To: "#botfam", Subject: "hi", Body: "hi"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	// DND on: only the IRC line surfaces; the non-directed forge event is acked
+	// (drained) but not shown.
+	if err := runWait(context.Background(), &out, io.Discard, dir, parseSources("irc,forge"), true, 2*time.Second, 20*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	if countMessages(s) != 1 || !strings.Contains(s, "· irc =====") {
+		t.Fatalf("DND should surface only the IRC line, got:\n%s", s)
+	}
+	if strings.Contains(s, "· forge =====") {
+		t.Errorf("DND surfaced a non-directed forge event:\n%s", s)
+	}
+
+	// A directed forge event now wakes even under DND.
+	if _, err := sp.Deliver(&mailbox.Message{Source: mailbox.SourceForge, Subject: "issue: x#2", Body: "u", Directed: true}); err != nil {
+		t.Fatal(err)
+	}
+	var out2 bytes.Buffer
+	if err := runWait(context.Background(), &out2, io.Discard, dir, parseSources("irc,forge"), true, 2*time.Second, 20*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out2.String(), "· forge =====") {
+		t.Errorf("DND should surface a directed forge event:\n%s", out2.String())
+	}
+}
+
 func TestWaitSourceFilter(t *testing.T) {
 	dir := seedSpool(t)
 	var out bytes.Buffer
-	if err := runWait(context.Background(), &out, io.Discard, dir, parseSources("forge"), 2*time.Second, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &out, io.Discard, dir, parseSources("forge"), false, 2*time.Second, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	s := out.String()
@@ -94,7 +138,7 @@ func TestWaitSourceFilter(t *testing.T) {
 func TestWaitAcksDrainedMessages(t *testing.T) {
 	dir := seedSpool(t)
 	var first bytes.Buffer
-	if err := runWait(context.Background(), &first, io.Discard, dir, parseSources("forge"), 2*time.Second, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &first, io.Discard, dir, parseSources("forge"), false, 2*time.Second, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	if n := countMessages(first.String()); n != 1 {
@@ -102,7 +146,7 @@ func TestWaitAcksDrainedMessages(t *testing.T) {
 	}
 
 	var second bytes.Buffer
-	if err := runWait(context.Background(), &second, io.Discard, dir, parseSources("irc,forge"), 150*time.Millisecond, 20*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), &second, io.Discard, dir, parseSources("irc,forge"), false, 150*time.Millisecond, 20*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 	s := second.String()
@@ -120,7 +164,7 @@ func TestWaitAcksDrainedMessages(t *testing.T) {
 // codex review finding on #345.
 func TestWaitDoesNotAckOnWriteError(t *testing.T) {
 	dir := seedSpool(t)
-	err := runWait(context.Background(), failWriter{}, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 20*time.Millisecond)
+	err := runWait(context.Background(), failWriter{}, io.Discard, dir, parseSources("irc,forge"), false, 2*time.Second, 20*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected an error when surfaced output fails to write")
 	}
@@ -139,14 +183,14 @@ func TestWaitDoesNotAckOnWriteError(t *testing.T) {
 func TestWaitBlocksThenWakes(t *testing.T) {
 	dir := seedSpool(t)
 	// Drain the seeded backlog so new/ is empty before we block.
-	if err := runWait(context.Background(), io.Discard, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 10*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), io.Discard, io.Discard, dir, parseSources("irc,forge"), false, 2*time.Second, 10*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 
 	done := make(chan string, 1)
 	go func() {
 		var out bytes.Buffer
-		_ = runWait(context.Background(), &out, io.Discard, dir, parseSources("irc,forge"), 3*time.Second, 10*time.Millisecond)
+		_ = runWait(context.Background(), &out, io.Discard, dir, parseSources("irc,forge"), false, 3*time.Second, 10*time.Millisecond)
 		done <- out.String()
 	}()
 
@@ -182,7 +226,7 @@ func TestWaitContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- runWait(ctx, io.Discard, io.Discard, dir, parseSources("irc,forge"), 0 /* block forever */, 10*time.Millisecond)
+		done <- runWait(ctx, io.Discard, io.Discard, dir, parseSources("irc,forge"), false, 0 /* block forever */, 10*time.Millisecond)
 	}()
 	time.Sleep(40 * time.Millisecond)
 	cancel()
@@ -200,7 +244,7 @@ func TestWaitContextCancel(t *testing.T) {
 // resolved absolute path, rather than blocking forever (#263).
 func TestWaitFailFastMissingSpool(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist", "spool")
-	err := runWait(context.Background(), io.Discard, io.Discard, missing, parseSources("irc,forge"), 0, 10*time.Millisecond)
+	err := runWait(context.Background(), io.Discard, io.Discard, missing, parseSources("irc,forge"), false, 0, 10*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected a fail-fast error for a missing spool, got nil")
 	}
@@ -212,7 +256,7 @@ func TestWaitFailFastMissingSpool(t *testing.T) {
 func TestReplayFromCur(t *testing.T) {
 	dir := seedSpool(t)
 	// Drain to move the seeded messages into cur/ (the replay buffer).
-	if err := runWait(context.Background(), io.Discard, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 10*time.Millisecond); err != nil {
+	if err := runWait(context.Background(), io.Discard, io.Discard, dir, parseSources("irc,forge"), false, 2*time.Second, 10*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
 

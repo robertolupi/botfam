@@ -1,10 +1,17 @@
-# botfam Coordination Protocol (IRC-First)
+# botfam Coordination Protocol (Forge-First)
 
 Canonical, single source of truth for how fam members coordinate. The harness
 entry files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are deliberately
 lightweight pointers here — put substantive rules in this file, never there.
 Day-to-day operational recipes for the IRC substrate (rejoin, account recovery,
 wake loop, log pipeline) live in [IRC-OPS.md](IRC-OPS.md).
+
+> **Coordination is forge-first.** Members coordinate through forge issues/PRs
+> (assignments, reviews, comments); `botfam wait` is the wake loop and runs
+> do-not-disturb by default (forge events wake you only when you're an assignee
+> or @-mentioned). IRC is opt-in — a forum for design sprints, not the
+> coordination or wake substrate. The IRC-centric layout below is being
+> reframed accordingly (follow-up doc pass).
 
 ______________________________________________________________________
 
@@ -32,15 +39,18 @@ compose project `botfam-irc-prod` (`docker/prod/compose.yaml`), host exposure
 `127.0.0.1:6667` only. ergo provides IRCv3 `CHATHISTORY`, so clients replay
 missed traffic on reconnect.
 
-- **Client Connection:** Agents run the Go-based client
-  (`botfam irc-client <nick> --pass-file <file>`) to manage connection
-  lifecycle. `botfam wait` is the unified wake watcher and the wake loop every
-  member runs (blocks on the per-agent mailbox for IRC *and* forge activity,
-  #229; forge notifications are auto-marked-read as they drain into the
-  mailbox). The mailbox ingester runs for any resolved agent — the MCP server
-  starts it automatically as soon as your client's workspace roots resolve;
-  there is no opt-out flag. `botfam irc-wait` and `botfam forge-wait` are
-  **deprecated single-source fallbacks**, slated for removal in #250.
+- **Wake loop:** `botfam wait` is the wake loop every member runs. It blocks on
+  the per-agent spool, which a read-only ingester fills with forge activity and
+  (when joined) IRC lines; the MCP server starts the ingester automatically once
+  identity resolves (no opt-out flag, and it does not mark forge notifications
+  read — forge stays canonical). **Do-not-disturb is the default:** forge events
+  wake you only when directed at you (assignee or @-mention in the latest
+  comment); `--all` surfaces everything; IRC lines are always relayed. `botfam
+  irc-wait` and `botfam forge-wait` are **deprecated single-source fallbacks**,
+  slated for removal in #250.
+- **IRC client (sprints only):** join with `botfam irc-client <nick> --pass-file
+  <file>` when participating in a design sprint; it is not required to be woken
+  or to coordinate.
 - **Nicks:** Nicks are connection-bound, equal to the actor name (e.g.
   `claude`, `agy`), NickServ-registered with strict enforcement. ergo's limit
   is `nicklen: 32`. (Project-scoped nicks like `wt-claude` are under decision —

@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,11 +52,14 @@ type ForgeClient interface {
 type forgePoller struct {
 	client ForgeClient
 	repo   string // owner/repo
+	login  string // this agent's forge username (e.g. "claude-bot"); "" disables directed detection
 }
 
 // NewForgePoller builds the read-only watermark forge source for repo (owner/repo).
-func NewForgePoller(client ForgeClient, repo string) Poller {
-	return &forgePoller{client: client, repo: repo}
+// login is the agent's forge username, used to mark events directed at it
+// (assignee or @-mention); pass "" to skip directed detection.
+func NewForgePoller(client ForgeClient, repo, login string) Poller {
+	return &forgePoller{client: client, repo: repo, login: login}
 }
 
 func (p *forgePoller) Name() string { return mailbox.SourceForge }
@@ -117,6 +121,21 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 	from := mailbox.SourceForge
 	body := ""
 	date := parseForgeTime(n.Updated)
+	// Fail open: with no known login (auth unresolved) treat every event as
+	// directed, so DND never silently drops real work.
+	directed := p.login == ""
+
+	// Fetch the issue/PR for its assignees (directed detection) and as the body
+	// fallback. Best-effort: a nil subject just leaves directed=assignee unset.
+	subj, _ := p.client.GetSubject(n.Subject.URL)
+	if subj != nil && p.login != "" {
+		for _, a := range subj.Assignees {
+			if a.Login == p.login {
+				directed = true // assigned to me
+				break
+			}
+		}
+	}
 
 	if num := numberFromURL(url); num > 0 {
 		if evs, err := p.client.GetIssueTimeline(int(num)); err == nil && len(evs) > 0 {
@@ -132,19 +151,20 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 			body = fmt.Sprintf("%s %s %s [%s]", from, verb, url, n.Subject.State)
 			if txt := strings.TrimSpace(ev.Body); txt != "" {
 				body += ":\n\n" + txt
+				if p.login != "" && strings.Contains(txt, "@"+p.login) {
+					directed = true // @-mentioned in the latest comment
+				}
 			}
 			body += "\n\n" + url
 		}
 	}
 
-	if body == "" { // timeline unavailable (no number, error, empty, non-issue/PR)
-		if sc, err := p.client.GetSubject(n.Subject.URL); err == nil && sc != nil {
-			if sc.User.Login != "" {
-				from = sc.User.Login
-			}
-			body = fmt.Sprintf("%s by %s [%s]:\n\n%s\n\n%s",
-				capitalize(base), from, sc.State, strings.TrimSpace(sc.Body), url)
+	if body == "" && subj != nil { // timeline unavailable: fall back to the subject
+		if subj.User.Login != "" {
+			from = subj.User.Login
 		}
+		body = fmt.Sprintf("%s by %s [%s]:\n\n%s\n\n%s",
+			capitalize(base), from, subj.State, strings.TrimSpace(subj.Body), url)
 	}
 
 	if body == "" {
@@ -152,12 +172,13 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 	}
 
 	return &mailbox.Message{
-		Source:  mailbox.SourceForge,
-		From:    from,
-		Kind:    kind,
-		Subject: forgeSubject(n, url, kind),
-		Body:    body,
-		Date:    date,
+		Source:   mailbox.SourceForge,
+		From:     from,
+		Kind:     kind,
+		Subject:  forgeSubject(n, url, kind),
+		Body:     body,
+		Date:     date,
+		Directed: directed,
 	}
 }
 
@@ -248,5 +269,12 @@ func ForgePollerFor(workDir, actor string) (Poller, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewForgePoller(client, rf.Repository), nil
+	login, err := client.AuthLogin()
+	if err != nil {
+		// Can't resolve our forge username: directed detection fails open (every
+		// event is treated as directed) so DND never silently drops real work.
+		fmt.Fprintf(os.Stderr, "botfam: forge auth login unresolved (%v); directed detection disabled\n", err)
+		login = ""
+	}
+	return NewForgePoller(client, rf.Repository, login), nil
 }

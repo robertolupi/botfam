@@ -28,8 +28,8 @@ func NewIngester(spoolDir string, interval time.Duration, pollers ...Poller) *In
 func NewIRCPoller(logPath, matchNick string) Poller { return ingest.NewIRCPoller(logPath, matchNick) }
 
 // NewForgePoller re-exports ingest.NewForgePoller.
-func NewForgePoller(client ForgeClient, repo string) Poller {
-	return ingest.NewForgePoller(client, repo)
+func NewForgePoller(client ForgeClient, repo, login string) Poller {
+	return ingest.NewForgePoller(client, repo, login)
 }
 
 // ForgePollerFor re-exports ingest.ForgePollerFor.

@@ -19,43 +19,43 @@ and verify your actor name by running:
 botfam whoami
 ```
 
-## 2. IRC Connection & Layout
+## 2. Coordination & Wake Loop
 
-We use a local IRC server for coordination and wake triggers.
+**The forge is the coordination plane.** You coordinate with peers and the
+operator through forge issues/PRs — assignments, reviews, and comments — not
+through chat. To send another agent a direct message, comment on an issue/PR
+and **@-mention or assign** them: that is delivered durably (see below). IRC is
+**opt-in**, used only as a forum for design sprints (§2a).
 
-- **Connect**: Connect to the IRC server by running the client in the
-  background:
-  ```bash
-  botfam irc-client {{.Actor}}
-  ```
-  The on-server nick is fam-scoped to `{{.Actor}}-{{.Fam}}` automatically, and
-  the pass file resolves on its own (scoped `irc-pass-{{.Actor}}-{{.Fam}}` →
-  legacy → anonymous). Override either with `--pass-file <path>` / `--raw-nick`
-  if needed.
-- **Durability**: The client writes raw traffic to `scratch/irc/{{.Actor}}/log`
-  and reads input from the named pipe `scratch/irc/{{.Actor}}/in`.
-- **Replay History**: When you boot or reconnect, you MUST read and parse the
-  shared history ledger first (e.g., via the `irc_replay` MCP tool). Do not
-  assume you saw all traffic live.
-- **Wake Loop**: Run `botfam wait` — the unified wake point — to block until
-  new IRC **or** forge activity arrives, then re-arm after every wake-up to
-  avoid falling asleep. As a botfam member you are expected to start it as soon
-  as you boot, and to act autonomously on what it surfaces (work an issue the
-  operator assigns you, review a PR another bot requests). It reads your
-  per-agent spool (`$FAMROOT/spool/$AGENT`) and prints each message as a
+- **Wake Loop**: Run `botfam wait` — the unified wake point — to block until new
+  activity arrives, then re-arm after every wake-up to avoid falling asleep. As
+  a botfam member you are expected to start it as soon as you boot and to act
+  autonomously on what it surfaces. It reads your per-agent spool
+  (`$FAMROOT/spool/{{.Actor}}`) and prints each surfaced message as a
   `===== message N/M · <source> =====` banner followed by the verbatim RFC-822
-  message (headers + body). Surfacing a message moves it from `new/` to `cur/`
-  (the ack) — there is no cursor to pass back; the next `botfam wait` only shows
-  what's new, and `botfam wait --replay` re-reads `cur/` for gap recovery. Forge
-  notifications are drained into the spool and **marked read automatically** —
-  the spool is the durable record; you do not clear notifications by hand. The
-  spool is filled by an ingest goroutine the MCP server starts automatically
-  for your agent as soon as your client's workspace roots resolve — so it is
-  armed by the time you reach this point. It runs for any resolved agent;
-  there is no opt-out flag.
-  - **Deprecated fallbacks**: `botfam irc-wait` (IRC only) and
-    `botfam forge-wait` (forge only) are the legacy single-source watchers,
-    slated for removal in #250 — prefer `botfam wait`.
+  message (headers + body); surfacing moves the batch from `new/` to `cur/` (the
+  ack), and `botfam wait --replay` re-reads `cur/` for gap recovery.
+  - **Do-not-disturb is the default.** Forge events wake you only when they are
+    **directed** at you — you are an assignee, or @-mentioned in the latest
+    comment. Non-directed forge activity is still recorded (in `cur/`, via
+    `--replay`) but does not interrupt you. Pass `--all` to surface everything.
+  - The spool is filled by a read-only ingester the MCP server starts
+    automatically once your identity resolves (it does **not** mark your forge
+    notifications read — the forge stays canonical). No opt-out flag.
+
+### 2a. IRC (design sprints only)
+
+IRC is not required to coordinate or to be woken — that is the forge's job. Join
+the channel only when participating in a **design sprint**:
+
+```bash
+botfam irc-client {{.Actor}}
+```
+
+The nick is fam-scoped to `{{.Actor}}-{{.Fam}}` and the pass file resolves on its
+own. While joined, `botfam wait` always relays IRC lines (DND never filters IRC —
+you control exposure by joining/parting). `botfam irc-wait` / `botfam forge-wait`
+are deprecated single-source watchers (removal in #250) — prefer `botfam wait`.
 
 ## 3. Verifying Environment Health
 

@@ -107,7 +107,7 @@ func pollSeeded(t *testing.T, fc *fakeForge) (spoolDir string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := NewForgePoller(fc, fc.repo)
+	p := NewForgePoller(fc, fc.repo, "") // login "" → fail-open (directed=true)
 	if err := p.Poll(sp, &mailbox.Cursors{ForgeSeeded: true}); err != nil {
 		t.Fatalf("Poll: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestForgePollerSeedsThenDelivers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := NewForgePoller(fc, fc.repo)
+	p := NewForgePoller(fc, fc.repo, "")
 	cur := &mailbox.Cursors{} // fresh: not yet seeded
 
 	// First poll seeds the watermark to the current high-water id and delivers
@@ -164,7 +164,7 @@ func TestForgePollerSeedEmptyThenDelivers(t *testing.T) {
 	fc := &fakeForge{repo: "botfam/botfam"}
 	spoolDir := filepath.Join(t.TempDir(), "spool")
 	sp, _ := mailbox.Open(spoolDir)
-	p := NewForgePoller(fc, fc.repo)
+	p := NewForgePoller(fc, fc.repo, "")
 	cur := &mailbox.Cursors{}
 
 	if err := p.Poll(sp, cur); err != nil { // seed on empty
@@ -189,7 +189,7 @@ func TestForgePollerListError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := NewForgePoller(fc, fc.repo)
+	p := NewForgePoller(fc, fc.repo, "")
 	if err := p.Poll(sp, &mailbox.Cursors{ForgeSeeded: true}); err == nil {
 		t.Fatal("expected Poll to surface the list error")
 	}
@@ -281,5 +281,75 @@ func TestForgePollerFallsBackToSubject(t *testing.T) {
 	}
 	if msgs[0].Kind != "issue" || msgs[0].From != "rlupi" || !strings.Contains(msgs[0].Body, "do the thing") {
 		t.Errorf("subject fallback not applied: Kind=%q From=%q body=%q", msgs[0].Kind, msgs[0].From, msgs[0].Body)
+	}
+}
+
+func TestForgePollerMarksDirected(t *testing.T) {
+	mk := func(id int64, num int) forge.Notification {
+		var n forge.Notification
+		n.ID = id
+		n.Repository.FullName = "botfam/botfam"
+		n.Subject.Type = "Issue"
+		n.Subject.Title = "t"
+		n.Subject.State = "open"
+		n.Subject.URL = fmt.Sprintf("http://gitea:3000/api/v1/repos/botfam/botfam/issues/%d", num)
+		n.Subject.HTMLURL = fmt.Sprintf("http://gitea:3000/botfam/botfam/issues/%d", num)
+		return n
+	}
+	user := func(login string) *struct {
+		Login string `json:"login"`
+	} {
+		return &struct {
+			Login string `json:"login"`
+		}{Login: login}
+	}
+	assigned := mk(1, 10)  // claude-bot is an assignee → directed
+	mentioned := mk(2, 11) // latest comment @-mentions claude-bot → directed
+	neither := mk(3, 12)   // someone else's thread, no mention → not directed
+
+	assignedSubj := &forge.SubjectContent{State: "open"}
+	assignedSubj.Assignees = []struct {
+		Login string `json:"login"`
+	}{{Login: "claude-bot"}}
+	plainSubj := &forge.SubjectContent{State: "open"}
+
+	fc := &fakeForge{
+		repo:   "botfam/botfam",
+		unread: []forge.Notification{assigned, mentioned, neither},
+		subjects: map[string]*forge.SubjectContent{
+			assigned.Subject.URL:  assignedSubj,
+			mentioned.Subject.URL: plainSubj,
+			neither.Subject.URL:   plainSubj,
+		},
+		timelines: map[int][]*forge.TimelineEvent{
+			11: {{Type: "comment", User: user("rlupi"), Body: "ping @claude-bot please", CreatedAt: "2026-06-16T09:00:00Z"}},
+			12: {{Type: "comment", User: user("agy-bot"), Body: "agy and rlupi discussing", CreatedAt: "2026-06-16T09:00:00Z"}},
+		},
+	}
+
+	spoolDir := filepath.Join(t.TempDir(), "spool")
+	sp, _ := mailbox.Open(spoolDir)
+	p := NewForgePoller(fc, fc.repo, "claude-bot")
+	if err := p.Poll(sp, &mailbox.Cursors{ForgeSeeded: true}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{} // subject ref -> directed
+	for _, m := range forgeMessages(t, spoolDir) {
+		got[m.Subject] = m.Directed
+	}
+	for ref, wantDirected := range map[string]bool{
+		"#10": true, "#11": true, "#12": false,
+	} {
+		var found, directed bool
+		for subj, d := range got {
+			if strings.Contains(subj, ref) {
+				found, directed = true, d
+			}
+		}
+		if !found {
+			t.Errorf("%s not delivered", ref)
+		} else if directed != wantDirected {
+			t.Errorf("%s directed=%v, want %v", ref, directed, wantDirected)
+		}
 	}
 }
