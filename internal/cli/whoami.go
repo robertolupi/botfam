@@ -27,7 +27,7 @@ func NewWhoamiCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			info, err := (Resolver{WorkDir: wd}).Resolve()
+			info, err := (GitResolver{}).ResolveIdentity(wd)
 			if err != nil {
 				return err
 			}

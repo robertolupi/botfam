@@ -199,14 +199,14 @@ func TestIdentityOptionalToolsWithoutIdentity(t *testing.T) {
 	plainDir := setupTestWorktree(t, base, "myrepo", "someactor")
 
 	t.Setenv("HOME", base)
-	info, err := (famconfig.Resolver{WorkDir: plainDir, Env: []string{"HOME=" + base}}).Resolve()
+	info, err := (famconfig.GitResolver{Env: []string{"HOME=" + base}}).ResolveIdentity(plainDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(info.Root, 0755); err != nil {
+	if err := os.MkdirAll(info.FamDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeMockRegistry(t, info.Root, plainDir, "mockfam")
+	writeMockRegistry(t, info.FamDir, plainDir, "mockfam")
 
 	// worktree_sync does not use the calling actor.
 	if _, err := s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": plainDir}); err != nil {
@@ -787,8 +787,7 @@ func TestMcpResources(t *testing.T) {
 		t.Error("index.json advertises no resources")
 	}
 
-	// 3. Named authority matching the local family still resolves.
-	resolved, err := (famconfig.Resolver{WorkDir: root}).Resolve()
+	resolved, err := (famconfig.GitResolver{}).ResolveIdentity(root)
 	if err == nil && resolved.Name != "" {
 		req.Params.URI = fmt.Sprintf("botfam://%s/docs/protocol", resolved.Name)
 		if _, err := s.handleReadResource(context.Background(), req); err != nil {

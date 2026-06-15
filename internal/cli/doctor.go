@@ -122,7 +122,7 @@ func credentialHelperCheck(workDir string) doctorCheck {
 // mis-attributed even when the push helper is correct.
 func gitIdentityCheck(workDir string) doctorCheck {
 	var actor string
-	if info, err := (Resolver{WorkDir: workDir}).Resolve(); err == nil {
+	if info, err := (GitResolver{}).ResolveIdentity(workDir); err == nil {
 		actor = info.Actor
 	}
 	name, _ := gitexec.One(workDir, "config", "user.name")

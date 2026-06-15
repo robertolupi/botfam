@@ -28,12 +28,11 @@ func RegisterWorktrees(args []string, out io.Writer) error {
 		return err
 	}
 
-	// Resolve the fam root and load its registry.
-	info, err := (famconfig.Resolver{WorkDir: absPath}).Resolve()
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(absPath)
 	if err != nil {
 		return err
 	}
-	regPath := filepath.Join(info.Root, "fam.toml")
+	regPath := filepath.Join(info.FamDir, "fam.toml")
 	reg, err := famconfig.ReadRegistry(regPath)
 	if err != nil {
 		return fmt.Errorf("read registry %s: %w", regPath, err)

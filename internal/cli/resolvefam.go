@@ -19,10 +19,15 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 		return ResolvedFam{}, err
 	}
 	return ResolvedFam{
-		Name:         c.Name,
+		FamIdentity: famconfig.FamIdentity{
+			FamDir:      c.FamDir,
+			FamTOMLPath: c.FamTOMLPath,
+			Name:        c.Name,
+			Actor:       c.Actor,
+			ActorRole:   c.ActorRole,
+			Source:      c.Source,
+		},
 		Slug:         c.Slug,
-		Actor:        c.Actor,
-		FamDir:       c.FamDir,
 		WorktreeRoot: c.WorktreeRoot,
 		ForgeURL:     c.Registry.ForgeURL,
 		Repository:   c.Registry.Repository,

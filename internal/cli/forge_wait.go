@@ -71,7 +71,7 @@ Requires the token to carry the notification scope (forge-login.sh requests it).
 func runForgeWait(out io.Writer, once, markRead bool, interval, timeout time.Duration) error {
 	actor := os.Getenv("COLLAB_ACTOR")
 	if actor == "" {
-		if info, err := (Resolver{WorkDir: "."}).Resolve(); err == nil {
+		if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
 			actor = info.Actor
 		}
 	}

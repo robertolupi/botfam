@@ -54,7 +54,7 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 			return err
 		}
 	}
-	info, err := (Resolver{WorkDir: "."}).Resolve()
+	info, err := (GitResolver{}).ResolveIdentity(".")
 	if err != nil {
 		return err
 	}
@@ -62,10 +62,10 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(info.Root, 0o755); err != nil {
+	if err := os.MkdirAll(info.FamDir, 0o755); err != nil {
 		return err
 	}
-	regPath := filepath.Join(info.Root, "fam.toml")
+	regPath := filepath.Join(info.FamDir, "fam.toml")
 	reg := Registry{}
 	if _, err := os.Stat(regPath); err == nil {
 		reg, err = ReadRegistry(regPath)
@@ -73,7 +73,7 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 			return err
 		}
 		if !force && !hasAny(reg.ObjectStores, stores) {
-			return fmt.Errorf("%s already exists and this repo is not a registered member; use --force deliberately", info.Root)
+			return fmt.Errorf("%s already exists and this repo is not a registered member; use --force deliberately", info.FamDir)
 		}
 	}
 	if reg.Name == "" {
@@ -88,13 +88,13 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	if err := WriteRegistry(regPath, reg); err != nil {
 		return err
 	}
-	if err := createProjectSymlink(project, info.Root); err != nil {
+	if err := createProjectSymlink(project, info.FamDir); err != nil {
 		return err
 	}
 	if err := RegisterMCPServerGlobally(reg.ForgeURL, FamSlug(reg), out); err != nil {
 		fmt.Fprintf(out, "Warning: failed to register MCP server globally: %v\n", err)
 	}
-	fmt.Fprintf(out, "botfam root: %s\n", info.Root)
+	fmt.Fprintf(out, "botfam root: %s\n", info.FamDir)
 	return nil
 }
 

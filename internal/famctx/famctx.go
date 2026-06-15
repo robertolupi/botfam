@@ -19,22 +19,22 @@ const (
 	ModeAgentRuntime             // require declared [agent.<name>]
 )
 
-type Source string
+type Source = famconfig.Source
 
 const (
-	SourceWorkDir       Source = "work_dir"
-	SourceClientRoots   Source = "client_roots"
-	SourcePWD           Source = "pwd"
-	SourceGitRoots      Source = "git_roots"
+	SourceWorkDir     = famconfig.SourceWorkDir
+	SourceClientRoots = famconfig.SourceClientRoots
+	SourcePWD         = famconfig.SourcePWD
+	SourceGitRoots    = famconfig.SourceGitRoots
 )
 
-type ActorRole string
+type ActorRole = famconfig.ActorRole
 
 const (
-	RoleAgent   ActorRole = "agent"
-	RoleUser    ActorRole = "user"
-	RoleBase    ActorRole = "base"
-	RoleUnknown ActorRole = "unknown"
+	RoleAgent   = famconfig.RoleAgent
+	RoleUser    = famconfig.RoleUser
+	RoleBase    = famconfig.RoleBase
+	RoleUnknown = famconfig.RoleUnknown
 )
 
 type Location string
@@ -62,18 +62,13 @@ type Inputs struct {
 }
 
 type Context struct {
-	FamDir       string
-	FamTOMLPath  string
-	Name         string
+	famconfig.FamIdentity
 	Slug         string
 	Registry     famconfig.Registry
 
 	WorktreeRoot string
 	WorkDir      string
-	Source       Source
 
-	Actor     string
-	ActorRole ActorRole
 	Agent     famconfig.AgentConfig
 	Flags     map[string]any
 
@@ -153,22 +148,17 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 
 			var rootSet []string
 			var rootSetID string
-			if info, err := (famconfig.Resolver{WorkDir: dir, Env: inputs.Env}).Resolve(); err == nil {
+			if info, err := (famconfig.GitResolver{Env: inputs.Env}).ResolveIdentity(dir); err == nil {
 				rootSet = info.RootSet
 				rootSetID = info.RootSetID
 			}
 
 			c := Context{
-				FamDir:       resolved.FamDir,
-				FamTOMLPath:  filepath.Join(resolved.FamDir, "fam.toml"),
-				Name:         resolved.Name,
+				FamIdentity:  resolved.FamIdentity,
 				Slug:         resolved.Slug,
 				Registry:     resolved.Registry,
 				WorktreeRoot: resolved.WorktreeRoot,
 				WorkDir:      dir,
-				Source:       cSource,
-				Actor:        resolved.Actor,
-				ActorRole:    RoleAgent,
 				Agent:        resolved.Agent,
 				Flags:        resolved.Flags,
 				MailboxPath:  filepath.Join(resolved.FamDir, resolved.Actor+".mailbox"),
@@ -181,8 +171,8 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			return c, nil
 		}
 
-		// Use famconfig.Resolver to resolve walk-up/legacy root and actor name
-		info, err := (famconfig.Resolver{WorkDir: dir, Env: inputs.Env}).Resolve()
+		// Use famconfig.GitResolver to resolve walk-up/legacy root and actor name
+		info, err := (famconfig.GitResolver{Env: inputs.Env}).ResolveIdentity(dir)
 		if err != nil {
 			if resolveErr == nil {
 				resolveErr = err
@@ -190,8 +180,8 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			continue
 		}
 
-		evalRoot := info.Root
-		if eval, err := filepath.EvalSymlinks(info.Root); err == nil {
+		evalRoot := info.FamDir
+		if eval, err := filepath.EvalSymlinks(info.FamDir); err == nil {
 			evalRoot = eval
 		}
 
@@ -264,17 +254,19 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			}
 
 			slug := famconfig.FamSlug(reg)
+			identity := info.FamIdentity
+			identity.Actor = actor
+			identity.ActorRole = role
+			identity.Source = cSource
+			identity.FamTOMLPath = cFamTOMLPath
+			identity.Name = reg.Name
+
 			c := Context{
-				FamDir:       evalRoot,
-				FamTOMLPath:  cFamTOMLPath,
-				Name:         reg.Name,
+				FamIdentity:  identity,
 				Slug:         slug,
 				Registry:     reg,
 				WorktreeRoot: gitRoot(dir),
 				WorkDir:      dir,
-				Source:       cSource,
-				Actor:        actor,
-				ActorRole:    role,
 				Agent:        agent,
 				Flags:        famconfig.ResolveFlags(reg, actor),
 				MailboxPath:  filepath.Join(evalRoot, actor+".mailbox"),
@@ -288,8 +280,8 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 
 		} else {
 			// fam.toml does NOT exist
-			if inputs.Mode == ModeAgentRuntime || inputs.Mode == ModeRegistry {
-				// ModeAgentRuntime / ModeRegistry requires fam.toml
+			if inputs.Mode == ModeRegistry {
+				// ModeRegistry requires fam.toml
 				resolveErr = fmt.Errorf("no readable fam.toml at %s: run `botfam setup`; if it persists, report to your operator (file not found)", tomlPath)
 				continue
 			}
@@ -320,17 +312,18 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				Message:  "Using legacy git-history fallback. Run 'botfam setup' to migrate.",
 			})
 
+			identity := info.FamIdentity
+			identity.Actor = actor
+			identity.ActorRole = RoleUnknown
+			identity.Source = cSource
+			identity.FamTOMLPath = ""
+
 			c := Context{
-				FamDir:       evalRoot,
-				FamTOMLPath:  "",
-				Name:         info.Name,
+				FamIdentity:  identity,
 				Slug:         slug,
 				Registry:     famconfig.Registry{Name: info.Name},
 				WorktreeRoot: gitRoot(dir),
 				WorkDir:      dir,
-				Source:       cSource,
-				Actor:        actor,
-				ActorRole:    RoleUnknown,
 				Flags:        nil,
 				MailboxPath:  filepath.Join(evalRoot, actor+".mailbox"),
 				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),

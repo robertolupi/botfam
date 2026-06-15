@@ -12,31 +12,42 @@ import (
 	"strings"
 )
 
-// Resolver derives a fam Root/Name/Actor for a worktree. It is the dependency-free
+// Resolver is the interface for family resolution.
+type Resolver interface {
+	Resolve(workDir string) (FamIdentity, error)
+}
+
+// GitResolver derives a fam Root/Name/Actor for a worktree. It is the dependency-free
 // home of identity resolution (#311): both internal/cli and internal/mcp resolve
-// through it without importing each other. internal/fam re-exports Resolver and
-// RootInfo via type aliases so existing callers are unaffected.
-type Resolver struct {
-	WorkDir string
-	Env     []string
+// through it without importing each other.
+type GitResolver struct {
+	Env []string
 }
 
 // RootInfo is the resolved fam root for a worktree.
 type RootInfo struct {
-	Root      string
-	Name      string
+	FamIdentity
 	RootSet   []string
 	RootSetID string
-	Actor     string
 }
 
-func (r Resolver) Resolve() (RootInfo, error) {
-	repoName := ResolveRepoName(r.WorkDir)
+// Resolve implements the Resolver interface.
+func (r GitResolver) Resolve(workDir string) (FamIdentity, error) {
+	info, err := r.ResolveIdentity(workDir)
+	if err != nil {
+		return FamIdentity{}, err
+	}
+	return info.FamIdentity, nil
+}
+
+// ResolveIdentity resolves the full git-specific identity including root set.
+func (r GitResolver) ResolveIdentity(workDir string) (RootInfo, error) {
+	repoName := ResolveRepoName(workDir)
 	var parsedActor string
 	var unifiedRoot string
 	var unifiedName string
 
-	if absDir, err := filepath.Abs(r.WorkDir); err == nil {
+	if absDir, err := filepath.Abs(workDir); err == nil {
 		if evalDir, err := filepath.EvalSymlinks(absDir); err == nil {
 			absDir = evalDir
 		}
@@ -66,7 +77,7 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		// must still derive a Root/Name for. (FindFamTOMLPath, not
 		// LoadFamRegistry, so we don't recurse back through Resolve.)
 		if gitRoot != "" {
-			if famTOMLPath := FindFamTOMLPath(r.WorkDir, r.Env); famTOMLPath != "" {
+			if famTOMLPath := FindFamTOMLPath(workDir, r.Env); famTOMLPath != "" {
 				if reg, err := ReadRegistry(famTOMLPath); err == nil {
 					famDir := filepath.Dir(famTOMLPath)
 					base := filepath.Base(gitRoot)
@@ -89,7 +100,7 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		return RootInfo{}, fmt.Errorf("COLLAB_ACTOR %q conflicts with resolved directory actor %q", envActor, parsedActor)
 	}
 
-	roots, err := gitexec.Lines(r.WorkDir, "rev-list", "--max-parents=0", "HEAD")
+	roots, err := gitexec.Lines(workDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		return RootInfo{}, makeNoGitHistoryError()
 	}
@@ -97,13 +108,39 @@ func (r Resolver) Resolve() (RootInfo, error) {
 	sum := sha256.Sum256([]byte(strings.Join(roots, "\n")))
 	id := hex.EncodeToString(sum[:])[:12]
 
+	var role ActorRole = RoleUnknown
+	var source Source = SourceWorkDir
+	var tomlPath string
+
 	if unifiedRoot != "" {
+		tomlPath = filepath.Join(unifiedRoot, "fam.toml")
+		if reg, err := ReadRegistry(tomlPath); err == nil {
+			if _, ok := reg.Agents[parsedActor]; ok {
+				role = RoleAgent
+			} else if _, ok := reg.Users[parsedActor]; ok {
+				role = RoleUser
+			} else {
+				// empty actor: check if base checkout
+				gitRoot, _ := gitexec.One(workDir, "rev-parse", "--show-toplevel")
+				if eval, err := filepath.EvalSymlinks(gitRoot); err == nil {
+					gitRoot = eval
+				}
+				if gitRoot != "" && gitRoot == unifiedRoot {
+					role = RoleBase
+				}
+			}
+		}
 		return RootInfo{
-			Root:      unifiedRoot,
-			Name:      unifiedName,
+			FamIdentity: FamIdentity{
+				FamDir:      unifiedRoot,
+				FamTOMLPath: tomlPath,
+				Name:        unifiedName,
+				Actor:       parsedActor,
+				ActorRole:   role,
+				Source:      source,
+			},
 			RootSet:   roots,
 			RootSetID: id,
-			Actor:     parsedActor,
 		}, nil
 	}
 
@@ -115,12 +152,18 @@ func (r Resolver) Resolve() (RootInfo, error) {
 	if err != nil {
 		return RootInfo{}, err
 	}
+	famDir := filepath.Join(home, ".botfam", name)
 	return RootInfo{
-		Root:      filepath.Join(home, ".botfam", name),
-		Name:      name,
+		FamIdentity: FamIdentity{
+			FamDir:      famDir,
+			FamTOMLPath: "",
+			Name:        name,
+			Actor:       parsedActor,
+			ActorRole:   RoleUnknown,
+			Source:      SourceGitRoots,
+		},
 		RootSet:   roots,
 		RootSetID: id,
-		Actor:     parsedActor,
 	}, nil
 }
 

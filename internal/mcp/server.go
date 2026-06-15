@@ -241,7 +241,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		if famTomlPresent(c.WorkDir) {
 			return nil, quarantineError(fmt.Errorf("strict agent runtime required: resolved role is %s (actor: %s)", c.ActorRole, c.Actor))
 		}
-		if err := provision.EnsureMembership(c.FamDir, c.WorkDir); err != nil {
+		if err := provision.EnsureMembership(c.FamIdentity, c.WorkDir); err != nil {
 			return nil, err
 		}
 	}

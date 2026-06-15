@@ -150,7 +150,7 @@ func runMetaReview(num int, opts metaReviewOpts, out io.Writer) error {
 
 	actor := os.Getenv("COLLAB_ACTOR")
 	if actor == "" {
-		if info, err := (Resolver{WorkDir: "."}).Resolve(); err == nil {
+		if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
 			actor = info.Actor
 		}
 	}

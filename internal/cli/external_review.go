@@ -421,7 +421,7 @@ func assemblePRMaterial(pr string) (string, error) {
 	}
 	actor := os.Getenv("COLLAB_ACTOR")
 	if actor == "" {
-		if info, err := (Resolver{WorkDir: "."}).Resolve(); err == nil {
+		if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
 			actor = info.Actor
 		}
 	}

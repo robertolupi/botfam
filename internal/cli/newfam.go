@@ -83,15 +83,15 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 	parentDir := filepath.Dir(repoRoot)
 
 	// Resolve registry root
-	info, err := (Resolver{WorkDir: "."}).Resolve()
+	info, err := (GitResolver{}).ResolveIdentity(".")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(info.Root, 0o755); err != nil {
+	if err := os.MkdirAll(info.FamDir, 0o755); err != nil {
 		return err
 	}
 
-	regPath := filepath.Join(info.Root, "fam.toml")
+	regPath := filepath.Join(info.FamDir, "fam.toml")
 	reg := Registry{}
 	stores, err := GitObjectStores(".")
 	if err != nil {
@@ -116,7 +116,7 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 	if err := WriteRegistry(regPath, reg); err != nil {
 		return err
 	}
-	if err := createProjectSymlink(projectName, info.Root); err != nil {
+	if err := createProjectSymlink(projectName, info.FamDir); err != nil {
 		return err
 	}
 
