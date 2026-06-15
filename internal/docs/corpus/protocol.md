@@ -62,8 +62,10 @@ avoid deadlocks:
   design/contracts/data models). A coupled cluster must be assigned to a
   **single owner** who claims all related issues end-to-end to avoid Concept
   Fragmentation. The owner agent can fan out to subagents (hands) under its own
-  context for execution. Peer agents must not work concurrently on different
-  parts of a coupled cluster.
+  context for execution. Using subagents where appropriate and efficient is
+  actively permitted and encouraged. Use architectural paradigms like
+  divide-and-conquer or map-reduce when fanning out tasks to subagents. Peer
+  agents must not work concurrently on different parts of a coupled cluster.
 - **Bounded WIP**: Default to **WIP=1** for coupled clusters. Juggling multiple
   coupled tasks in one overfull context degrades reasoning and increases cost.
 
