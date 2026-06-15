@@ -61,3 +61,16 @@ Read the Model Context Protocol (MCP) root resource `botfam:///` first. It
 returns an index of all available resources and lists any active environment
 health warnings (such as missing API tokens, wrong directories, or offline IRC
 client).
+
+## 4. Warm Onboarding / Handover Snapshot
+
+If you are booting to resume a task that was already in progress (e.g.
+following a Let It Crash restart):
+
+- **Load the Handover Snapshot**: Do not replay the task history from genesis
+  or re-read the entire wiki/corpus. Find the latest Handover Snapshot on the
+  forge issue/PR comment (goal, decisions taken so far, branch/PR pointer,
+  current blocker, next step).
+- **Check out the Branch**: Switch to the branch indicated in the snapshot to
+  retrieve the current product state from the data plane, and resume from the
+  next step specified.

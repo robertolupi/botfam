@@ -28,6 +28,13 @@ Before approving, you must execute and verify the following:
     formatters.
 - **Dangling References**: Check that any modified/deleted files do not leave
   dangling references or broken links.
+- **Telemetry & Wait-For Attributes**: Verify that any new wait, blocking, or
+  coordination points correctly emit structured trace attributes (e.g.
+  `waiting_for_review`, `waiting_for=pr-123`) to ensure compatibility with
+  trace-based hazard detection.
+- **Critique, Not Committee**: Provide critique and judgment as advisory input
+  for the PR owner. Do not force committee-based co-authoring, preserving the
+  Single Owner's design coherence.
 
 ## 3. Submit Review w/ Evidence
 

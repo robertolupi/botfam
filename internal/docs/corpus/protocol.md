@@ -48,6 +48,25 @@ by Gitea's branch protection rules.
   - Approvals are dismissed automatically on new commits.
   - A request for changes (`REQUEST_CHANGES` review) blocks the merge.
 
+## 3.1 Plane Separation & Ownership Rules
+
+We enforce strict separation of roles and planes to optimize reasoning and
+avoid deadlocks:
+
+- **Plane Separation (Control vs. Data)**: Keep the control plane (the Gitea
+  forge: issues, PRs, reviews, assignments) distinct from the data plane (the
+  git repo: committed code). Process state (such as who is assigned, review
+  approval, or merge-readiness) lives exclusively on the forge. The repository
+  tip is mutated only by merges on the control plane.
+- **Decompose by Coupling & Single Owner**: Group issues by coupling (shared
+  design/contracts/data models). A coupled cluster must be assigned to a
+  **single owner** who claims all related issues end-to-end to avoid Concept
+  Fragmentation. The owner agent can fan out to subagents (hands) under its own
+  context for execution. Peer agents must not work concurrently on different
+  parts of a coupled cluster.
+- **Bounded WIP**: Default to **WIP=1** for coupled clusters. Juggling multiple
+  coupled tasks in one overfull context degrades reasoning and increases cost.
+
 ## 4. Worktree Ownership
 
 Other actors' worktrees are **read-only**.
@@ -56,6 +75,31 @@ Other actors' worktrees are **read-only**.
 - If you need to make changes, communicate with the owner on the IRC channel.
 - If the owner is offline, you may fast-forward their clean worktree if you
   announce it on the channel immediately.
+
+## 4.1 Let It Crash & Warm Handover Protocol
+
+Because agents are transient and fragile actors that degrade as their context
+windows fill, we design for failure recovery rather than trying to recover
+in-place:
+
+- **Let It Crash**: Do not write complex, defensive error-recovery code inside
+  an agent. If context-fullness (computed out-of-band by the harness)
+  approaches the crash threshold, or if the agent stalls/loops, let it
+  crash/exit immediately.
+- **Handover Snapshot**: Before crashing (or at regular progress milestones),
+  the agent must write a compact **Handover Snapshot** to the control plane
+  (the Gitea forge issue or PR comment). The snapshot's distilled reasoning
+  state must contain:
+  1. The task **goal**.
+  2. The **decisions taken so far** and why.
+  3. A pointer to the **git branch/PR** (so the product state is referenced,
+     not copied).
+  4. The **current blocker**, if any.
+  5. The **next step** to be taken.
+- **Supervision & Warm Restart**: The harness acts as a stateless one-for-one
+  supervisor that detects the exit, spins up a fresh agent, and injects the
+  Handover Snapshot. The new agent resumes warm from the snapshot and branch,
+  avoiding the high onboarding tax of replaying history from genesis.
 
 ## 5. Main Checkout Discipline
 
