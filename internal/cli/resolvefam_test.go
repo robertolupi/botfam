@@ -210,7 +210,7 @@ func TestForgeIdentityParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
-	for _, k := range []string{"GITEA_URL", "GITEA_OWNER", "GITEA_REPO", "GITEA_TOKEN", "COLLAB_ROOT", "BOTFAM_FORGE_REMOTE"} {
+	for _, k := range []string{"GITEA_URL", "GITEA_OWNER", "GITEA_REPO", "GITEA_TOKEN", "BOTFAM_FORGE_REMOTE"} {
 		t.Setenv(k, "")
 	}
 
@@ -276,7 +276,7 @@ func TestResolverLegacyNoFamTOML(t *testing.T) {
 	famDir := t.TempDir() // deliberately no fam.toml
 	wt := filepath.Join(famDir, "legacy")
 	gitInit(t, wt)
-	for _, k := range []string{"COLLAB_ROOT", "BOTFAM_FAM"} {
+	for _, k := range []string{"BOTFAM_FAM"} {
 		t.Setenv(k, "")
 	}
 

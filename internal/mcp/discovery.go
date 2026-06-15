@@ -207,11 +207,10 @@ func buildDiscoveryData(workDir string) discoveryData {
 // resource read. Resources are param-less, and a system-wide MCP server runs
 // with CWD=/, so this layered chain (first hit wins) makes the discovery root
 // resolve across mount topologies (#132):
-//  1. COLLAB_ROOT env (explicit)
-//  2. server CWD, if it sits inside a fam (per-project mounts + the CLI path)
-//  3. client workspace roots via the MCP `roots` capability (system-wide mounts)
-//  4. the launching shell's PWD
-//  5. server CWD as a last resort (surfaces <unresolved> + a health warning)
+//  1. server CWD, if it sits inside a fam (per-project mounts + the CLI path)
+//  2. client workspace roots via the MCP `roots` capability (system-wide mounts)
+//  3. the launching shell's PWD
+//  4. server CWD as a last resort (surfaces <unresolved> + a health warning)
 func (s *server) resolveDiscoveryWorkDir(ctx context.Context) string {
 	dir, _ := s.resolveDiscoveryWorkDirVia(ctx)
 	return dir
@@ -237,24 +236,20 @@ func (s *server) resolveDiscoveryWorkDirVia(ctx context.Context) (dir, via strin
 			return s.requestRootsWithCache(ctx)
 		}
 	}
-	return resolveWorkDir(ctx, os.Getenv("COLLAB_ROOT"), cwd, os.Getenv("PWD"), requestRoots, famResolvable)
+	return resolveWorkDir(ctx, cwd, os.Getenv("PWD"), requestRoots, famResolvable)
 }
 
 // resolveWorkDir is the pure tier chain behind resolveDiscoveryWorkDirVia (first
 // hit wins), separated from the live inputs (env, CWD, MCP client, fam
 // detection) so every tier — including the client `roots` path — is testable:
-//  1. collabRoot (COLLAB_ROOT env, explicit)
-//  2. client workspace roots via requestRoots (gated on the resolvable check)
-//  3. cwd, if it is a real dir other than "/" (per-project mounts, the CLI, tests)
-//  4. pwd (the launching shell's PWD), if it sits inside a fam
-//  5. cwd as a last resort (surfaces <unresolved> + a health warning)
+//  1. client workspace roots via requestRoots (gated on the resolvable check)
+//  2. cwd, if it is a real dir other than "/" (per-project mounts, the CLI, tests)
+//  3. pwd (the launching shell's PWD), if it sits inside a fam
+//  4. cwd as a last resort (surfaces <unresolved> + a health warning)
 //
 // resolvable reports whether a candidate dir sits inside a fam (famResolvable in
-// production); tiers 2 and 4 only accept candidates it approves.
-func resolveWorkDir(ctx context.Context, collabRoot, cwd, pwd string, requestRoots rootsRequester, resolvable func(string) bool) (dir, via string) {
-	if collabRoot != "" {
-		return collabRoot, "collab_root"
-	}
+// production); tiers 1 and 3 only accept candidates it approves.
+func resolveWorkDir(ctx context.Context, cwd, pwd string, requestRoots rootsRequester, resolvable func(string) bool) (dir, via string) {
 	if requestRoots != nil {
 		if res, err := requestRoots(ctx); err == nil && res != nil {
 			for _, root := range res.Roots {

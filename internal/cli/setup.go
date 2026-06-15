@@ -73,7 +73,7 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 			return err
 		}
 		if !force && !hasAny(reg.ObjectStores, stores) {
-			return fmt.Errorf("%s already exists and this repo is not a registered member; use --force, COLLAB_ROOT, or BOTFAM_FAM deliberately", info.Root)
+			return fmt.Errorf("%s already exists and this repo is not a registered member; use --force deliberately", info.Root)
 		}
 	}
 	if reg.Name == "" {

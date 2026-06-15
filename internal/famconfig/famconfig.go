@@ -175,21 +175,15 @@ func HarnessTokenPath(harness string) (string, error) {
 	return filepath.Join(home, ".botfam", "token-"+harness), nil
 }
 
-// FindFamTOMLPath locates the canonical fam.toml for workDir, in priority order:
+// FindFamTOMLPath locates the canonical fam.toml for workDir by checking
+// <parent of the git worktree top-level>/fam.toml.
 //
-//  1. $COLLAB_ROOT/fam.toml (explicit override), when it exists;
-//  2. <parent of the git worktree top-level>/fam.toml, when it exists.
-//
-// Returns "" when none is found. env is an os.Environ()-style "K=V" slice to
-// read COLLAB_ROOT from; nil falls back to the process environment. This is the
-// one fam.toml locator; ResolveFam (the strict agent path) and forge.NewClient
-// (which also tolerates non-agent/legacy checkouts) both build on it.
+// Returns "" when none is found. env is an os.Environ()-style "K=V" slice
+// reserved for future use; nil falls back to the process environment. This is
+// the one fam.toml locator; ResolveFam (the strict agent path) and
+// forge.NewClient (which also tolerates non-agent/legacy checkouts) both
+// build on it.
 func FindFamTOMLPath(workDir string, env []string) string {
-	if cr := lookupEnv(env, "COLLAB_ROOT"); cr != "" {
-		if p := filepath.Join(cr, "fam.toml"); fileExists(p) {
-			return p
-		}
-	}
 	if root, err := gitexec.One(workDir, "rev-parse", "--show-toplevel"); err == nil && root != "" {
 		if eval, err := filepath.EvalSymlinks(root); err == nil {
 			root = eval
@@ -220,7 +214,11 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 		root = eval
 	}
 	famDir := filepath.Dir(root)
-	actor := filepath.Base(root)
+	repoName := ResolveRepoName(root)
+	actor := ParseActor(filepath.Base(root), repoName)
+	if actor == "" {
+		actor = filepath.Base(root)
+	}
 	tomlPath := filepath.Join(famDir, "fam.toml")
 
 	reg, err := ReadRegistry(tomlPath)
