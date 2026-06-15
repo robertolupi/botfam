@@ -17,6 +17,34 @@ still prevents wasted work (proposal section 3.4: *isolation is not deferral* �
 timing is chosen on "does early flagging prevent waste" and "does it need
 cross-artifact visibility", not on context concerns).
 
+## Two ways to run this tier
+
+1. **`botfam meta-review <issue-or-pr-number>`** (recommended;
+   [#306](http://gitea:3000/botfam/botfam/issues/306)) — a **read-only,
+   harness-agnostic driver**. Deterministic retrieval gathers the candidate
+   signals (referenced files absent from the tree, decisions marked superseded
+   in `Lineage`, test assertions that may re-assert what the code emits), a
+   **local ollama model** confirms and phrases them, and the driver posts the
+   one advisory comment below. Code never leaves the box; output is reproducible
+   (temperature 0 + a fixed `--seed`); a wrong suggestion is cheap because the
+   output is advisory. Mechanical risks (`phase-inversion`, `superseded`) run on
+   the local `--ollama` model; judgment-heavy risks (`hollow-validation`,
+   `speculative`) route to `--escalate` when set, else the local model with
+   confidence forced low — **never silently trusted**. High-confidence labels
+   are applied only with `--apply-labels` (additive); otherwise it is
+   comment-only. Because it is read-only it dodges the worktree-isolation
+   hazard ([#304](http://gitea:3000/botfam/botfam/issues/304)) and runs on any
+   harness. Score it against a labelled set with `botfam meta-review eval --set
+   <labelled.json> --ollama <model>` (per-risk precision/recall); a seed set
+   ships at `doc/review/metareview-eval-set.json`.
+2. **Spawned subagent** (this skill, below) — when you are already inside a
+   harness with a subagent capability and want a frontier-model second opinion
+   instead of the local model. Same input contract, same output comment. The
+   driver is preferred for routine flagging; the subagent for the occasional
+   deeper diverse-model pass.
+
+Both honour the independence rule: neither sees the primary review's verdict.
+
 ## Input contract
 
 You are given exactly:

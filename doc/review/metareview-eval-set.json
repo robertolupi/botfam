@@ -1,0 +1,57 @@
+{
+  "_comment": "Self-contained labelled set for `botfam meta-review eval` (botfam#306). Each case carries its own corpus (tree file list + Lineage text) so the eval runs offline and reproducibly. Cases are modelled on the proposal-process-risk-labels worked example (the #298 triage, re-expressed as labels) and the meta-review skill's examples. `expected` is the per-artifact risk label set a human confirmed; the batch-tier labels (risk/fragmentation, source/agent-burst) are intentionally absent — they are out of this tier's scope.",
+  "cases": [
+    {
+      "name": "phase-inversion-missing-schema",
+      "kind": "issue",
+      "title": "Re-sequence the simulator around the trace schema",
+      "body": "Build the query-based checker on top of `internal/trace/schema.go`, reading events the producer emits. Wire it into `internal/cli/root.go`.",
+      "tree": ["internal/cli/root.go"],
+      "expected": ["risk/phase-inversion"]
+    },
+    {
+      "name": "superseded-ccrep",
+      "kind": "issue",
+      "title": "Add a CCREP quality ratchet gate",
+      "body": "Re-introduce the consensus ratchet from [ccrep](lineage-botfam-ccrep.md) so merges require N approvals tracked in the ledger.",
+      "tree": [],
+      "lineage": "| CCREP (quality ratchet) | [lineage-botfam-ccrep](lineage-botfam-ccrep.md) — superseded; consensus is now Gitea branch protection |",
+      "expected": ["risk/superseded"]
+    },
+    {
+      "name": "hollow-validation-test-restates-impl",
+      "kind": "pr",
+      "title": "Add coverage for the resolver default",
+      "body": "Adds a test pinning the resolver's default precedence.",
+      "diff": "+++ b/internal/famconfig/resolver_test.go\n+func TestDefault(t *testing.T) {\n+\trequire.Equal(t, \"botfam-next\", defaultTarget)\n+}\n",
+      "tree": ["internal/famconfig/resolver_test.go"],
+      "expected": ["risk/hollow-validation"]
+    },
+    {
+      "name": "speculative-ranker-before-data",
+      "kind": "issue",
+      "title": "Train a fragmentation ranker",
+      "body": "Build a learned ranker for risk/fragmentation. We have no labelled data yet, so we assume that cosine similarity over embeddings approximates human judgement.",
+      "tree": [],
+      "expected": ["risk/speculative"]
+    },
+    {
+      "name": "clean-existing-files",
+      "kind": "pr",
+      "title": "Tidy the CLI root wiring",
+      "body": "Small refactor of `internal/cli/rootcmd.go`; no new dependencies.",
+      "diff": "+++ b/internal/cli/rootcmd.go\n+\t// reorder command registration\n",
+      "tree": ["internal/cli/rootcmd.go"],
+      "expected": []
+    },
+    {
+      "name": "clean-references-live-decision",
+      "kind": "issue",
+      "title": "Extend the architecture MOC",
+      "body": "Add a pattern page under the [architecture](Architecture.md) language; it governs the current system.",
+      "tree": [],
+      "lineage": "| Architecture | live page; governs the current system |",
+      "expected": []
+    }
+  ]
+}

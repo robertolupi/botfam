@@ -432,8 +432,9 @@ type Issue struct {
 	PullRequest *struct {
 		URL string `json:"url"`
 	} `json:"pull_request"`
-	CreatedAt string `json:"created_at"`
-	ClosedAt  string `json:"closed_at"`
+	Labels    []Label `json:"labels"`
+	CreatedAt string  `json:"created_at"`
+	ClosedAt  string  `json:"closed_at"`
 }
 
 type TimelineEvent struct {
