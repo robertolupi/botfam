@@ -81,6 +81,16 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.ctx = ctx
+
+	// Arm the ingester eagerly from the server's cwd so the wake path does not
+	// depend on the client making any MCP call this session — a purely-CLI
+	// session (`botfam wait` only) would otherwise never arm it. No-op when cwd
+	// isn't a resolvable worktree (e.g. a system-wide mount at "/"), where the
+	// resource-read / tool-call paths still arm it once the client identifies.
+	if cwd, err := os.Getwd(); err == nil {
+		s.maybeStartIngestForWorkDir(ctx, cwd)
+	}
+
 	return serveStdio(ctx, mcpSrv, in, out)
 }
 
