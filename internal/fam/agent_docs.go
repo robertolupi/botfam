@@ -2,15 +2,14 @@ package fam
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"text/template"
 
+	"github.com/robertolupi/botfam/internal/skills"
 	"github.com/spf13/cobra"
 )
 
@@ -39,11 +38,12 @@ const agentDocsTemplateText = "# botfam agent harness pointer\n" +
 	"\n" +
 	"Refer to the MCP resources above for all operational details.\n"
 
-type RepoSkill struct {
-	Name        string
-	Description string
-	Path        string
-}
+// RepoSkill and the repo-skills reader moved to the internal/skills leaf (#311).
+// Re-exported here so the agent-docs renderer and internal/mcp are unaffected.
+type RepoSkill = skills.RepoSkill
+
+// ReadRepoSkills re-exports skills.ReadRepoSkills.
+func ReadRepoSkills(repoRoot string) ([]RepoSkill, error) { return skills.ReadRepoSkills(repoRoot) }
 
 // AgentDocsCmd is the thin args/io entry point retained for tests; it builds
 // the Cobra command and runs it against args.
@@ -157,85 +157,3 @@ func RenderAgentDocs(repoRoot string) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func ReadRepoSkills(repoRoot string) ([]RepoSkill, error) {
-	skillsDir := filepath.Join(repoRoot, "skills")
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read skills directory: %w", err)
-	}
-
-	var skills []RepoSkill
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		rel := filepath.Join("skills", entry.Name(), "SKILL.md")
-		skill, err := readRepoSkill(filepath.Join(repoRoot, rel), rel)
-		if err != nil {
-			return nil, err
-		}
-		if skill.Name != "" {
-			skills = append(skills, skill)
-		}
-	}
-
-	sort.Slice(skills, func(i, j int) bool {
-		if skills[i].Name == skills[j].Name {
-			return skills[i].Path < skills[j].Path
-		}
-		return skills[i].Name < skills[j].Name
-	})
-	return skills, nil
-}
-
-func readRepoSkill(path, rel string) (RepoSkill, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return RepoSkill{}, nil
-		}
-		return RepoSkill{}, fmt.Errorf("read %s: %w", rel, err)
-	}
-	name, desc, err := parseSkillFrontmatter(string(data))
-	if err != nil {
-		return RepoSkill{}, fmt.Errorf("%s: %w", rel, err)
-	}
-	return RepoSkill{Name: name, Description: desc, Path: rel}, nil
-}
-
-func parseSkillFrontmatter(s string) (string, string, error) {
-	lines := strings.Split(s, "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
-		return "", "", errors.New("missing YAML frontmatter")
-	}
-
-	var name, desc string
-	for i := 1; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if line == "---" {
-			if name == "" {
-				return "", "", errors.New("frontmatter missing name")
-			}
-			if desc == "" {
-				return "", "", errors.New("frontmatter missing description")
-			}
-			return name, desc, nil
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		switch strings.TrimSpace(key) {
-		case "name":
-			name = value
-		case "description":
-			desc = value
-		}
-	}
-	return "", "", errors.New("unterminated YAML frontmatter")
-}

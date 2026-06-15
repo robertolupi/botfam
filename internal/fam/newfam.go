@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/spf13/cobra"
 )
 
@@ -202,7 +203,7 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 		}
 
 		// Initialize the worktree git identity
-		if err := worktreeInit([]string{actor, wtPath}, out); err != nil {
+		if err := provision.InitWorktree([]string{actor, wtPath}, out); err != nil {
 			return fmt.Errorf("failed to initialize git identity in worktree %s: %w", wtPath, err)
 		}
 
