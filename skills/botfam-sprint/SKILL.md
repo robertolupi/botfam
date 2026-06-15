@@ -22,16 +22,31 @@ Coordination consensus is Gitea PR reviews + native branch protection (PROTOCOL
 
 Each iteration, in order:
 
-1. **Claim** an unassigned issue (assign it to yourself + announce).
-2. **Resolve** it on a branch off `botfam-next`, under the change discipline.
-3. **Open a PR** into `botfam-next` and announce it.
-4. **Review** one peer PR, if any is open (full `forge-autonomy` discipline).
+1. **Triage & Claim**: Inspect the forge for issue coupling.
+   - **Coupled Cluster** (labeled `coupled` or sharing a design/contract/data
+     model) → One agent claims the **entire cluster** (**Single Owner**). Use
+     subagents (hands) for parallel execution under one coherent design. Never
+     split coupled labor across peer minds.
+   - **Decoupled Backlog** (labeled `decoupled` or sharing no contracts) →
+     Distribute to peer agents via atomic issue-claims.
+   - **Bounded WIP**: Default to **WIP=1** for coupled work. Decoupled WIP may
+     be raised only when total work exceeds one owner's context.
+2. **Resolve**: Work the issue on a branch off `botfam-next` under the change
+   discipline.
+   - **Let It Crash & Supervise**: Monitor your context-fullness. If you
+     approach context-window fullness or get stuck, compile a **Handover
+     Snapshot** (distilled goals, decisions, branch, blocker, next step) to the
+     forge issue/PR, and crash/exit. The harness supervisor will perform a warm
+     restart.
+3. **Open a PR**: Target `botfam-next` and announce it.
+4. **Review**: Review one peer PR, if any is open (full `forge-autonomy`
+   discipline). Use peer reviews for critique/judgment, never
+   co-authoring/co-execution (**Diversity for Critique**).
 5. **Address comments** on your own PRs.
 
 **Exit** when *both* hold: no unassigned issue you can take without colliding
 with your own in-flight work, **and** no peer PR left to review. When the only
-remaining issues are blocked on your own PRs merging (see
-[Avoiding self-collision](#avoiding-self-collision)), don't spin — watch
+remaining issues are blocked on your own PRs merging, don't spin — watch
 `botfam-next` and resume when it advances.
 
 Announce each transition (claim / PR opened / review posted) on the fam channel
@@ -54,11 +69,34 @@ Resolve your own identity and the forge's before touching anything:
 Then survey the board: forge MCP `list_issues {state: open}` and
 `list_pull_requests {state: open}`.
 
-## 1. Pick an issue
+## 1. Pick an issue (Coupling Triage)
 
-Pick one that is **unassigned**, **well-scoped**, and **doesn't touch code your
-own open PRs are changing** (see
-[Avoiding self-collision](#avoiding-self-collision)).
+Survey the board (`list_issues {state: open}`). Before picking, determine the
+coupling of the backlog:
+
+- **Check Labels**: Inspect the labels on the forge issue (e.g. `coupled` or
+  `decoupled`). If the triage has not occurred yet, run **Coupling Triage**
+  yourself: group issues by shared design, contracts, file paths, or data
+  models.
+- **Coupled Cluster → Single Owner**: If an issue belongs to a coupled cluster,
+  it must have **exactly one owner** for all issues in that cluster end-to-end
+  to prevent **Concept Fragmentation** and concurrency deadlock. If a peer has
+  already claimed any issue in the cluster, do not claim the other parts of it.
+  If you claim the cluster, assign **all** related issues to yourself.
+- **Decoupled Backlog**: If issues are genuinely decoupled, distribute them
+  among peers atomicly.
+- **Bounded WIP**: Enforce **WIP=1** on coupled work (only claim one coupled
+  cluster/PR at a time). For decoupled work, you may carry WIP > 1 if total
+  work exceeds one owner's context, but default to WIP=1 to prevent
+  context-window degradation.
+
+Pick an issue that:
+
+1. Is unassigned and has not been claimed by a peer (assignee check required).
+2. For coupled work, belongs to a cluster you own (or are claiming the whole
+   of).
+3. Doesn't touch code your own open PRs are changing (see
+   [Avoiding self-collision](#avoiding-self-collision)).
 
 > ⚠️ `list_issues` does **not** return assignees. Check them explicitly before
 > claiming, or you'll grab something already in flight:
@@ -70,19 +108,17 @@ own open PRs are changing** (see
 >   | python3 -c 'import sys,json;d=json.load(sys.stdin);print([a["login"] for a in (d.get("assignees") or [])])'
 > ```
 
-Prefer issues that are concrete and verifiable (a bug with a clear repro, a
-missing timeout, a dead-code removal, a doc that drifted from reality) over
-open-ended design work. Read the full issue body — botfam issues usually name
-the exact file/line and suggest a fix.
-
 ## 2. Claim it
 
 Two steps, both required, and check for a race first (scan the channel + the
 assignee API — a peer may have claimed it seconds ago):
 
-1. Assign on the forge: MCP
+1. Assign on the forge (the control plane): MCP
    `issue_write {method: "update", issue_number: N, assignees: ["<actor>-bot"]}`.
-2. Announce on IRC: `Claimed #N (<title>). Fixing + will open a PR.`
+   (For a coupled cluster, claim **all** issues in that cluster).
+2. Announce on IRC:
+   `Claimed #N (<title>) [coupled cluster: #A, #B, ...]. Fixing + will open a PR.`
+   (or note if decoupled).
 
 ## 3. Resolve it
 
@@ -126,6 +162,33 @@ git push gitea HEAD
 
 Write the body to explain the *why*, not just the *what* — the reviewer reads
 it before the diff.
+
+### Context-Window Fullness, Handover Snapshots, and Let It Crash
+
+An agent's context window is finite, and its reasoning degrades as the context
+fills. Rather than trying to nurse a degraded agent, follow the **Let It Crash
+and Supervise** pattern:
+
+- **Monitor Context**: Do not guess your token consumption or context size; use
+  computed metrics from the harness (`input_tokens` / `context_window` on the
+  latest `claude_code.llm_request` span).
+- **Prepare Handover Snapshot**: If context-fullness crosses 80% (or the crash
+  threshold), or if you loop/stall, write a compact **Handover Snapshot** to
+  the control plane (the forge, e.g., as a comment on the issue or PR). The
+  snapshot must capture the distilled reasoning state:
+  ```yaml
+  goal: <what you are trying to achieve>
+  decisions_so_far:
+    - <what was chosen and why>
+  branch: <pointer to the branch/PR on the repo>
+  current_blocker: <what is blocking you, if any>
+  next_step: <the next immediate action the replacement should take>
+  ```
+- **Crash Gracefully**: Exit or crash the process. The harness/CI supervisor
+  will detect the exit and spawn a fresh agent.
+- **Warm Restart**: The replacement agent will read the Handover Snapshot from
+  the forge and checkout the branch (already on the repo), avoiding the
+  onboarding tax of replaying the entire task history from genesis.
 
 ## 4. Open the PR
 
