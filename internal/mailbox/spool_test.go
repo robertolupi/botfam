@@ -106,3 +106,25 @@ func itoa(i int) string {
 	}
 	return string(b)
 }
+
+func TestSpoolOnDeliverFires(t *testing.T) {
+	sp, err := Open(filepath.Join(t.TempDir(), "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []*Message
+	sp.OnDeliver = func(m *Message) { got = append(got, m) }
+
+	if _, err := sp.Deliver(&Message{Source: SourceForge, Kind: "issue", Subject: "ping", Body: "http://x"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sp.Deliver(&Message{Source: SourceIRC, Subject: "hi", Body: "claude: hi"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("OnDeliver fired %d times, want 2", len(got))
+	}
+	if got[0].Subject != "ping" || got[1].Source != SourceIRC {
+		t.Errorf("OnDeliver received wrong messages: %+v", got)
+	}
+}

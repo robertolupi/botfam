@@ -125,3 +125,32 @@ func TestParseToleratesUnknownAndMalformed(t *testing.T) {
 		t.Errorf("malformed Seq should be skipped, got %d", got.Seq)
 	}
 }
+
+func TestSanitizedHeadersOmitsBodyAndSanitizes(t *testing.T) {
+	m := &Message{
+		From:    "forge",
+		To:      "#botfam",
+		Subject: "issue: botfam/botfam#1 \"hi\"\r\nInjected: evil",
+		Source:  SourceForge,
+		Kind:    "issue",
+		Seq:     7,
+		Body:    "http://gitea/secret-url",
+	}
+	h := m.SanitizedHeaders()
+	if _, ok := h["Body"]; ok {
+		t.Error("SanitizedHeaders must never include the body")
+	}
+	for _, v := range h {
+		if strings.ContainsAny(v, "\r\n") {
+			t.Errorf("header value not sanitized (CR/LF present): %q", v)
+		}
+	}
+	if h["Source"] != "forge" || h["Kind"] != "issue" || h["Seq"] != "7" {
+		t.Errorf("unexpected headers: %+v", h)
+	}
+	// CR/LF stripping (no header forging) is the security property checked above;
+	// the literal text survives harmlessly as Subject content, which is fine.
+	if h["Subject"] == "" {
+		t.Error("Subject should be present (sanitized, not dropped)")
+	}
+}

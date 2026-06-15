@@ -38,6 +38,10 @@ type Ingester struct {
 	spoolDir string
 	interval time.Duration
 	pollers  []Poller
+
+	// OnDeliver, if set, is wired to the spool so each delivered message fires
+	// the best-effort MCP notification nudge (#337). Set before Run.
+	OnDeliver func(*mailbox.Message)
 }
 
 // NewIngester builds an ingester for the spool at spoolDir that polls its sources
@@ -73,6 +77,7 @@ func (in *Ingester) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	sp.OnDeliver = in.OnDeliver
 
 	// The lock lives inside the (now-created) spool dir so the writer-lock
 	// acquisition never races the spool-dir creation.

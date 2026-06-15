@@ -19,6 +19,7 @@ import (
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/irc"
+	"github.com/robertolupi/botfam/internal/mailbox"
 )
 
 func newTestServer(t *testing.T) (*server, string) {
@@ -137,6 +138,42 @@ func TestMaybeStartIngestForWorkDirArmsIngester(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("ingester did not create the spool at %s", spoolDir)
+}
+
+// TestNudgeCallbackGating: the #337 notification nudge is on by default for a
+// resolvable agent and nil when the fam can't be resolved (no notify target).
+// The flag-off case rides on the generic famconfig FlagEnabled tests.
+func TestNudgeCallbackGating(t *testing.T) {
+	s, _ := newTestServer(t)
+	wtDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.nudgeCallback(wtDir) == nil {
+		t.Error("nudge should default on for a resolvable agent worktree")
+	}
+	if s.nudgeCallback("/definitely/not/a/fam") != nil {
+		t.Error("nudge callback should be nil when the fam can't be resolved")
+	}
+}
+
+// TestNudgeDebounce: a second nudge within the debounce window is suppressed
+// (lastNudge timestamp unchanged), so a backlog drain doesn't flood the client.
+func TestNudgeDebounce(t *testing.T) {
+	// A real server with no client sessions: SendNotificationToAllClients is a
+	// safe no-op, so the test exercises the debounce path without a live client.
+	s := &server{mcpSrv: mcpserver.NewMCPServer(serverName, serverVersion)}
+	m := &mailbox.Message{Source: mailbox.SourceForge, Subject: "x"}
+
+	s.nudge(m)
+	first := s.lastNudge
+	if first.IsZero() {
+		t.Fatal("first nudge did not set lastNudge")
+	}
+	s.nudge(m) // within window
+	if !s.lastNudge.Equal(first) {
+		t.Error("second nudge within debounce window should be suppressed (lastNudge advanced)")
+	}
 }
 
 func mkdir(t *testing.T, path string) string {

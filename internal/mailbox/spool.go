@@ -24,6 +24,12 @@ const (
 // this layer.
 type Spool struct {
 	dir string
+
+	// OnDeliver, if set, is invoked with each message immediately after it
+	// becomes visible in new/ (post-rename). It is the hook the ingester uses to
+	// fire the best-effort MCP notification nudge (#337). It must not block (the
+	// caller may hold the writer lock) and must not mutate the spool.
+	OnDeliver func(*Message)
 }
 
 // Open ensures the Maildir layout (tmp/new/cur) exists under dir and returns a
@@ -89,6 +95,9 @@ func (s *Spool) Deliver(m *Message) (string, error) {
 	if err := os.Rename(tmp, filepath.Join(s.dir, boxNew, name)); err != nil {
 		_ = os.Remove(tmp)
 		return "", err
+	}
+	if s.OnDeliver != nil {
+		s.OnDeliver(m)
 	}
 	return name, nil
 }

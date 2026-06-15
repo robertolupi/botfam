@@ -102,6 +102,34 @@ func (m *Message) Encode() []byte {
 	return b.Bytes()
 }
 
+// SanitizedHeaders returns the message's header values after the same
+// sanitization Encode applies (CR/LF + control stripping and length caps, §4),
+// as a map suitable for the best-effort MCP notification nudge (§5). It carries
+// only the metadata that lets an agent judge urgency — From/To/Subject/Source/
+// Kind/Seq/Date — and never the body, a URL, or Traceparent.
+func (m *Message) SanitizedHeaders() map[string]string {
+	h := make(map[string]string, 7)
+	set := func(k, v string) {
+		if v != "" {
+			h[k] = v
+		}
+	}
+	set(hdrFrom, sanitizeName(m.From))
+	set(hdrTo, sanitizeName(m.To))
+	set(hdrSubject, sanitizeHeaderValue(m.Subject, maxSubjectLen))
+	set(hdrSource, sanitizeHeaderValue(m.Source, maxNameLen))
+	set(hdrKind, sanitizeHeaderValue(m.Kind, maxNameLen))
+	if m.Seq > 0 {
+		set(hdrSeq, strconv.FormatInt(m.Seq, 10))
+	}
+	date := m.Date
+	if date.IsZero() {
+		date = time.Now()
+	}
+	set(hdrDate, date.UTC().Format(time.RFC3339))
+	return h
+}
+
 // ParseMessage decodes an [Message.Encode] envelope using the standard library's
 // net/mail RFC-5322 reader. Header lookups are case-insensitive (Header.Get
 // canonicalizes); the body is everything after the blank line. Unknown headers

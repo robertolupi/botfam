@@ -25,6 +25,7 @@ import (
 	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/ingest"
 	"github.com/robertolupi/botfam/internal/irc"
+	"github.com/robertolupi/botfam/internal/mailbox"
 	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/robertolupi/botfam/internal/wiki"
 )
@@ -66,8 +67,19 @@ type server struct {
 	cachedRoots    *mcplib.ListRootsResult
 	cachedRootsErr error
 	rootsCached    bool
-	ingestStarted  bool // mailbox ingest goroutine launched (guarded by mu)
+	ingestStarted  bool      // mailbox ingest goroutine launched (guarded by mu)
+	lastNudge      time.Time // last MCP notification nudge sent (#337 debounce, guarded by mu)
 }
+
+// nudgeDebounce suppresses notification nudges fired within this window of the
+// previous one, so a cold-start backlog drain or a burst collapses to a single
+// "call botfam wait" prompt rather than a flood (proposal §5).
+const nudgeDebounce = 2 * time.Second
+
+// nudgeMethod is the JSON-RPC method for the best-effort wake nudge (#337).
+// botfam-namespaced so a client that doesn't recognize it simply ignores it
+// (graceful degradation — the agent still wakes via `botfam wait`).
+const nudgeMethod = "notifications/botfam/wake"
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	s := &server{}
@@ -130,6 +142,7 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 		pollers = append(pollers, fp)
 	}
 	ing := ingest.NewIngester(spoolDir, 30*time.Second, pollers...)
+	ing.OnDeliver = s.nudgeCallback(workDir)
 	go func() {
 		// A non-nil Run error with a live server ctx is a real failure (e.g. the
 		// #263 fail-fast on a missing fam root): surface it on stderr (the host's
@@ -142,6 +155,51 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 			s.mu.Unlock()
 		}
 	}()
+}
+
+// nudgeCallback returns the spool OnDeliver hook that fires the best-effort MCP
+// notification nudge (#337), or nil when the per-agent `mcp_notify` fam.toml
+// flag is off (default on) — in which case the ingester delivers silently and
+// the agent wakes via `botfam wait` as usual. A nil callback also results when
+// the fam can't be resolved (no notify target).
+func (s *server) nudgeCallback(workDir string) func(*mailbox.Message) {
+	rf, err := famconfig.ResolveFam(workDir)
+	if err != nil {
+		return nil
+	}
+	if on, _ := rf.FlagEnabled("mcp_notify", true); !on {
+		return nil
+	}
+	return s.nudge
+}
+
+// nudge sends a best-effort, non-acking notification to the client: a sanitized
+// headers-only projection of a delivered message (§4/§5) whose sole job is to
+// prompt the agent to call `botfam wait`. It never advances a cursor or moves a
+// message to cur/ — `botfam wait` remains the sole drain/ack path. Debounced so
+// a backlog drain or burst collapses to one nudge; the send is fire-and-forget
+// (mcp-go drops it if the client channel is blocked), so it never stalls the
+// ingester even when it holds the writer lock.
+func (s *server) nudge(m *mailbox.Message) {
+	if s.mcpSrv == nil || m == nil {
+		return
+	}
+	s.mu.Lock()
+	if !s.lastNudge.IsZero() && time.Since(s.lastNudge) < nudgeDebounce {
+		s.mu.Unlock()
+		return
+	}
+	s.lastNudge = time.Now()
+	s.mu.Unlock()
+
+	params := make(map[string]any, 8)
+	for k, v := range m.SanitizedHeaders() {
+		params[k] = v
+	}
+	// A bounded hint that the spool has unread mail; the agent reads the actual
+	// content (URL/body) via `botfam wait`, never from the nudge.
+	params["hint"] = "new spool message — call `botfam wait` to read"
+	s.mcpSrv.SendNotificationToAllClients(nudgeMethod, params)
 }
 
 func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
