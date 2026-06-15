@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
@@ -139,17 +138,9 @@ func DefaultPassFile(famSlug, actor string) string {
 	return ""
 }
 
-// FamScopedNick returns the fam-scoped IRC nick for an actor: "<actor>-<slug>"
-// (e.g. "claude-botfam", "agy-dc"), so agents from different fams sharing the
-// same actor name (and even the same wt-<actor> dir) never collide on a shared
-// IRC server (#137). It is idempotent (won't double-suffix) and returns the
-// bare actor when no slug is resolvable.
+// FamScopedNick re-exports famconfig.FamScopedNick, which now owns the fam-scoped
+// IRC nick logic so famctx can derive it without importing internal/fam (#262).
+// Kept here so existing internal/fam callers are unaffected.
 func FamScopedNick(actor, famSlug string) string {
-	if famSlug == "" || actor == "" {
-		return actor
-	}
-	if strings.HasSuffix(actor, "-"+famSlug) {
-		return actor
-	}
-	return actor + "-" + famSlug
+	return famconfig.FamScopedNick(actor, famSlug)
 }

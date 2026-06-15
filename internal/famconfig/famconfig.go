@@ -147,6 +147,22 @@ func FamSlug(reg Registry) string {
 	return reg.Name
 }
 
+// FamScopedNick returns the fam-scoped IRC nick for an actor: "<actor>-<slug>"
+// (e.g. "claude-botfam", "agy-dc"), so agents from different fams sharing the
+// same actor name never collide on a shared IRC server (#137). It is idempotent
+// (won't double-suffix) and returns the bare actor when no slug is resolvable.
+// Lives in the famconfig leaf so famctx can derive ScopedNick without importing
+// internal/fam (which would cycle); internal/fam re-exports it for callers.
+func FamScopedNick(actor, famSlug string) string {
+	if famSlug == "" || actor == "" {
+		return actor
+	}
+	if strings.HasSuffix(actor, "-"+famSlug) {
+		return actor
+	}
+	return actor + "-" + famSlug
+}
+
 // HarnessTokenPath returns the per-harness token path ~/.botfam/token-<harness>.
 func HarnessTokenPath(harness string) (string, error) {
 	if harness == "" {
@@ -267,6 +283,14 @@ func ResolveFlags(reg Registry, actor string) map[string]any {
 // {"0","false","f","off","no","n"} (false).
 func FlagEnabled(reg Registry, actor, name string, def bool) (bool, error) {
 	return flagValue(ResolveFlags(reg, actor), name, def)
+}
+
+// FlagFromMap reads name from an already-resolved effective flag map (e.g.
+// famctx.Context.Flags), applying FlagEnabled's conversion rules and returning
+// def when the flag is absent. It lets consumers that hold a pre-merged flag set
+// share the one truthiness interpreter instead of re-deriving it.
+func FlagFromMap(flags map[string]any, name string, def bool) (bool, error) {
+	return flagValue(flags, name, def)
 }
 
 // flagValue looks name up in flags and converts it per FlagEnabled's rules,
