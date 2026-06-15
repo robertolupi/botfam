@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/spf13/cobra"
 )
 
@@ -93,7 +94,7 @@ repository = ""
 	}
 
 	if _, err := os.Stat(filepath.Join(mainDir, ".git")); os.IsNotExist(err) {
-		if _, err := gitOutput(mainDir, "init"); err != nil {
+		if _, err := gitexec.Output(mainDir, "init"); err != nil {
 			return fmt.Errorf("failed to initialize git repository: %w", err)
 		}
 		fmt.Fprintf(out, "Initialized fresh Git repository at %s\n", mainDir)

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/spf13/cobra"
 )
 
@@ -56,7 +57,7 @@ func runVerify(sha string, pkgs []string, race bool, out io.Writer) error {
 
 	// Resolve the sha to a concrete commit so the report and the worktree
 	// reference the same revision, and so we fail early on a bad ref.
-	resolved, err := gitOne(repo, "rev-parse", "--verify", sha+"^{commit}")
+	resolved, err := gitexec.One(repo, "rev-parse", "--verify", sha+"^{commit}")
 	if err != nil {
 		return fmt.Errorf("cannot resolve %q to a commit: %w", sha, err)
 	}
@@ -72,7 +73,7 @@ func runVerify(sha string, pkgs []string, race bool, out io.Writer) error {
 	wtPath := filepath.Join(tmpDir, "wt")
 
 	// Create a detached worktree at the resolved commit.
-	if _, err := gitOutput(repo, "worktree", "add", "--detach", wtPath, resolved); err != nil {
+	if _, err := gitexec.Output(repo, "worktree", "add", "--detach", wtPath, resolved); err != nil {
 		_ = os.RemoveAll(tmpDir)
 		return fmt.Errorf("failed to add ephemeral worktree: %w", err)
 	}
@@ -81,7 +82,7 @@ func runVerify(sha string, pkgs []string, race bool, out io.Writer) error {
 	defer func() {
 		// `worktree remove --force` detaches the linked worktree from git's
 		// metadata; RemoveAll then clears the temp dir itself.
-		_, _ = gitOutput(repo, "worktree", "remove", "--force", wtPath)
+		_, _ = gitexec.Output(repo, "worktree", "remove", "--force", wtPath)
 		_ = os.RemoveAll(tmpDir)
 	}()
 

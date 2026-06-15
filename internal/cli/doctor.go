@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/spf13/cobra"
 )
 
@@ -124,8 +125,8 @@ func gitIdentityCheck(workDir string) doctorCheck {
 	if info, err := (Resolver{WorkDir: workDir}).Resolve(); err == nil {
 		actor = info.Actor
 	}
-	name, _ := gitOne(workDir, "config", "user.name")
-	email, _ := gitOne(workDir, "config", "user.email")
+	name, _ := gitexec.One(workDir, "config", "user.name")
+	email, _ := gitexec.One(workDir, "config", "user.email")
 	return evaluateGitIdentity(actor, name, email)
 }
 
@@ -202,7 +203,7 @@ func parseCredentialHelpers(showOriginOutput string) []string {
 // remote, falling back to `origin`.
 func forgeRemoteURL(workDir string) (string, error) {
 	for _, remote := range []string{"gitea", "origin"} {
-		out, err := gitOne(workDir, "remote", "get-url", remote)
+		out, err := gitexec.One(workDir, "remote", "get-url", remote)
 		if err == nil {
 			if u := strings.TrimSpace(out); u != "" {
 				return u, nil

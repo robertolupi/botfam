@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/spf13/cobra"
 )
 
@@ -83,7 +84,7 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 	mainDir := filepath.Join(famDir, "main")
 	if _, statErr := os.Stat(filepath.Join(mainDir, ".git")); os.IsNotExist(statErr) {
 		fmt.Fprintf(out, "Cloning %s into %s...\n", gitURL, mainDir)
-		if _, err := gitOutput(famDir, "clone", gitURL, mainDir); err != nil {
+		if _, err := gitexec.Output(famDir, "clone", gitURL, mainDir); err != nil {
 			return fmt.Errorf("git clone: %w", err)
 		}
 	} else {
@@ -110,7 +111,7 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 	for n, ac := range agents {
 		wt := filepath.Join(famDir, n)
 		if _, statErr := os.Stat(wt); os.IsNotExist(statErr) {
-			if _, err := gitOutput(mainDir, "worktree", "add", "-b", "agent/"+n, wt); err != nil {
+			if _, err := gitexec.Output(mainDir, "worktree", "add", "-b", "agent/"+n, wt); err != nil {
 				return fmt.Errorf("create worktree for %s: %w", n, err)
 			}
 			fmt.Fprintf(out, "Created worktree %s\n", wt)

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/spf13/cobra"
 )
@@ -132,7 +133,7 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 	}
 
 	// Build list of worktrees to add
-	repoCommon, err := gitOne(repoRoot, "rev-parse", "--git-common-dir")
+	repoCommon, err := gitexec.One(repoRoot, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return err
 	}
@@ -153,11 +154,11 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 
 		if _, err := os.Stat(wtPath); err == nil {
 			// Path exists. Validate it.
-			isGit, err := gitOne(wtPath, "rev-parse", "--is-inside-work-tree")
+			isGit, err := gitexec.One(wtPath, "rev-parse", "--is-inside-work-tree")
 			if err != nil || isGit != "true" {
 				return fmt.Errorf("path exists but is not a git worktree: %s", wtPath)
 			}
-			wtCommon, err := gitOne(wtPath, "rev-parse", "--git-common-dir")
+			wtCommon, err := gitexec.One(wtPath, "rev-parse", "--git-common-dir")
 			if err != nil {
 				return err
 			}
@@ -167,7 +168,7 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 			if wtCommon != repoCommon {
 				return fmt.Errorf("existing worktree %s does not belong to %s", wtPath, repoRoot)
 			}
-			wtBranch, err := gitOne(wtPath, "branch", "--show-current")
+			wtBranch, err := gitexec.One(wtPath, "branch", "--show-current")
 			if err != nil {
 				return err
 			}
@@ -178,17 +179,17 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 		} else {
 			// Create new worktree
 			hasBranch := false
-			if _, err := gitOutput(repoRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+			if _, err := gitexec.Output(repoRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
 				hasBranch = true
 			}
 			if hasBranch {
 				fmt.Fprintf(out, "  creating worktree on existing branch %s...\n", branch)
-				if _, err := gitOutput(repoRoot, "worktree", "add", wtPath, branch); err != nil {
+				if _, err := gitexec.Output(repoRoot, "worktree", "add", wtPath, branch); err != nil {
 					return fmt.Errorf("failed to add worktree %s: %w", wtPath, err)
 				}
 			} else {
 				fmt.Fprintf(out, "  creating worktree on new branch %s...\n", branch)
-				if _, err := gitOutput(repoRoot, "worktree", "add", "-b", branch, wtPath, "HEAD"); err != nil {
+				if _, err := gitexec.Output(repoRoot, "worktree", "add", "-b", branch, wtPath, "HEAD"); err != nil {
 					return fmt.Errorf("failed to create worktree %s: %w", wtPath, err)
 				}
 			}
@@ -306,7 +307,7 @@ func registerMCPServerGlobally(out io.Writer) error {
 func wikiRemoteURL(repoRoot string) (string, error) {
 	var raw string
 	for _, remote := range []string{"gitea", "origin"} {
-		if u, err := gitOne(repoRoot, "remote", "get-url", remote); err == nil && u != "" {
+		if u, err := gitexec.One(repoRoot, "remote", "get-url", remote); err == nil && u != "" {
 			raw = u
 			break
 		}
@@ -333,24 +334,24 @@ func cloneWiki(repoRoot, wtPath string, out io.Writer) {
 	}
 
 	// Read git identity config from the worktree to replicate in the cloned wiki repo.
-	name, _ := gitOne(wtPath, "config", "user.name")
-	email, _ := gitOne(wtPath, "config", "user.email")
+	name, _ := gitexec.One(wtPath, "config", "user.name")
+	email, _ := gitexec.One(wtPath, "config", "user.email")
 	name = strings.TrimSpace(name)
 	email = strings.TrimSpace(email)
 
-	if _, err := gitOutput(repoRoot, "clone", wikiURL, dest); err != nil {
+	if _, err := gitexec.Output(repoRoot, "clone", wikiURL, dest); err != nil {
 		fmt.Fprintf(out, "  warning: could not clone wiki %s: %v\n", wikiURL, err)
 		return
 	}
 	fmt.Fprintf(out, "  cloned wiki into %s\n", dest)
 
 	if name != "" {
-		if _, err := gitOutput(dest, "config", "user.name", name); err != nil {
+		if _, err := gitexec.Output(dest, "config", "user.name", name); err != nil {
 			fmt.Fprintf(out, "  warning: could not configure wiki user.name: %v\n", err)
 		}
 	}
 	if email != "" {
-		if _, err := gitOutput(dest, "config", "user.email", email); err != nil {
+		if _, err := gitexec.Output(dest, "config", "user.email", email); err != nil {
 			fmt.Fprintf(out, "  warning: could not configure wiki user.email: %v\n", err)
 		}
 	}
