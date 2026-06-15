@@ -30,6 +30,11 @@ type AgentConfig struct {
 	ForgeUser string `toml:"forge_user,omitempty"`
 	Email     string `toml:"email,omitempty"`
 	IsUser    bool   `toml:"-"` // true for [user.<name>] entries
+
+	// Flags are this agent's per-harness feature-flag overrides
+	// ([agent.<name>.flags] in fam.toml); they win over the fam-wide [flags]
+	// defaults key-by-key. See ResolveFlags.
+	Flags map[string]any `toml:"flags,omitempty"`
 }
 
 // Registry is the parsed fam.toml.
@@ -56,6 +61,13 @@ type Registry struct {
 	Agents map[string]AgentConfig `toml:"agent,omitempty"`
 	Users  map[string]AgentConfig `toml:"user,omitempty"`
 
+	// Flags is the fam-wide feature-flag table ([flags] in fam.toml). It lets a
+	// new codepath be toggled per-fam (and per-agent via AgentConfig.Flags)
+	// without changing MCP env/settings — see wiki/ProposalFlagFlips and
+	// ResolveFlags. Values may be bool, number, or string; FlagEnabled
+	// interprets truthiness.
+	Flags map[string]any `toml:"flags,omitempty"`
+
 	// WikiProjections declares curated wiki indexes as "name:glob" entries (#120).
 	WikiProjections []string `toml:"wiki_projections,omitempty"`
 }
@@ -75,6 +87,19 @@ type ResolvedFam struct {
 	TokenPath    string
 	Agent        AgentConfig
 	Registry     Registry
+
+	// Flags is this agent's effective feature flags: the fam-wide [flags]
+	// defaults overlaid with the agent's [agent.<name>.flags] overrides. Query
+	// with FlagEnabled.
+	Flags map[string]any
+}
+
+// FlagEnabled reports whether the named feature flag is truthy in this resolved
+// fam's effective Flags, returning def when the flag is set nowhere. It errors
+// when the flag IS set but its value does not cleanly convert to a boolean. See
+// FlagEnabled (package func) for the accepted values.
+func (rf ResolvedFam) FlagEnabled(name string, def bool) (bool, error) {
+	return flagValue(rf.Flags, name, def)
 }
 
 // ReadRegistry parses the fam.toml at path, backfilling the canonical Name (and
@@ -210,7 +235,78 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 		TokenPath:    tokenPath,
 		Agent:        agent,
 		Registry:     reg,
+		Flags:        ResolveFlags(reg, actor),
 	}, nil
+}
+
+// ResolveFlags returns the effective feature flags for actor: the fam-wide
+// [flags] table overlaid with the agent's [agent.<actor>.flags] overrides.
+// Agent overrides win per key; an unknown actor yields just the fam defaults.
+// The result is a fresh map and never nil.
+func ResolveFlags(reg Registry, actor string) map[string]any {
+	out := make(map[string]any, len(reg.Flags))
+	for k, v := range reg.Flags {
+		out[k] = v
+	}
+	if ac, ok := reg.Agents[actor]; ok {
+		for k, v := range ac.Flags {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// FlagEnabled reports whether the named feature flag resolves truthy for actor
+// in reg, returning def when the flag is set in neither the fam-wide [flags] nor
+// the agent's overrides. It errors when the flag IS set but its value does not
+// cleanly convert to a boolean (a likely typo) — callers should surface that
+// rather than silently treating a misconfigured flag as off.
+//
+// Accepted values: a bool; any number (non-zero is true); or a string (after
+// trim + lowercase) in {"1","true","t","on","yes","y"} (true) or
+// {"0","false","f","off","no","n"} (false).
+func FlagEnabled(reg Registry, actor, name string, def bool) (bool, error) {
+	return flagValue(ResolveFlags(reg, actor), name, def)
+}
+
+// flagValue looks name up in flags and converts it per FlagEnabled's rules,
+// returning def when it is absent.
+func flagValue(flags map[string]any, name string, def bool) (bool, error) {
+	v, ok := flags[name]
+	if !ok {
+		return def, nil
+	}
+	b, err := parseFlagBool(v)
+	if err != nil {
+		return def, fmt.Errorf("fam.toml flag %q = %#v: %w", name, v, err)
+	}
+	return b, nil
+}
+
+// parseFlagBool converts a fam.toml flag value (go-toml yields bool/int64/
+// float64/string) to a boolean, erroring on anything that is not unambiguously
+// truthy or falsy.
+func parseFlagBool(v any) (bool, error) {
+	switch x := v.(type) {
+	case bool:
+		return x, nil
+	case int64:
+		return x != 0, nil
+	case int:
+		return x != 0, nil
+	case float64:
+		return x != 0, nil
+	case string:
+		switch strings.ToLower(strings.TrimSpace(x)) {
+		case "1", "true", "t", "on", "yes", "y":
+			return true, nil
+		case "0", "false", "f", "off", "no", "n":
+			return false, nil
+		}
+		return false, fmt.Errorf("%q is not a boolean", x)
+	default:
+		return false, fmt.Errorf("unsupported flag type %T", v)
+	}
 }
 
 // --- lightweight, dependency-free helpers (leaf package) ---------------------

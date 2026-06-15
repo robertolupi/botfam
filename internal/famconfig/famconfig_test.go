@@ -115,6 +115,200 @@ func TestFindFamTOMLPath(t *testing.T) {
 	}
 }
 
+const flagsFamTOML = `name       = "botfam"
+slug       = "botfam"
+forge_url  = "http://gitea:3000/"
+repository = "botfam/botfam"
+roster     = ["claude", "agy"]
+
+[flags]
+wait_ingest = 1
+experiment  = false
+ratio       = 0
+
+[agent.claude]
+harness    = "claude-code"
+forge_user = "claude-bot"
+
+[agent.agy]
+harness    = "antigravity"
+forge_user = "agy-bot"
+
+[agent.agy.flags]
+wait_ingest = 0
+experiment  = "yes"
+`
+
+func TestReadRegistryParsesFlags(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fam.toml")
+	if err := os.WriteFile(path, []byte(flagsFamTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := ReadRegistry(path)
+	if err != nil {
+		t.Fatalf("ReadRegistry: %v", err)
+	}
+	if reg.Flags["wait_ingest"] != int64(1) {
+		t.Errorf("fam-wide wait_ingest = %#v, want int64(1)", reg.Flags["wait_ingest"])
+	}
+	if reg.Agents["agy"].Flags["experiment"] != "yes" {
+		t.Errorf("agent.agy experiment = %#v, want \"yes\"", reg.Agents["agy"].Flags["experiment"])
+	}
+	if reg.Agents["claude"].Flags != nil {
+		t.Errorf("agent.claude has no [flags] table; got %#v", reg.Agents["claude"].Flags)
+	}
+}
+
+func TestWriteRegistryRoundTripsFlags(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fam.toml")
+	if err := os.WriteFile(path, []byte(flagsFamTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := ReadRegistry(path)
+	if err != nil {
+		t.Fatalf("ReadRegistry: %v", err)
+	}
+	out := filepath.Join(dir, "out.toml")
+	if err := WriteRegistry(out, reg); err != nil {
+		t.Fatalf("WriteRegistry: %v", err)
+	}
+	got, err := ReadRegistry(out)
+	if err != nil {
+		t.Fatalf("ReadRegistry(rewritten): %v", err)
+	}
+	if got.Flags["wait_ingest"] != int64(1) {
+		t.Errorf("fam flags lost on rewrite: %#v", got.Flags)
+	}
+	if got.Agents["agy"].Flags["wait_ingest"] != int64(0) {
+		t.Errorf("agent flags lost on rewrite: %#v", got.Agents["agy"].Flags)
+	}
+}
+
+func TestResolveFlagsAndFlagEnabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fam.toml")
+	if err := os.WriteFile(path, []byte(flagsFamTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := ReadRegistry(path)
+	if err != nil {
+		t.Fatalf("ReadRegistry: %v", err)
+	}
+
+	// on asserts FlagEnabled succeeds and returns the resolved value.
+	on := func(actor, name string, def bool) bool {
+		t.Helper()
+		v, err := FlagEnabled(reg, actor, name, def)
+		if err != nil {
+			t.Fatalf("FlagEnabled(%s, %s): unexpected error %v", actor, name, err)
+		}
+		return v
+	}
+
+	// claude has no overrides → inherits the fam-wide defaults.
+	if !on("claude", "wait_ingest", false) {
+		t.Error("claude wait_ingest should be truthy (fam default 1)")
+	}
+	if on("claude", "experiment", true) {
+		t.Error("claude experiment should be false (fam default false)")
+	}
+
+	// agy overrides win key-by-key: wait_ingest off, experiment on.
+	if on("agy", "wait_ingest", true) {
+		t.Error("agy wait_ingest should be false (agent override 0)")
+	}
+	if !on("agy", "experiment", false) {
+		t.Error("agy experiment should be truthy (agent override \"yes\")")
+	}
+
+	// Unset flag falls back to the supplied default.
+	if !on("claude", "nonexistent", true) {
+		t.Error("unset flag should return def=true")
+	}
+	if on("claude", "nonexistent", false) {
+		t.Error("unset flag should return def=false")
+	}
+
+	// Unknown actor → just the fam-wide defaults.
+	if !on("ghost", "wait_ingest", false) {
+		t.Error("unknown actor should see fam default wait_ingest=1")
+	}
+
+	// ResolveFlags merge surface.
+	flags := ResolveFlags(reg, "agy")
+	if flags["wait_ingest"] != int64(0) || flags["experiment"] != "yes" || flags["ratio"] != int64(0) {
+		t.Errorf("ResolveFlags(agy) = %#v", flags)
+	}
+}
+
+func TestFlagEnabledErrorsOnBadValue(t *testing.T) {
+	// A set-but-unparseable value (likely a typo) errors rather than silently
+	// reading as off; the returned bool is the caller's default.
+	reg := Registry{Flags: map[string]any{"wait_ingest": "treu"}}
+	got, err := FlagEnabled(reg, "", "wait_ingest", true)
+	if err == nil {
+		t.Fatal("expected an error for non-boolean flag value \"treu\"")
+	}
+	if got != true {
+		t.Errorf("on error the default should be returned; got %v want true", got)
+	}
+
+	// Every accepted spelling converts without error.
+	cases := map[any]bool{
+		true: true, false: false,
+		int64(1): true, int64(0): false, int64(2): true,
+		"on": true, "OFF": false, "Yes": true, "n": false, " true ": true,
+	}
+	for v, want := range cases {
+		reg := Registry{Flags: map[string]any{"f": v}}
+		got, err := FlagEnabled(reg, "", "f", !want)
+		if err != nil {
+			t.Errorf("FlagEnabled(%#v): unexpected error %v", v, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("FlagEnabled(%#v) = %v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestResolveFamPopulatesFlags(t *testing.T) {
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(flagsFamTOML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(famDir, "agy")
+	gitInit(t, wt)
+
+	rf, err := ResolveFam(wt)
+	if err != nil {
+		t.Fatalf("ResolveFam: %v", err)
+	}
+	// agy's override turns wait_ingest off; the method uses the effective flags.
+	on := func(name string, def bool) bool {
+		t.Helper()
+		v, err := rf.FlagEnabled(name, def)
+		if err != nil {
+			t.Fatalf("rf.FlagEnabled(%s): unexpected error %v", name, err)
+		}
+		return v
+	}
+	if on("wait_ingest", true) {
+		t.Error("rf.FlagEnabled(wait_ingest) should be false for agy (override 0)")
+	}
+	if !on("experiment", false) {
+		t.Error("rf.FlagEnabled(experiment) should be true for agy (override \"yes\")")
+	}
+	if !on("unset", true) {
+		t.Error("rf.FlagEnabled(unset) should fall back to def=true")
+	}
+}
+
 func TestResolveFam(t *testing.T) {
 	famDir := famFixture(t)
 
