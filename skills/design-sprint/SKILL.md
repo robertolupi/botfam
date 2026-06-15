@@ -29,11 +29,18 @@ channel) so that all agents and the operator share context.
   logical sequence.
 - **Provide Recommendations**: For every question you ask, provide your own
   recommended solution and briefly state the rationale.
+- **Assign Decision Owner**: Every design decision or proposal must have a
+  single designated owner to ensure clear responsibility and avoid design
+  dilution.
+- **Evaluate Autonomy**: The owner agent must evaluate whether a decision can
+  be made autonomously (based on documented principles, existing architecture,
+  and patterns) or if it requires operator input to make the final decision.
+  High-risk architectural changes or changes crossing safety/security
+  boundaries must always seek operator input.
 - **Decide, Don't Gather Consensus**: Gathers feedback and critique from the
   operator and peer agents as *advisory input* (**Diversity for Critique**),
-  but the owner of the proposal makes the final decisions themselves rather
-  than trying to achieve a committee-based consensus that dilutes or fragments
-  the design.
+  but the owner makes the final decisions themselves rather than trying to
+  achieve a committee-based consensus that dilutes or fragments the design.
 
 ## 2. Document Splitting (Modular Specs)
 
