@@ -414,47 +414,6 @@ func (c *Client) PostCommitStatus(commitSHA string, state string, context string
 	return err
 }
 
-// resolveFamName derives the fam name used in the token filename
-// (token-<fam>-<actor>). It honours BOTFAM_FAM when set, otherwise it follows
-// the on-disk layout convention where a worktree lives at
-// ~/src/fams/<fam>/wt-<actor>, so the fam is the basename of the directory
-// *containing the worktree root*.
-//
-// The worktree root is resolved via git first so the result is stable no
-// matter which nested subdirectory the command was invoked from. Taking the
-// parent of the raw working directory (the previous behaviour) yielded a
-// package dir name like "cmd" or "internal" when run from a subdirectory,
-// breaking token lookup (issue #81). When git can't identify a worktree (e.g.
-// outside a repo) it falls back to the parent of the working directory itself.
-func resolveFamName(workDir string) string {
-	if fam := os.Getenv("BOTFAM_FAM"); fam != "" {
-		return fam
-	}
-	root := worktreeRoot(workDir)
-	if root == "" {
-		if abs, err := filepath.Abs(workDir); err == nil {
-			root = abs
-		}
-	}
-	if root == "" {
-		return ""
-	}
-	return filepath.Base(filepath.Dir(root))
-}
-
-// worktreeRoot returns the absolute top-level directory of the git worktree
-// containing workDir, or "" if it cannot be determined.
-func worktreeRoot(workDir string) string {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = workDir
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(out.String())
-}
-
 type Milestone struct {
 	ID    int64  `json:"id"`
 	Title string `json:"title"`

@@ -4,7 +4,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/forge"
 )
 
 const sampleFamTOML = `name       = "deep-cuts"
@@ -177,6 +180,115 @@ func TestResolverBareNameActor(t *testing.T) {
 	}
 	if info2.Actor != "" {
 		t.Errorf("main actor = %q, want empty (not a roster member)", info2.Actor)
+	}
+}
+
+// TestForgeIdentityParity is the #231/#252 acceptance test: the three
+// independent consumers of fam identity resolve IDENTICAL forge_url / owner/repo
+// / token / actor for one worktree, proving the "one resolver" goal (no #183
+// divergence). The consumers exercised:
+//
+//   - `botfam credential`     → famconfig.ResolveFam (via fam.ResolveFam)
+//   - the forge MCP client    → forge.NewClient
+//   - whoami / orient         → fam.Resolver.Resolve
+//
+// All env short-circuits (GITEA_*, COLLAB_ROOT) are cleared so every path is
+// forced through fam.toml — if any consumer re-derived identity its own way,
+// the asserted values would drift apart.
+func TestForgeIdentityParity(t *testing.T) {
+	famDir := resolveFamFixture(t)
+	wt := filepath.Join(famDir, "claude") // [agent.claude], harness claude-code
+	gitInit(t, wt)
+
+	// The per-harness token on disk that all three must agree to use.
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".botfam"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const tokenVal = "parity-token-xyz"
+	if err := os.WriteFile(filepath.Join(home, ".botfam", "token-claude-code"), []byte(tokenVal+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	for _, k := range []string{"GITEA_URL", "GITEA_OWNER", "GITEA_REPO", "GITEA_TOKEN", "COLLAB_ROOT", "BOTFAM_FORGE_REMOTE"} {
+		t.Setenv(k, "")
+	}
+
+	// 1. botfam credential.
+	rf, err := ResolveFam(wt)
+	if err != nil {
+		t.Fatalf("ResolveFam: %v", err)
+	}
+	// 2. forge MCP client.
+	cl, err := forge.NewClient(wt, rf.Actor)
+	if err != nil {
+		t.Fatalf("forge.NewClient: %v", err)
+	}
+	// 3. whoami / orient.
+	info, err := (Resolver{WorkDir: wt}).Resolve()
+	if err != nil {
+		t.Fatalf("Resolver.Resolve: %v", err)
+	}
+
+	// forge_url parity (NewClient guarantees a trailing slash).
+	wantBase := rf.ForgeURL
+	if !strings.HasSuffix(wantBase, "/") {
+		wantBase += "/"
+	}
+	if cl.BaseURL != wantBase {
+		t.Errorf("forge_url diverges: NewClient=%q ResolveFam=%q", cl.BaseURL, wantBase)
+	}
+
+	// owner/repo parity (fam.toml repository is "owner/repo").
+	parts := strings.SplitN(rf.Repository, "/", 2)
+	if len(parts) != 2 {
+		t.Fatalf("repository %q is not owner/repo", rf.Repository)
+	}
+	if cl.Owner != parts[0] || cl.Repo != parts[1] {
+		t.Errorf("owner/repo diverges: NewClient=%q/%q fam.toml=%q/%q", cl.Owner, cl.Repo, parts[0], parts[1])
+	}
+
+	// token parity: NewClient's token == contents of the file ResolveFam points at.
+	rawTok, err := os.ReadFile(rf.TokenPath)
+	if err != nil {
+		t.Fatalf("read token at ResolveFam.TokenPath=%q: %v", rf.TokenPath, err)
+	}
+	if got := strings.TrimSpace(string(rawTok)); cl.Token != got || cl.Token != tokenVal {
+		t.Errorf("token diverges: NewClient=%q tokenfile(%s)=%q want=%q", cl.Token, rf.TokenPath, got, tokenVal)
+	}
+
+	// actor / fam name / root parity across credential and whoami.
+	if rf.Actor != info.Actor {
+		t.Errorf("actor diverges: ResolveFam=%q Resolver=%q", rf.Actor, info.Actor)
+	}
+	if rf.Name != info.Name {
+		t.Errorf("fam name diverges: ResolveFam=%q Resolver=%q", rf.Name, info.Name)
+	}
+	if info.Root != rf.FamDir {
+		t.Errorf("root/famDir diverges: Resolver.Root=%q ResolveFam.FamDir=%q", info.Root, rf.FamDir)
+	}
+}
+
+// TestResolverLegacyNoFamTOML guards the non-agent escape hatch #252 must keep
+// intact: a repo with NO fam.toml still resolves a (hashed) fam root via git
+// history rather than erroring.
+func TestResolverLegacyNoFamTOML(t *testing.T) {
+	famDir := t.TempDir() // deliberately no fam.toml
+	wt := filepath.Join(famDir, "legacy")
+	gitInit(t, wt)
+	for _, k := range []string{"COLLAB_ROOT", "BOTFAM_FAM"} {
+		t.Setenv(k, "")
+	}
+
+	info, err := (Resolver{WorkDir: wt}).Resolve()
+	if err != nil {
+		t.Fatalf("Resolve with no fam.toml should fall back, got: %v", err)
+	}
+	if info.Actor != "" {
+		t.Errorf("actor = %q, want empty (no fam.toml roster)", info.Actor)
+	}
+	if !strings.HasPrefix(info.Name, "fam-") {
+		t.Errorf("name = %q, want hashed fam-<id> fallback", info.Name)
 	}
 }
 

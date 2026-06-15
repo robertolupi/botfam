@@ -25,8 +25,7 @@ func TestNewClientTestTokenFallbackIsOptIn(t *testing.T) {
 	}
 
 	t.Setenv("HOME", home)
-	t.Setenv("BOTFAM_FAM", "testfam") // make resolveFamName deterministic
-	t.Setenv("GITEA_TOKEN", "")       // force file-based resolution
+	t.Setenv("GITEA_TOKEN", "") // force file-based resolution
 	// Resolve the forge endpoint from env so NewClient never touches git.
 	t.Setenv("GITEA_URL", "http://example.test")
 	t.Setenv("GITEA_OWNER", "o")

@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 type Resolver struct {
@@ -58,22 +60,27 @@ func (r Resolver) Resolve() (RootInfo, error) {
 		// Bare-name worktrees: the wt- prefix is retired (agent name =
 		// basename). When the prefix-based ParseActor finds nothing, accept the
 		// worktree-root basename if it is a declared [agent.<name>]/[user.<name>]
-		// in the canonical <fam-dir>/fam.toml (read directly — not via
-		// LoadFamRegistry, which would recurse through Resolve).
+		// in the canonical fam.toml. Locate+read it through the shared famconfig
+		// primitives — the one fam.toml finder every consumer uses (#252) —
+		// rather than re-deriving <fam-dir>/fam.toml here. ResolveFam isn't used
+		// directly: it fail-closes on [user.<name>]/base checkouts, which Resolve
+		// must still derive a Root/Name for. (FindFamTOMLPath, not
+		// LoadFamRegistry, so we don't recurse back through Resolve.)
 		if gitRoot != "" {
-			famDir := filepath.Dir(gitRoot)
-			famTOMLPath := filepath.Join(famDir, "fam.toml")
-			if reg, err := ReadRegistry(famTOMLPath); err == nil {
-				base := filepath.Base(gitRoot)
-				if _, ok := reg.Agents[base]; ok {
-					parsedActor = base
-				} else if _, ok := reg.Users[base]; ok {
-					parsedActor = base
-				}
-				unifiedRoot = famDir
-				unifiedName = reg.Name
-				if unifiedName == "" {
-					unifiedName = filepath.Base(famDir)
+			if famTOMLPath := famconfig.FindFamTOMLPath(r.WorkDir, r.Env); famTOMLPath != "" {
+				if reg, err := famconfig.ReadRegistry(famTOMLPath); err == nil {
+					famDir := filepath.Dir(famTOMLPath)
+					base := filepath.Base(gitRoot)
+					if _, ok := reg.Agents[base]; ok {
+						parsedActor = base
+					} else if _, ok := reg.Users[base]; ok {
+						parsedActor = base
+					}
+					unifiedRoot = famDir
+					unifiedName = reg.Name
+					if unifiedName == "" {
+						unifiedName = filepath.Base(famDir)
+					}
 				}
 			}
 		}
