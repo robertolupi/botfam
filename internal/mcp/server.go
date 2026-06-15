@@ -48,6 +48,15 @@ var identityOptionalTools = map[string]bool{
 	"worktree_sync": true,
 }
 
+// readOnlyTools defines the MCP tools allowed in cross-actor mode.
+// Any tool not listed here is considered mutating and blocked.
+var readOnlyTools = map[string]bool{
+	"orient":     true,
+	"irc_read":   true,
+	"irc_wait":   true,
+	"irc_replay": true,
+}
+
 type server struct {
 	envActor string
 	lockMode bool
@@ -259,15 +268,8 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		isCrossActor = false
 	}
 
-	if isCrossActor {
-		mutatingTools := map[string]bool{
-			"irc_write":     true,
-			"worktree_init": true,
-			"worktree_sync": true,
-		}
-		if mutatingTools[name] {
-			return nil, fmt.Errorf("acting in another agent's worktree (executing: %s, target: %s) is read-only; mutating tool '%s' is blocked", actor, c.Actor, name)
-		}
+	if isCrossActor && !readOnlyTools[name] {
+		return nil, fmt.Errorf("acting in another agent's worktree (executing: %s, target: %s) is read-only; mutating tool '%s' is blocked", actor, c.Actor, name)
 	}
 
 	// Lazily start the mailbox ingester now that an actor + workDir are resolved
@@ -472,10 +474,9 @@ func (s *server) resolveActor(callActor string, dirActor string, toolName string
 		return "", false, fmt.Errorf("actor %q conflicts with bound session actor %q", callActor, s.actor)
 	}
 
+	// Bind session actor if not already bound, and not a blocked mutating call.
 	isCrossActor := dirActor != "" && executing != dirActor
-	isMutating := toolName == "irc_write" || toolName == "worktree_init" || toolName == "worktree_sync"
-
-	// Bind session actor if not already bound, and not a blocked mutating call
+	isMutating := !readOnlyTools[toolName]
 	if s.actor == "" && !(isCrossActor && isMutating) {
 		s.actor = executing
 	}
