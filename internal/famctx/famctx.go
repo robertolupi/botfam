@@ -14,9 +14,9 @@ import (
 type ResolveMode int
 
 const (
-	ModeLocate ResolveMode = iota // fam may be missing; return diagnostics
-	ModeRegistry                 // require fam.toml, allow user/base
-	ModeAgentRuntime             // require declared [agent.<name>]
+	ModeLocate       ResolveMode = iota // fam may be missing; return diagnostics
+	ModeRegistry                        // require fam.toml, allow user/base
+	ModeAgentRuntime                    // require declared [agent.<name>]
 )
 
 type Source = famconfig.Source
@@ -63,14 +63,14 @@ type Inputs struct {
 
 type Context struct {
 	famconfig.FamIdentity
-	Slug         string
-	Registry     famconfig.Registry
+	Slug     string
+	Registry famconfig.Registry
 
 	WorktreeRoot string
 	WorkDir      string
 
-	Agent     famconfig.AgentConfig
-	Flags     map[string]any
+	Agent famconfig.AgentConfig
+	Flags map[string]any
 
 	MailboxPath string
 	IRCLogDir   string
@@ -153,8 +153,10 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				rootSetID = info.RootSetID
 			}
 
+			identity := resolved.FamIdentity
+			identity.Source = cSource
 			c := Context{
-				FamIdentity:  resolved.FamIdentity,
+				FamIdentity:  identity,
 				Slug:         resolved.Slug,
 				Registry:     resolved.Registry,
 				WorktreeRoot: resolved.WorktreeRoot,

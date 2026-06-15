@@ -7,8 +7,6 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
-type Resolver = famconfig.Resolver
-
 type GitResolver = famconfig.GitResolver
 
 type RootInfo = famconfig.RootInfo

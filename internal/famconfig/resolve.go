@@ -12,11 +12,6 @@ import (
 	"strings"
 )
 
-// Resolver is the interface for family resolution.
-type Resolver interface {
-	Resolve(workDir string) (FamIdentity, error)
-}
-
 // GitResolver derives a fam Root/Name/Actor for a worktree. It is the dependency-free
 // home of identity resolution (#311): both internal/cli and internal/mcp resolve
 // through it without importing each other.
@@ -31,27 +26,19 @@ type RootInfo struct {
 	RootSetID string
 }
 
-// Resolve implements the Resolver interface.
-func (r GitResolver) Resolve(workDir string) (FamIdentity, error) {
-	info, err := r.ResolveIdentity(workDir)
-	if err != nil {
-		return FamIdentity{}, err
-	}
-	return info.FamIdentity, nil
-}
-
 // ResolveIdentity resolves the full git-specific identity including root set.
 func (r GitResolver) ResolveIdentity(workDir string) (RootInfo, error) {
 	repoName := ResolveRepoName(workDir)
 	var parsedActor string
 	var unifiedRoot string
 	var unifiedName string
+	var gitRoot string
 
 	if absDir, err := filepath.Abs(workDir); err == nil {
 		if evalDir, err := filepath.EvalSymlinks(absDir); err == nil {
 			absDir = evalDir
 		}
-		gitRoot, _ := gitexec.One(absDir, "rev-parse", "--show-toplevel")
+		gitRoot, _ = gitexec.One(absDir, "rev-parse", "--show-toplevel")
 		if evalRoot, err := filepath.EvalSymlinks(gitRoot); err == nil {
 			gitRoot = evalRoot
 		}
@@ -121,10 +108,6 @@ func (r GitResolver) ResolveIdentity(workDir string) (RootInfo, error) {
 				role = RoleUser
 			} else {
 				// empty actor: check if base checkout
-				gitRoot, _ := gitexec.One(workDir, "rev-parse", "--show-toplevel")
-				if eval, err := filepath.EvalSymlinks(gitRoot); err == nil {
-					gitRoot = eval
-				}
 				if gitRoot != "" && gitRoot == unifiedRoot {
 					role = RoleBase
 				}

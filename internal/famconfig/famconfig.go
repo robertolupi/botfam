@@ -84,10 +84,10 @@ const (
 type Source string
 
 const (
-	SourceWorkDir       Source = "work_dir"
-	SourceClientRoots   Source = "client_roots"
-	SourcePWD           Source = "pwd"
-	SourceGitRoots      Source = "git_roots"
+	SourceWorkDir     Source = "work_dir"
+	SourceClientRoots Source = "client_roots"
+	SourcePWD         Source = "pwd"
+	SourceGitRoots    Source = "git_roots"
 )
 
 // FamIdentity holds the core identity components for a resolved family.

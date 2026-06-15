@@ -74,7 +74,7 @@ func TestResolver(t *testing.T) {
 
 	// Resolve from main checkout directory
 	rMain := GitResolver{
-		Env:     []string{},
+		Env: []string{},
 	}
 	infoMain, err := rMain.ResolveIdentity(gitDir)
 	if err != nil {
@@ -83,7 +83,7 @@ func TestResolver(t *testing.T) {
 
 	// Resolve from worktree directory
 	rWt := GitResolver{
-		Env:     []string{},
+		Env: []string{},
 	}
 	infoWt, err := rWt.ResolveIdentity(wtDir)
 	if err != nil {
@@ -111,7 +111,7 @@ func TestResolver(t *testing.T) {
 
 	// Resolve from the nested subdirectory inside the worktree
 	rSub := GitResolver{
-		Env:     []string{},
+		Env: []string{},
 	}
 	infoSub, err := rSub.ResolveIdentity(nestedSubDir)
 	if err != nil {
@@ -132,7 +132,7 @@ func TestResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	rNonGit := GitResolver{
-		Env:     []string{},
+		Env: []string{},
 	}
 	_, err = rNonGit.ResolveIdentity(nonGitDir)
 	if err == nil {
@@ -168,7 +168,7 @@ harness = "test-harness"
 	initGitRepo(t, wtBobDir)
 
 	rUnified := GitResolver{
-		Env:     []string{},
+		Env: []string{},
 	}
 	infoUnified, err := rUnified.ResolveIdentity(wtBobDir)
 	if err != nil {
