@@ -13,11 +13,11 @@ package famconfig
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
+	"github.com/robertolupi/botfam/internal/gitexec"
 )
 
 // AgentConfig is a single `[agent.<name>]` or `[user.<name>]` entry in fam.toml.
@@ -190,7 +190,7 @@ func FindFamTOMLPath(workDir string, env []string) string {
 			return p
 		}
 	}
-	if root, err := gitOne(workDir, "rev-parse", "--show-toplevel"); err == nil && root != "" {
+	if root, err := gitexec.One(workDir, "rev-parse", "--show-toplevel"); err == nil && root != "" {
 		if eval, err := filepath.EvalSymlinks(root); err == nil {
 			root = eval
 		}
@@ -212,7 +212,7 @@ func FindFamTOMLPath(workDir string, env []string) string {
 // `main`/base checkout). Callers that legitimately run outside an agent worktree
 // (doctor/setup/whoami/version) must not gate on this.
 func ResolveFam(workDir string) (ResolvedFam, error) {
-	root, err := gitOne(workDir, "rev-parse", "--show-toplevel")
+	root, err := gitexec.One(workDir, "rev-parse", "--show-toplevel")
 	if err != nil || root == "" {
 		return ResolvedFam{}, fmt.Errorf("not inside a git worktree (%s); report this to your operator", workDir)
 	}
@@ -351,35 +351,4 @@ func lookupEnv(env []string, key string) string {
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
-}
-
-func gitOutput(workDir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = workDir
-	return cmd.Output()
-}
-
-func gitLines(workDir string, args ...string) ([]string, error) {
-	out, err := gitOutput(workDir, args...)
-	if err != nil {
-		return nil, err
-	}
-	var lines []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return lines, nil
-}
-
-func gitOne(workDir string, args ...string) (string, error) {
-	lines, err := gitLines(workDir, args...)
-	if err != nil {
-		return "", err
-	}
-	if len(lines) == 0 {
-		return "", fmt.Errorf("git %s returned no output", strings.Join(args, " "))
-	}
-	return lines[0], nil
 }

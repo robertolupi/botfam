@@ -312,4 +312,3 @@ func TestCodexMCPConfigurator(t *testing.T) {
 		t.Errorf("expected empty list, got %v", names)
 	}
 }
-

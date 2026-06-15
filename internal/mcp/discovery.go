@@ -15,8 +15,9 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/robertolupi/botfam/internal/docs"
-	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/robertolupi/botfam/internal/skills"
 	"github.com/robertolupi/botfam/internal/wiki"
 )
 
@@ -155,12 +156,12 @@ type discoveryData struct {
 func buildDiscoveryData(workDir string) discoveryData {
 	var d discoveryData
 
-	var reg fam.Registry
+	var reg famconfig.Registry
 	var harness string
 	// Prefer the unified resolver: it reads the canonical <fam-dir>/fam.toml and
 	// validates the worktree basename against the roster (the wt- prefix is
 	// retired). It succeeds only in an [agent.<name>] worktree of a migrated fam.
-	if rf, err := fam.ResolveFam(workDir); err == nil {
+	if rf, err := famconfig.ResolveFam(workDir); err == nil {
 		d.tmpl.Actor = rf.Actor
 		harness = rf.Agent.Harness
 		reg = rf.Registry
@@ -171,17 +172,17 @@ func buildDiscoveryData(workDir string) discoveryData {
 	} else {
 		// Legacy / soft fallback: un-migrated fam, or a base/user worktree where
 		// the runtime resolver fails closed. Surface what we can for display.
-		if info, e := (fam.Resolver{WorkDir: workDir}).Resolve(); e == nil {
+		if info, e := (famconfig.Resolver{WorkDir: workDir}).Resolve(); e == nil {
 			d.tmpl.Actor = info.Actor
 			d.tmpl.Fam = info.Name
 		}
-		reg = fam.LoadFamRegistry(workDir)
-		if slug := fam.FamSlug(reg); slug != "" {
+		reg = famconfig.LoadFamRegistry(workDir)
+		if slug := famconfig.FamSlug(reg); slug != "" {
 			d.tmpl.Fam = slug
 		}
 	}
-	d.tmpl.MainChannel, d.tmpl.CcrepChannel = fam.FamChannels(reg)
-	d.tmpl.IntegrationBranch = fam.FamBranch(reg)
+	d.tmpl.MainChannel, d.tmpl.CcrepChannel = famconfig.FamChannels(reg)
+	d.tmpl.IntegrationBranch = famconfig.FamBranch(reg)
 	d.tmpl.ForgeURL = reg.Origin
 	d.projections = wiki.ParseProjections(reg.WikiProjections)
 	hasMemory := false
@@ -280,7 +281,7 @@ func resolveWorkDir(ctx context.Context, collabRoot, cwd, pwd string, requestRoo
 
 // famResolvable reports whether dir sits inside a fam (a fam.toml is reachable).
 func famResolvable(dir string) bool {
-	return fam.FamSlug(fam.LoadFamRegistry(dir)) != ""
+	return famconfig.FamSlug(famconfig.LoadFamRegistry(dir)) != ""
 }
 
 // fileURIToPath turns a file:// root URI into a local path, or "" if not a
@@ -596,7 +597,7 @@ func (s *server) renderToolsJSON() ([]byte, error) {
 }
 
 func renderSkillsMarkdown(repoRoot string) ([]byte, error) {
-	skills, err := fam.ReadRepoSkills(repoRoot)
+	skills, err := skills.ReadRepoSkills(repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -623,7 +624,7 @@ type skillsCatalog struct {
 }
 
 func renderSkillsJSON(repoRoot string) ([]byte, error) {
-	skills, err := fam.ReadRepoSkills(repoRoot)
+	skills, err := skills.ReadRepoSkills(repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +643,7 @@ func renderSkillsJSON(repoRoot string) ([]byte, error) {
 }
 
 func readSkillMarkdown(repoRoot string, name string) ([]byte, error) {
-	skills, err := fam.ReadRepoSkills(repoRoot)
+	skills, err := skills.ReadRepoSkills(repoRoot)
 	if err != nil {
 		return nil, err
 	}

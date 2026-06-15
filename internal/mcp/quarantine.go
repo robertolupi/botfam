@@ -9,17 +9,17 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 // famTomlPresent reports whether workDir belongs to a migrated fam: a fam.toml
 // exists at the fam directory (the parent of the worktree root), the same
-// location fam.ResolveFam reads. This distinguishes a migrated fam — where a
+// location famconfig.ResolveFam reads. This distinguishes a migrated fam — where a
 // ResolveFam failure means "wrong/base/user worktree" and must quarantine — from
 // an un-migrated fam with no fam.toml, where the legacy membership check still
 // applies.
 func famTomlPresent(workDir string) bool {
-	root := fam.RepoPath(workDir)
+	root := famconfig.RepoPath(workDir)
 	_, err := os.Stat(filepath.Join(filepath.Dir(root), "fam.toml"))
 	return err == nil
 }
@@ -27,7 +27,7 @@ func famTomlPresent(workDir string) bool {
 // Fail-closed serve gate (#191, proposal-unified-fam-config §4.6).
 //
 // When `botfam serve` runs in a worktree that is NOT a valid agent worktree —
-// fam.ResolveFam(workDir) returns an error (not inside a git worktree, no/invalid
+// famconfig.ResolveFam(workDir) returns an error (not inside a git worktree, no/invalid
 // fam.toml, a [user.<name>] human checkout, or the base/main checkout) — the
 // server must refuse to do real work. It still starts (so the harness gets a
 // surface), but the only affordance is a quarantine resource set that tells the
@@ -48,7 +48,7 @@ func quarantineError(cause error) error {
 }
 
 // renderProblemMarkdown is the human-readable botfam:///problem resource served
-// in quarantine. cause is the fam.ResolveFam error (which already carries the
+// in quarantine. cause is the famconfig.ResolveFam error (which already carries the
 // "report to your operator" hint). When cause is nil the worktree is healthy and
 // the resource says so.
 func renderProblemMarkdown(workDir string, cause error) []byte {
@@ -71,7 +71,7 @@ func renderProblemMarkdown(workDir string, cause error) []byte {
 	fmt.Fprintf(&b, "- **failure**: %s\n", cause.Error())
 
 	b.WriteString("\n## What this means\n\n")
-	b.WriteString("`fam.ResolveFam` (the single source of truth for fam identity) could not accept\n")
+	b.WriteString("`famconfig.ResolveFam` (the single source of truth for fam identity) could not accept\n")
 	b.WriteString("this worktree as a declared `[agent.<name>]`. Causes include: not inside a git\n")
 	b.WriteString("worktree, a missing/unreadable/invalid `fam.toml`, a `[user.<name>]` (human)\n")
 	b.WriteString("checkout, or the base/`main` checkout. None of these are agent runtime contexts.\n")
@@ -120,7 +120,7 @@ func renderProblemJSON(workDir string, cause error) ([]byte, error) {
 // problemResource builds the MCP resource contents for botfam:///problem and
 // botfam:///problem.json from the resolve result for workDir.
 func problemResource(uri, workDir string, wantJSON bool) ([]mcplib.ResourceContents, error) {
-	_, cause := fam.ResolveFam(workDir)
+	_, cause := famconfig.ResolveFam(workDir)
 	if wantJSON {
 		body, err := renderProblemJSON(workDir, cause)
 		if err != nil {

@@ -21,7 +21,10 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/robertolupi/botfam/internal/docs"
-	"github.com/robertolupi/botfam/internal/fam"
+	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/ingest"
+	"github.com/robertolupi/botfam/internal/irc"
+	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/robertolupi/botfam/internal/wiki"
 )
 
@@ -80,7 +83,7 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 // first time a real (actor, workDir) resolves. It is the default wake path
 // (#229/#254): `botfam wait` reads the mailbox this fills, so the ingester runs
 // for any resolved agent unless the `wait_ingest` fam.toml flag opts it out
-// (fam.WaitIngestEnabled — set wait_ingest=0 under [flags] or
+// (ingest.WaitIngestEnabled — set wait_ingest=0 under [flags] or
 // [agent.<name>.flags]). The goroutine runs for the server's lifetime and holds
 // an advisory flock, so across multiple harnesses of one agent exactly one
 // instance writes the mailbox while the rest stand by.
@@ -91,7 +94,7 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	if actor == "" || s.ctx == nil {
 		return
 	}
-	enabled, err := fam.WaitIngestEnabled(workDir)
+	enabled, err := ingest.WaitIngestEnabled(workDir)
 	if err != nil {
 		// A malformed wait_ingest flag value (likely a typo): surface it on
 		// stderr (visible in the host's MCP server log) and fall back to the
@@ -101,7 +104,7 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	if !enabled {
 		return
 	}
-	mboxPath, ircLog, matchNick, err := fam.IngestParams(workDir)
+	mboxPath, ircLog, matchNick, err := ingest.IngestParams(workDir)
 	if err != nil {
 		return // not resolvable yet; a later tool call retries
 	}
@@ -113,14 +116,14 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	s.ingestStarted = true
 	s.mu.Unlock()
 
-	pollers := []fam.Poller{fam.NewIRCPoller(ircLog, matchNick)}
+	pollers := []ingest.Poller{ingest.NewIRCPoller(ircLog, matchNick)}
 	// Add the forge source when one can be built; IRC-only otherwise (e.g. no
 	// repository declared, or no notification-scoped token). The forge source
 	// drains the repo's unread set (append-to-mailbox then mark-read).
-	if fp, err := fam.ForgePollerFor(workDir, actor); err == nil {
+	if fp, err := ingest.ForgePollerFor(workDir, actor); err == nil {
 		pollers = append(pollers, fp)
 	}
-	ing := fam.NewIngester(mboxPath, 30*time.Second, pollers...)
+	ing := ingest.NewIngester(mboxPath, 30*time.Second, pollers...)
 	go func() { _ = ing.Run(s.ctx) }()
 }
 
@@ -209,7 +212,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	if workDir == "" || (workDir == "." && err == nil && cwd == "/") {
 		workDir = s.resolveDiscoveryWorkDir(ctx)
 	}
-	info, err := (fam.Resolver{WorkDir: workDir, Env: os.Environ()}).Resolve()
+	info, err := (famconfig.Resolver{WorkDir: workDir, Env: os.Environ()}).Resolve()
 	if err != nil {
 		return nil, err
 	}
@@ -221,11 +224,11 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	// to its operator rather than self-fix. An un-migrated fam (no fam.toml) is not
 	// gated: it falls back to the legacy content-hash membership check, which is
 	// also what proves membership for a fam ResolveFam doesn't yet understand.
-	if _, rfErr := fam.ResolveFam(workDir); rfErr != nil {
+	if _, rfErr := famconfig.ResolveFam(workDir); rfErr != nil {
 		if famTomlPresent(workDir) {
 			return nil, quarantineError(rfErr)
 		}
-		if err := fam.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
+		if err := provision.EnsureMembership(info.Root, info.Explicit, workDir); err != nil {
 			return nil, err
 		}
 	}
@@ -248,7 +251,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, errors.New("target_actor is required")
 		}
 		var buf bytes.Buffer
-		err := fam.WorktreeCmd([]string{"init", targetActor, workDir}, &buf)
+		err := provision.InitWorktree([]string{targetActor, workDir}, &buf)
 		if err != nil {
 			return nil, err
 		}
@@ -257,7 +260,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 
 	if name == "worktree_sync" {
 		var buf bytes.Buffer
-		err := fam.WorktreeCmd([]string{"sync", workDir}, &buf)
+		err := provision.SyncWorktree([]string{workDir}, &buf)
 		if err != nil {
 			return nil, err
 		}
@@ -319,7 +322,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 
 		maxLines := int(argFloatDefault(args, "lines", 0))
 		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
-		lines, nextOffset, err := fam.ReadIrcLog(logPath, fromOffset, maxLines)
+		lines, nextOffset, err := irc.ReadIrcLog(logPath, fromOffset, maxLines)
 		if err != nil {
 			return nil, err
 		}
@@ -348,8 +351,8 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		// appear under the fam-scoped nick (claude-botfam) in the log — match on
 		// the scoped nick or the wait wakes on its own traffic (#137; matches the
 		// `botfam irc-wait` CLI fix).
-		matchNick := fam.FamScopedNick(actor, fam.FamSlug(fam.LoadFamRegistry(absWorkDir)))
-		lines, nextOffset, timedOut, err := fam.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
+		matchNick := famconfig.FamScopedNick(actor, famconfig.FamSlug(famconfig.LoadFamRegistry(absWorkDir)))
+		lines, nextOffset, timedOut, err := irc.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
 		if err != nil {
 			return nil, err
 		}
@@ -365,7 +368,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			return nil, err
 		}
 
-		historyPath, err := fam.DefaultHistoryPath(absWorkDir)
+		historyPath, err := famconfig.DefaultHistoryPath(absWorkDir)
 		if err != nil {
 			return nil, err
 		}
@@ -384,8 +387,8 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			}
 		} else {
 			// default to main + ccrep channels
-			reg := fam.LoadFamRegistry(absWorkDir)
-			mainChan, ccrepChan := fam.FamChannels(reg)
+			reg := famconfig.LoadFamRegistry(absWorkDir)
+			mainChan, ccrepChan := famconfig.FamChannels(reg)
 			if mainChan != "" {
 				filterChans = append(filterChans, mainChan)
 			}
@@ -394,8 +397,8 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			}
 		}
 
-		matchNick := fam.FamScopedNick(actor, fam.FamSlug(fam.LoadFamRegistry(absWorkDir)))
-		lines, nextOffset, err := fam.ReplayHistory(historyPath, actor, matchNick, since, filterChans)
+		matchNick := famconfig.FamScopedNick(actor, famconfig.FamSlug(famconfig.LoadFamRegistry(absWorkDir)))
+		lines, nextOffset, err := irc.ReplayHistory(historyPath, actor, matchNick, since, filterChans)
 		if err != nil {
 			return nil, err
 		}
@@ -632,7 +635,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 
 func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResourceRequest) ([]mcplib.ResourceContents, error) {
 	cwd, resolvedVia := s.resolveDiscoveryWorkDirVia(ctx)
-	localRepoRoot := fam.RepoPath(cwd)
+	localRepoRoot := famconfig.RepoPath(cwd)
 
 	u, err := url.Parse(req.Params.URI)
 	if err != nil {
@@ -650,8 +653,8 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	} else {
 		// Named authority. Resolve the local family first so a name/slug that
 		// refers to this fam never scans ~/.botfam.
-		localInfo, errInfo := (fam.Resolver{WorkDir: cwd}).Resolve()
-		localReg := fam.LoadFamRegistry(cwd)
+		localInfo, errInfo := (famconfig.Resolver{WorkDir: cwd}).Resolve()
+		localReg := famconfig.LoadFamRegistry(cwd)
 		if (errInfo == nil && u.Host == localInfo.Name) || u.Host == localReg.Name || u.Host == localReg.Slug {
 			targetRepoRoot = localRepoRoot
 		} else {
@@ -672,7 +675,7 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 				}
 				tomlPath := filepath.Join(botfamDir, entry.Name(), "fam.toml")
 				if _, err := os.Stat(tomlPath); err == nil {
-					reg, err := fam.ReadRegistry(tomlPath)
+					reg, err := famconfig.ReadRegistry(tomlPath)
 					if err == nil {
 						if reg.Name == u.Host || reg.Slug == u.Host {
 							if len(reg.RepoPaths) > 0 {

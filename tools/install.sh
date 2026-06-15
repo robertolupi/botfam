@@ -31,7 +31,7 @@ if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
   fi
   version="0.1.0 ($sha, $date)"
 fi
-go build -v -ldflags "-X 'github.com/robertolupi/botfam/internal/fam.BuildSHA=$version'" -o "$BIN_DIR/botfam" "$REPO_ROOT/cmd/botfam"
+go build -v -ldflags "-X 'github.com/robertolupi/botfam/internal/version.BuildSHA=$version'" -o "$BIN_DIR/botfam" "$REPO_ROOT/cmd/botfam"
 
 # 4. Build gitea-mcp-server
 echo "Building gitea-mcp-server..."
