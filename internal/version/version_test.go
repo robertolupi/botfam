@@ -1,4 +1,4 @@
-package fam
+package version
 
 import (
 	"regexp"
