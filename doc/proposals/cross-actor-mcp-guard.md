@@ -40,15 +40,16 @@ cross-actor context.
 - `irc_wait`
 - `irc_replay`
 
-### 2. Environment Variables & Roles
+### 2. Actor Identity Resolution
 
-- **`COLLAB_ACTOR`**: Configured as the single-owner local checkout identity.
-  Standard local command-line commands and git assertions strictly enforce
-  `COLLAB_ACTOR == resolved.Actor` to keep workspaces safe.
-- **`BOTFAM_ACTOR`**: Serves as the explicit bridge for cross-actor operations.
-  When configured, it allows the server to load another actor's worktree
-  context in read-only mode, bypassing the strict single-owner workspace
-  validation.
+The executing actor identity is established dynamically from the MCP workspace
+roots (`clientRoots`) sent by the client during initialization. The server
+resolves the active workspace directory's owner using these roots, removing the
+need for environment variable overrides (`COLLAB_ACTOR` or `BOTFAM_ACTOR`).
+
+If a tool execution target (`workDir`) resolves to a different actor than the
+client's own identity, it is classified as a cross-actor query and subjected to
+the default-deny read-only guard.
 
 ### 3. Boundary Scope
 

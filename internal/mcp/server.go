@@ -58,7 +58,6 @@ var readOnlyTools = map[string]bool{
 }
 
 type server struct {
-	envActor string
 	lockMode bool
 	mcpSrv   *mcpserver.MCPServer
 	ctx      context.Context // server lifetime; cancelled when serveStdio returns
@@ -72,12 +71,7 @@ type server struct {
 }
 
 func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
-	envAct := os.Getenv("BOTFAM_ACTOR")
-	if envAct == "" {
-		envAct = os.Getenv("COLLAB_ACTOR")
-	}
 	s := &server{
-		envActor: envAct,
 		lockMode: lockActorEnabled(),
 	}
 	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots())
@@ -259,7 +253,8 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		}
 	}
 
-	actor, isCrossActor, err := s.resolveActor(argString(args, "actor"), c.Actor, name)
+	clientActor := s.resolveClientActor(ctx, clientRoots)
+	actor, isCrossActor, err := s.resolveActor(argString(args, "actor"), clientActor, c.Actor, name)
 	if err != nil {
 		if !identityOptionalTools[name] || !errors.Is(err, errIdentityRequired) {
 			return nil, err
@@ -438,16 +433,32 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	return nil, fmt.Errorf("unknown tool %q", name)
 }
 
-func (s *server) resolveActor(callActor string, dirActor string, toolName string) (string, bool, error) {
+// resolveClientActor resolves the executing client actor by checking the MCP client's workspace roots.
+func (s *server) resolveClientActor(ctx context.Context, clientRoots []string) string {
+	for _, root := range clientRoots {
+		c, err := famctx.Resolve(ctx, famctx.Inputs{
+			WorkDir: root,
+			Mode:    famctx.ModeLocate,
+		})
+		if err == nil && c.Actor != "" {
+			return c.Actor
+		}
+	}
+	return ""
+}
+
+func (s *server) resolveActor(callActor string, clientActor string, dirActor string, toolName string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Establish session identity from client roots if not yet bound
+	if s.actor == "" && clientActor != "" {
+		s.actor = clientActor
+	}
 
 	executing := callActor
 	if executing == "" {
 		executing = s.actor
-	}
-	if executing == "" {
-		executing = s.envActor
 	}
 	if executing == "" {
 		executing = dirActor
@@ -457,16 +468,6 @@ func (s *server) resolveActor(callActor string, dirActor string, toolName string
 	}
 	if err := validateActorName(executing); err != nil {
 		return "", false, err
-	}
-
-	// Validate locked mode conflicts
-	if s.lockMode {
-		if s.envActor == "" {
-			return "", false, errors.New("BOTFAM_LOCK_ACTOR is set but COLLAB_ACTOR is empty")
-		}
-		if callActor != "" && callActor != s.envActor {
-			return "", false, fmt.Errorf("actor %q conflicts with locked COLLAB_ACTOR %q", callActor, s.envActor)
-		}
 	}
 
 	// Validate bound session conflicts

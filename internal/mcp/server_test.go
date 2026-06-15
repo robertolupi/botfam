@@ -49,7 +49,6 @@ func newTestServer(t *testing.T) (*server, string) {
 	t.Setenv("BOTFAM_TESTING", "1")
 
 	return &server{
-		envActor: "",
 		lockMode: false,
 	}, root
 }
