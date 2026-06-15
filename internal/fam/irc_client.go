@@ -341,15 +341,4 @@ func runIrcClient(actor, server, channel, workDir, passFile string, rawNick bool
 // ParseChannels splits a comma-separated list of channels and returns the
 // normalized list and primary channel. An empty list falls back to fallback
 // (the fam's main channel).
-func ParseChannels(channelStr, fallback string) (channels []string, primary string) {
-	for _, ch := range strings.Split(channelStr, ",") {
-		ch = strings.TrimSpace(ch)
-		if ch != "" {
-			channels = append(channels, ch)
-		}
-	}
-	if len(channels) == 0 {
-		channels = []string{fallback}
-	}
-	return channels, channels[0]
-}
+// ParseChannels moved to the internal/irc leaf (#311); re-exported in irc.go.

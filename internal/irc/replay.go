@@ -1,4 +1,4 @@
-package fam
+package irc
 
 import (
 	"bufio"
@@ -11,6 +11,15 @@ import (
 	"strings"
 	"time"
 )
+
+// HistoryEntry represents a single parsed event recorded by the scribe bot.
+type HistoryEntry struct {
+	Timestamp string `json:"timestamp"`
+	Sender    string `json:"sender"`
+	Type      string `json:"type"`
+	Target    string `json:"target"`
+	Body      string `json:"body"`
+}
 
 // ReplayHistory reads the durable shared history log and returns matched lines
 // along with the ending byte offset.

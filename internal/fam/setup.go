@@ -98,23 +98,8 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	return nil
 }
 
-func EnsureMembership(root string, explicit bool, workDir string) error {
-	if explicit {
-		return os.MkdirAll(root, 0o755)
-	}
-	reg, err := ReadRegistry(filepath.Join(root, "fam.toml"))
-	if err != nil {
-		return fmt.Errorf("fam root %s is not set up or readable; run botfam setup", root)
-	}
-	stores, err := GitObjectStores(workDir)
-	if err != nil {
-		return err
-	}
-	if hasAny(reg.ObjectStores, stores) {
-		return nil
-	}
-	return fmt.Errorf("repo object store is not registered for fam root %s; refusing unverified membership", root)
-}
+// EnsureMembership moved to the internal/provision leaf (#311); re-exported in
+// worktree.go.
 
 // ReadRegistry / WriteRegistry delegate to famconfig (#231), kept as fam-package
 // wrappers so existing callers don't change.
