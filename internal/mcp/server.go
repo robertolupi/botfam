@@ -85,28 +85,19 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 }
 
 // maybeStartIngest lazily launches the per-agent spool ingest goroutine the
-// first time a real (actor, workDir) resolves. It is the default wake path
-// (#229/#254): `botfam wait` reads the spool this fills, so the ingester runs
-// for any resolved agent unless the `wait_ingest` fam.toml flag opts it out
-// (ingest.WaitIngestEnabled — set wait_ingest=0 under [flags] or
-// [agent.<name>.flags]). The goroutine runs for the server's lifetime and holds
-// an advisory flock, so across multiple harnesses of one agent exactly one
-// instance writes the spool while the rest stand by.
+// first time a real (actor, workDir) resolves. It is the Maildir wake path
+// (#229/#342): the ingester is the single writer that tails IRC + drains forge
+// into the spool that `botfam wait` reads. It runs for **any** resolved agent —
+// the previous delivery system has been removed, so ingestion is not behind an
+// opt-in flag (the part to be flag-gated is the M4 notification nudge, #337, not
+// ingestion). The goroutine runs for the server's lifetime and holds an advisory
+// flock, so across multiple harnesses of one agent exactly one instance writes
+// the spool while the rest stand by.
 func (s *server) maybeStartIngest(workDir, actor string) {
 	// s.ctx is set only once the server is actually serving (Serve); the
 	// ingester needs that lifetime context to stop cleanly, and gating on it
 	// keeps direct-callTool unit tests from spawning a polling goroutine.
 	if actor == "" || s.ctx == nil {
-		return
-	}
-	enabled, err := ingest.WaitIngestEnabled(workDir)
-	if err != nil {
-		// A malformed wait_ingest flag value (likely a typo): surface it on
-		// stderr (visible in the host's MCP server log) and fall back to the
-		// default (enabled) rather than silently mis-gating the wake path.
-		fmt.Fprintf(os.Stderr, "botfam: %v\n", err)
-	}
-	if !enabled {
 		return
 	}
 	spoolDir, ircLog, matchNick, err := ingest.IngestParams(workDir)
@@ -264,8 +255,8 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 		return nil, fmt.Errorf("acting in another agent's worktree (executing: %s, target: %s) is read-only; mutating tool '%s' is blocked", actor, c.Actor, name)
 	}
 
-	// Lazily start the mailbox ingester now that an actor + workDir are resolved
-	// (default-on; fires at most once per server; the wait_ingest flag opts out).
+	// Lazily start the spool ingester now that an actor + workDir are resolved
+	// (runs for any resolved agent; fires at most once per server).
 	s.maybeStartIngest(workDir, actor)
 
 	if name == "worktree_init" {

@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,6 +58,17 @@ func NewIngester(spoolDir string, interval time.Duration, pollers ...Poller) *In
 // the host was down surface within milliseconds, not after a full poll interval),
 // then polls on the interval until ctx is cancelled.
 func (in *Ingester) Run(ctx context.Context) error {
+	// Fail-fast (#263): the ingester writes the spool the reader watches, so a
+	// drifted/garbage spoolDir must error loudly here rather than silently
+	// fabricating a parallel spool tree the reader (on the famctx path) never
+	// sees. The fam root is the spool's grandparent ($FAMROOT/spool/$agent ->
+	// $FAMROOT); IngestParams resolves it from famctx, so its absence is a real
+	// misconfiguration — refuse to MkdirAll a bogus tree under it.
+	famRoot := filepath.Dir(filepath.Dir(in.spoolDir))
+	if _, err := os.Stat(famRoot); err != nil {
+		return fmt.Errorf("ingest: fam root %s does not exist; refusing to create spool at %s: %w", famRoot, in.spoolDir, err)
+	}
+
 	sp, err := mailbox.Open(in.spoolDir)
 	if err != nil {
 		return err
@@ -228,20 +240,4 @@ func IngestParams(workDir string) (spoolDir, ircLogPath, matchNick string, err e
 	ircLogPath = filepath.Join(rf.WorktreeRoot, "scratch", "irc", rf.Actor, "log")
 	matchNick = famconfig.FamScopedNick(rf.Actor, rf.Slug)
 	return spoolDir, ircLogPath, matchNick, nil
-}
-
-// WaitIngestEnabled reports whether the mailbox ingester (the source `botfam
-// wait` reads) should run for the agent owning workDir. It is on by default and
-// gated by the `wait_ingest` fam.toml flag — set `wait_ingest = 0` under
-// `[flags]` (whole fam) or `[agent.<name>.flags]` (one harness) to opt out, no
-// MCP env/settings change needed (wiki/ProposalFlagFlips). A worktree whose fam
-// identity can't be resolved (legacy/non-agent checkout) keeps the default-on
-// behavior. It errors (returning the default, true) when wait_ingest is set to a
-// non-boolean value so the caller can surface the misconfiguration.
-func WaitIngestEnabled(workDir string) (bool, error) {
-	rf, err := famconfig.ResolveFam(workDir)
-	if err != nil {
-		return true, nil
-	}
-	return rf.FlagEnabled("wait_ingest", true)
 }

@@ -292,64 +292,6 @@ func TestResolverLegacyNoFamTOML(t *testing.T) {
 	}
 }
 
-// TestWaitIngestEnabled covers the #254 default-on ingester gate driven by the
-// `wait_ingest` fam.toml flag (wiki/ProposalFlagFlips): on by fam default, an
-// agent override turns it off, and a non-agent/legacy worktree stays on.
-func TestWaitIngestEnabled(t *testing.T) {
-	famDir := t.TempDir()
-	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
-		famDir = eval
-	}
-	const famTOML = `name       = "deep-cuts"
-slug       = "dc"
-forge_url  = "http://gitea:3000/"
-repository = "deep-cuts/deep-cuts"
-roster     = ["claude", "agy"]
-
-[flags]
-wait_ingest = 1
-
-[agent.claude]
-harness    = "claude-code"
-forge_user = "claude-bot"
-
-[agent.agy]
-harness    = "antigravity"
-forge_user = "agy-bot"
-[agent.agy.flags]
-wait_ingest = 0
-`
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	claude := filepath.Join(famDir, "claude")
-	gitInit(t, claude)
-	agy := filepath.Join(famDir, "agy")
-	gitInit(t, agy)
-
-	on := func(workDir string) bool {
-		t.Helper()
-		v, err := WaitIngestEnabled(workDir)
-		if err != nil {
-			t.Fatalf("WaitIngestEnabled(%s): unexpected error %v", workDir, err)
-		}
-		return v
-	}
-	if !on(claude) {
-		t.Error("claude: wait_ingest should be on (fam default 1)")
-	}
-	if on(agy) {
-		t.Error("agy: wait_ingest should be off (agent override 0)")
-	}
-
-	// A legacy / non-agent worktree (no fam.toml) keeps the default-on behavior.
-	legacy := filepath.Join(t.TempDir(), "legacy")
-	gitInit(t, legacy)
-	if !on(legacy) {
-		t.Error("legacy worktree without fam.toml should default on")
-	}
-}
-
 func TestResolveFamMissingFamTOML(t *testing.T) {
 	famDir := t.TempDir() // no fam.toml
 	wt := filepath.Join(famDir, "claude")
