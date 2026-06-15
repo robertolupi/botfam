@@ -51,7 +51,7 @@ func NewForgePoller(client ForgeClient, repo string) Poller {
 
 func (p *forgePoller) Name() string { return mailbox.SourceForge }
 
-func (p *forgePoller) Poll(w *mailbox.Writer, _ *mailbox.Cursors) error {
+func (p *forgePoller) Poll(s *mailbox.Spool, _ *mailbox.Cursors) error {
 	limit := forge.NotificationsPageLimit()
 	for page := 0; page < maxForgeDrainPages; page++ {
 		ns, err := p.client.ListUnreadRepoNotifications(p.repo)
@@ -68,15 +68,13 @@ func (p *forgePoller) Poll(w *mailbox.Writer, _ *mailbox.Cursors) error {
 			if url == "" {
 				url = n.Subject.URL
 			}
-			// Mailbox append first, then ack: at-least-once, never lose a thread.
-			if _, err := w.Append(mailbox.Event{
-				Source:      mailbox.SourceForge,
-				SubjectType: n.Subject.Type,
-				Repo:        n.Repository.FullName,
-				Number:      numberFromURL(url),
-				Title:       n.Subject.Title,
-				URL:         url,
-				NotifID:     n.ID,
+			// Spool deliver first, then ack: at-least-once, never lose a thread.
+			if _, err := s.Deliver(&mailbox.Message{
+				Source:  mailbox.SourceForge,
+				From:    mailbox.SourceForge,
+				Kind:    strings.ToLower(n.Subject.Type),
+				Subject: forgeSubject(n, url),
+				Body:    url,
 			}); err != nil {
 				return err
 			}
@@ -89,6 +87,19 @@ func (p *forgePoller) Poll(w *mailbox.Writer, _ *mailbox.Cursors) error {
 		}
 	}
 	return fmt.Errorf("forge: repo %s unread did not drain after %d pages (notification ack failing?)", p.repo, maxForgeDrainPages)
+}
+
+// forgeSubject renders the §4 per-source Subject template for a forge
+// notification: `<kind>: <repo>#<number> "<title>"`. The artifact ref is a fine
+// priority cue; the URL stays in the body, never the Subject (proposal §4).
+func forgeSubject(n forge.Notification, url string) string {
+	repo := n.Repository.FullName
+	num := numberFromURL(url)
+	kind := strings.ToLower(n.Subject.Type)
+	if num > 0 {
+		return fmt.Sprintf("%s: %s#%d %q", kind, repo, num, n.Subject.Title)
+	}
+	return fmt.Sprintf("%s: %s %q", kind, repo, n.Subject.Title)
 }
 
 // numberFromURL extracts the trailing issue/PR number from a subject URL, or 0.

@@ -23,18 +23,43 @@ func appendToLog(t *testing.T, path, line string) {
 	f.Close()
 }
 
-// waitForIRCEvent polls the mailbox until an irc event whose text contains substr
+// ircTexts drains every irc message body in the spool (new/ and cur/). Nothing
+// in these ingester tests acks, so delivered messages stay in new/, but reading
+// both boxes keeps the helper robust.
+func ircTexts(t *testing.T, spoolDir string) []string {
+	t.Helper()
+	sp, err := mailbox.Open(spoolDir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, list := range []func() ([]mailbox.Entry, error){sp.ListNew, sp.ListCur} {
+		ents, err := list()
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			m, err := sp.Read(e)
+			if err != nil {
+				continue
+			}
+			if m.Source == mailbox.SourceIRC {
+				out = append(out, m.Body)
+			}
+		}
+	}
+	return out
+}
+
+// waitForIRCEvent polls the spool until an irc message whose body contains substr
 // appears, or fails after the deadline.
-func waitForIRCEvent(t *testing.T, mboxPath, substr string, within time.Duration) {
+func waitForIRCEvent(t *testing.T, spoolDir, substr string, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
-		evs, _, err := mailbox.ReadFrom(mboxPath, 0)
-		if err == nil {
-			for _, ev := range evs {
-				if ev.Source == mailbox.SourceIRC && strings.Contains(ev.Text, substr) {
-					return
-				}
+		for _, txt := range ircTexts(t, spoolDir) {
+			if strings.Contains(txt, substr) {
+				return
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -42,30 +67,26 @@ func waitForIRCEvent(t *testing.T, mboxPath, substr string, within time.Duration
 	t.Fatalf("irc event containing %q did not appear within %s", substr, within)
 }
 
-func mailboxHasText(t *testing.T, mboxPath, substr string) bool {
+func spoolHasText(t *testing.T, spoolDir, substr string) bool {
 	t.Helper()
-	evs, _, err := mailbox.ReadFrom(mboxPath, 0)
-	if err != nil {
-		return false
-	}
-	for _, ev := range evs {
-		if strings.Contains(ev.Text, substr) {
+	for _, txt := range ircTexts(t, spoolDir) {
+		if strings.Contains(txt, substr) {
 			return true
 		}
 	}
 	return false
 }
 
-func TestIngesterTailsIRCToMailbox(t *testing.T) {
+func TestIngesterTailsIRCToSpool(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "log")
-	mboxPath := filepath.Join(dir, "claude.mailbox")
+	spoolDir := filepath.Join(dir, "spool")
 
-	// A line that already exists before the ingester starts: a fresh mailbox
-	// seeds to EOF, so this must NOT be ingested (no stale backlog dump).
+	// A line that already exists before the ingester starts: a fresh spool seeds
+	// to EOF, so this must NOT be ingested (no stale backlog dump).
 	appendToLog(t, logPath, "[00:00:00] #botfam <agy-botfam> claude: OLD pre-start\n")
 
-	ing := NewIngester(mboxPath, 20*time.Millisecond, NewIRCPoller(logPath, "claude-botfam"))
+	ing := NewIngester(spoolDir, 20*time.Millisecond, NewIRCPoller(logPath, "claude-botfam"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = ing.Run(ctx) }()
@@ -73,9 +94,9 @@ func TestIngesterTailsIRCToMailbox(t *testing.T) {
 	time.Sleep(60 * time.Millisecond) // let it acquire the lock and seed to EOF
 
 	appendToLog(t, logPath, "[00:00:01] #botfam <agy-botfam> claude: NEW after-start\n")
-	waitForIRCEvent(t, mboxPath, "NEW after-start", 2*time.Second)
+	waitForIRCEvent(t, spoolDir, "NEW after-start", 2*time.Second)
 
-	if mailboxHasText(t, mboxPath, "OLD pre-start") {
+	if spoolHasText(t, spoolDir, "OLD pre-start") {
 		t.Error("fresh ingester ingested pre-start backlog (should seed to EOF)")
 	}
 }
@@ -83,34 +104,33 @@ func TestIngesterTailsIRCToMailbox(t *testing.T) {
 func TestIngesterColdStartCatchUp(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "log")
-	mboxPath := filepath.Join(dir, "claude.mailbox")
+	spoolDir := filepath.Join(dir, "spool")
 
 	// Event that arrived "while the host was down".
 	appendToLog(t, logPath, "[00:00:00] #botfam <agy-botfam> claude: MISSED while down\n")
 
-	// Pre-existing mailbox with a meta cursor at IRC offset 0 => resume from the
-	// start of the log, not EOF.
-	w, err := mailbox.OpenWriter(mboxPath)
+	// Pre-existing cursors.json at IRC offset 0 => resume from the start of the
+	// log, not EOF (a non-fresh spool is not re-seeded).
+	sp, err := mailbox.Open(spoolDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.Checkpoint(mailbox.Cursors{IRCLogOffset: 0}); err != nil {
+	if err := sp.WriteCursors(mailbox.Cursors{IRCOffset: 0}); err != nil {
 		t.Fatal(err)
 	}
-	w.Close()
 
 	// A deliberately long interval: if the event shows up quickly it can only be
 	// from the one-shot synchronous cold-start poll, not the ticker.
-	ing := NewIngester(mboxPath, 10*time.Second, NewIRCPoller(logPath, "claude-botfam"))
+	ing := NewIngester(spoolDir, 10*time.Second, NewIRCPoller(logPath, "claude-botfam"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = ing.Run(ctx) }()
 
-	waitForIRCEvent(t, mboxPath, "MISSED while down", 1*time.Second)
+	waitForIRCEvent(t, spoolDir, "MISSED while down", 1*time.Second)
 }
 
 func TestWriterLockExclusive(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "claude.mailbox.lock")
+	path := filepath.Join(t.TempDir(), "spool.lock")
 
 	l1, err := acquireWriterLock(context.Background(), path, 10*time.Millisecond)
 	if err != nil {

@@ -84,14 +84,14 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	return serveStdio(ctx, mcpSrv, in, out)
 }
 
-// maybeStartIngest lazily launches the per-agent mailbox ingest goroutine the
+// maybeStartIngest lazily launches the per-agent spool ingest goroutine the
 // first time a real (actor, workDir) resolves. It is the default wake path
-// (#229/#254): `botfam wait` reads the mailbox this fills, so the ingester runs
+// (#229/#254): `botfam wait` reads the spool this fills, so the ingester runs
 // for any resolved agent unless the `wait_ingest` fam.toml flag opts it out
 // (ingest.WaitIngestEnabled — set wait_ingest=0 under [flags] or
 // [agent.<name>.flags]). The goroutine runs for the server's lifetime and holds
 // an advisory flock, so across multiple harnesses of one agent exactly one
-// instance writes the mailbox while the rest stand by.
+// instance writes the spool while the rest stand by.
 func (s *server) maybeStartIngest(workDir, actor string) {
 	// s.ctx is set only once the server is actually serving (Serve); the
 	// ingester needs that lifetime context to stop cleanly, and gating on it
@@ -109,7 +109,7 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	if !enabled {
 		return
 	}
-	mboxPath, ircLog, matchNick, err := ingest.IngestParams(workDir)
+	spoolDir, ircLog, matchNick, err := ingest.IngestParams(workDir)
 	if err != nil {
 		return // not resolvable yet; a later tool call retries
 	}
@@ -128,7 +128,7 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	if fp, err := ingest.ForgePollerFor(workDir, actor); err == nil {
 		pollers = append(pollers, fp)
 	}
-	ing := ingest.NewIngester(mboxPath, 30*time.Second, pollers...)
+	ing := ingest.NewIngester(spoolDir, 30*time.Second, pollers...)
 	go func() { _ = ing.Run(s.ctx) }()
 }
 
