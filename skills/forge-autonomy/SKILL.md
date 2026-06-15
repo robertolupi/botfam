@@ -86,7 +86,11 @@ Requirements / gotchas:
    control plane (reviews, approvals, claims) (**Plane Separation**). Quorum is
    the branch rule's Required Approvals (independent; the author can't
    self-approve). The **merge itself is the operator's** — don't merge without
-   an explicit go-ahead (and the gate enforces the approval count anyway).
+   an explicit go-ahead (and the gate enforces the approval count anyway). On
+   completion, **spawn the `meta-review` subagent** (STEP 2,
+   `skills/meta-review`) with `{PR index + repo, corpus index}` but **not**
+   your verdict — it emits advisory `risk/*` suggestions in an isolated
+   context.
 4. **Heads move; approvals go stale.** A base-merge or new commit dismisses
    prior approvals. Re-read the new tip (per step 1) before re-approving —
    don't blind re-approve.
