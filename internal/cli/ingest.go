@@ -41,6 +41,3 @@ func ForgePollerFor(workDir, actor string) (Poller, error) {
 func IngestParams(workDir string) (spoolDir, ircLogPath, matchNick string, err error) {
 	return ingest.IngestParams(workDir)
 }
-
-// WaitIngestEnabled re-exports ingest.WaitIngestEnabled.
-func WaitIngestEnabled(workDir string) (bool, error) { return ingest.WaitIngestEnabled(workDir) }
