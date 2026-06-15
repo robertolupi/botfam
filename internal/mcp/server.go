@@ -77,13 +77,28 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 }
 
 // maybeStartIngest lazily launches the per-agent mailbox ingest goroutine the
-// first time a real (actor, workDir) resolves. It is gated behind the
-// BOTFAM_WAIT_INGEST env var while the unified-wait path is being proven
-// (#229 M3): unset, the server behaves exactly as before. The goroutine runs for
-// the server's lifetime and holds an advisory flock, so across multiple harnesses
-// of one agent exactly one instance writes the mailbox while the rest stand by.
+// first time a real (actor, workDir) resolves. It is the default wake path
+// (#229/#254): `botfam wait` reads the mailbox this fills, so the ingester runs
+// for any resolved agent unless the `wait_ingest` fam.toml flag opts it out
+// (fam.WaitIngestEnabled — set wait_ingest=0 under [flags] or
+// [agent.<name>.flags]). The goroutine runs for the server's lifetime and holds
+// an advisory flock, so across multiple harnesses of one agent exactly one
+// instance writes the mailbox while the rest stand by.
 func (s *server) maybeStartIngest(workDir, actor string) {
-	if actor == "" || os.Getenv("BOTFAM_WAIT_INGEST") == "" {
+	// s.ctx is set only once the server is actually serving (Serve); the
+	// ingester needs that lifetime context to stop cleanly, and gating on it
+	// keeps direct-callTool unit tests from spawning a polling goroutine.
+	if actor == "" || s.ctx == nil {
+		return
+	}
+	enabled, err := fam.WaitIngestEnabled(workDir)
+	if err != nil {
+		// A malformed wait_ingest flag value (likely a typo): surface it on
+		// stderr (visible in the host's MCP server log) and fall back to the
+		// default (enabled) rather than silently mis-gating the wake path.
+		fmt.Fprintf(os.Stderr, "botfam: %v\n", err)
+	}
+	if !enabled {
 		return
 	}
 	mboxPath, ircLog, matchNick, err := fam.IngestParams(workDir)
@@ -224,7 +239,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	}
 
 	// Lazily start the mailbox ingester now that an actor + workDir are resolved
-	// (no-op unless BOTFAM_WAIT_INGEST is set; fires at most once per server).
+	// (default-on; fires at most once per server; the wait_ingest flag opts out).
 	s.maybeStartIngest(workDir, actor)
 
 	if name == "worktree_init" {

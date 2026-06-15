@@ -1,6 +1,6 @@
 ---
 name: forge-autonomy
-description: Use when operating as a botfam agent on the self-hosted forge — getting woken on queued work via `botfam forge-wait`, and reviewing/approving pull requests correctly (read the diff at the actual tip, build+test, never approve on assumption). Also covers delegating a PR review to a subagent.
+description: Use when operating as a botfam agent on the self-hosted forge — getting woken on queued work via `botfam wait`, and reviewing/approving pull requests correctly (read the diff at the actual tip, build+test, never approve on assumption). Also covers delegating a PR review to a subagent.
 ---
 
 # Operating autonomously on the forge
@@ -11,27 +11,43 @@ protection** (Required Approvals; lint it with `tools/forge-gate.sh`, see
 `doc/proposals/forge-backing.md`). This skill is how an agent notices work and
 reviews it without the operator nudging it.
 
-## 1. The wake loop — `botfam forge-wait`
+## 1. The wake loop — `botfam wait`
 
-`botfam forge-wait` is the forge analogue of `botfam irc-wait`. It blocks until
-this agent has unread forge notifications — a review requested, a comment, a
-mention, or a **new issue/PR assigned to you** (all subject types, not just
-PRs) — then prints them *with their content inline* and exits.
+`botfam wait` is the unified wake watcher: it blocks on your per-agent mailbox
+until new **forge** or **IRC** activity arrives, then prints the events (one
+JSONL object per line) and exits. Forge events are repo-scoped to your fam — a
+review requested, a comment, a mention, or a **new issue/PR assigned to you**
+(all subject types, not just PRs).
 
-> **Unified wake (#229):** where the mailbox ingester is enabled
-> (`BOTFAM_WAIT_INGEST=1`), `botfam wait` blocks on forge **and** IRC activity
-> together (forge events are repo-scoped to your fam). `botfam forge-wait` below
-> remains the forge-only fallback and is unchanged.
+As a botfam member you are expected to **start `botfam wait` as soon as you
+boot**, and to **act autonomously** on what it surfaces: work an issue the
+operator assigns you, and review a PR another bot requests from you — without
+waiting for a further nudge.
 
 Run it as a background watcher and loop:
 
-1. Start `botfam forge-wait` in the background (e.g. `--interval 90` to limit
-   churn). When it returns, the harness wakes you.
-2. **Act** on each surfaced notification (review the PR, answer the issue, …).
-3. **Clear**: `botfam forge-wait --once --mark-read` (so handled items don't
-   wake you again).
-4. **Re-arm**: start `botfam forge-wait` again. Always re-arm, or you stop
-   getting woken.
+1. Start `botfam wait` in the background. When it returns, the harness wakes
+   you (resume past handled events with `--from <offset>` from the trailing
+   cursor line).
+2. **Act** on each surfaced event (review the PR, work the assigned issue, …).
+3. **Re-arm**: start `botfam wait` again. Always re-arm, or you stop getting
+   woken.
+
+There is **no manual mark-read step.** With the ingester running, forge
+notifications are drained into your mailbox and **marked read automatically**
+(append-to-mailbox first, then ack upstream — at-least-once, so a crash
+re-surfaces a thread rather than losing it). The mailbox is the durable record;
+you consume from it by advancing `--from`, not by clearing the forge
+notification list yourself. A thread that gets new activity later re-appears
+and wakes you again.
+
+The mailbox is filled by an ingester the botfam MCP server starts automatically
+for your agent — on by default, no setup. To opt a fam or a single harness out,
+set `wait_ingest = 0` in fam.toml under `[flags]` or `[agent.<name>.flags]` (no
+MCP env/settings change). The legacy forge-only watcher `botfam forge-wait`
+still works but is **deprecated, being removed in #250** — prefer
+`botfam wait`. (On that legacy path you *do* clear handled items manually with
+`botfam forge-wait --once --mark-read`, then re-arm.)
 
 Requirements / gotchas:
 
@@ -40,8 +56,9 @@ Requirements / gotchas:
   (its defaults include these); a read-only token 403s on notifications and
   can't open PRs / review / merge.
 - Your own review actions generate notifications, so the loop can wake on
-  echoes of your own work — mark-read after handling and use a sane poll
-  interval rather than spinning.
+  echoes of your own work — the ingester's auto-mark-read clears them as it
+  drains; on the legacy `forge-wait` fallback, mark-read after handling and use
+  a sane poll interval rather than spinning.
 
 ## 2. Reviewing a pull request — the protocol
 
@@ -91,21 +108,24 @@ reviews. For anything beyond a small diff, spawn a **review subagent**:
 
 ## 4. Escalation — forge request, then IRC
 
-A forge review-request only reaches an agent that is actually running
-`botfam forge-wait` (with a notification-scoped token). Until every agent is
-reliably on the loop, don't assume a request was seen:
+A forge review-request only reaches an agent that is actually running the wake
+loop (`botfam wait`, or the legacy `botfam forge-wait`) with a
+notification-scoped token. Until every agent is reliably on the loop, don't
+assume a request was seen:
 
 1. Request the review on the forge (PR reviewer request / assignment).
 2. If the reviewer doesn't respond within **~2 minutes**, **ping them on IRC**
    (`#botfam` / `#ccrep`) with the PR link — IRC is the reliable fallback
    channel (see `skills/join-irc`).
 
-Keep an IRC client running alongside `forge-wait` so you can both send these
-pings and receive them.
+`botfam wait` already wakes you on IRC, but you still need a running IRC client
+(see `skills/join-irc`) to *send* these pings and receive them.
 
 ## Don't
 
 - Don't approve without reading the tip and building/testing it.
 - Don't merge without the operator's explicit go-ahead.
-- Don't let the wake loop spin on your own echoes — mark-read after handling
-  and re-arm with a sane interval.
+- Don't let the wake loop spin on your own echoes — the ingester auto-marks
+  forge notifications read as it drains; always re-arm `botfam wait` after
+  handling (on the legacy `forge-wait` fallback, mark-read with a sane
+  interval).

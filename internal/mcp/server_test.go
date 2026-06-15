@@ -34,6 +34,29 @@ func newTestServer(t *testing.T) (*server, string) {
 	}, root
 }
 
+// TestMaybeStartIngestGuards locks the early-return guards on the default-on
+// mailbox ingester (#254): it must NOT spawn its polling goroutine without a
+// serving-lifetime context (the direct-callTool unit-test path — a nil ctx here
+// previously panicked) or without a resolved actor. The wait_ingest flag gate
+// is covered by fam.TestWaitIngestEnabled.
+func TestMaybeStartIngestGuards(t *testing.T) {
+	t.Run("nil server ctx (direct callTool): no ingester", func(t *testing.T) {
+		s, root := newTestServer(t)
+		s.maybeStartIngest(root, "alice")
+		if s.ingestStarted {
+			t.Fatal("ingester started with nil ctx; must be gated to the serving lifetime")
+		}
+	})
+	t.Run("empty actor: no ingester", func(t *testing.T) {
+		s, root := newTestServer(t)
+		s.ctx = context.Background()
+		s.maybeStartIngest(root, "")
+		if s.ingestStarted {
+			t.Fatal("ingester started without an actor")
+		}
+	})
+}
+
 func mkdir(t *testing.T, path string) string {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {
