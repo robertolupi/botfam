@@ -17,10 +17,13 @@ const cursorsFile = "cursors.json"
 // Cursors are the upstream positions the ingester checkpoints so it can resume
 // tailing after a restart without re-dumping or skipping events. IRCOffset is
 // the byte offset into the IRC client log; ForgeWatermark is the high-water
-// notification id (reserved for the edge-triggered forge source, #169).
+// notification id and ForgeSeeded records that the forge source has adopted its
+// baseline (#169) — the seeded flag is distinct from a 0 watermark so the first
+// real notification after a quiet start is delivered, not mistaken for the seed.
 type Cursors struct {
 	IRCOffset      int64 `json:"irc_offset"`
 	ForgeWatermark int64 `json:"forge_watermark"`
+	ForgeSeeded    bool  `json:"forge_seeded"`
 }
 
 // HasCursors reports whether a cursors.json exists yet. The ingester uses its

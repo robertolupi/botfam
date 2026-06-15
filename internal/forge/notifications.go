@@ -61,8 +61,7 @@ func (c *Client) ListUnreadRepoNotifications(repo string) ([]Notification, error
 	return ns, nil
 }
 
-// NotificationsPageLimit is the page size the repo-scoped fetch uses; the
-// ingester reads it to know when a page was full (more may remain).
+// NotificationsPageLimit is the page size the repo-scoped notification fetch uses.
 func NotificationsPageLimit() int { return notificationsPageLimit }
 
 // MarkNotificationRead marks a single notification thread read so it does not

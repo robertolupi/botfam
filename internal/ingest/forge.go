@@ -15,10 +15,9 @@ import (
 // ForgeClient is the slice of the forge client the ingester needs; an interface
 // so the poller is testable with a fake.
 type ForgeClient interface {
-	// ListUnreadRepoNotifications returns one page of unread threads scoped to
-	// repo (owner/repo).
+	// ListUnreadRepoNotifications returns the newest page of unread threads scoped
+	// to repo (owner/repo), most-recent first.
 	ListUnreadRepoNotifications(repo string) ([]forge.Notification, error)
-	MarkNotificationRead(id int64) error
 	// GetIssueTimeline returns the thread's typed event log (comment/close/
 	// reopen/merge/review/…); its newest entry is what triggered the notification,
 	// so the poller can name the actual event + actor without remembering prior
@@ -29,63 +28,72 @@ type ForgeClient interface {
 	GetSubject(apiURL string) (*forge.SubjectContent, error)
 }
 
-// maxForgeDrainPages caps a single Poll's drain so a thread that refuses to ack
-// (e.g. a token without write:notification) cannot loop forever. A var so tests
-// can shrink it.
-var maxForgeDrainPages = 200
-
-// forgePoller surfaces Gitea notifications as forge events by *draining* the
-// repo's unread set: each poll repeatedly fetches a page of unread threads for
-// the fam's repo, appends each to the mailbox, then marks it read, until the
-// unread set is empty.
+// forgePoller surfaces Gitea notifications as forge events using a **read-only
+// id watermark** (#169): each poll lists the repo's unread threads and delivers
+// only those with a notification id past the high-water mark, then advances the
+// mark. It never marks notifications read — forge state stays canonical and
+// unmutated (the spool, not the forge's read-flag, is this agent's record).
 //
-// This avoids the offset-pagination + id-high-water-cursor design and its
-// skip/data-loss hazards (#251 review): there is no offset to shift under a
-// mutating list and no cursor to advance past an unseen thread. It is
-// at-least-once — the mailbox append happens *before* the upstream ack, so a
-// crash in between re-surfaces the thread (a benign duplicate) rather than
-// losing it. Marking read is the consumption mechanism; the mailbox is the
-// durable record, so acking upstream loses nothing. A thread that gets new
-// activity later re-appears as unread and is surfaced again — which also fixes
-// the updated-thread gap (#253).
+// On the first run for a spool it *seeds* — adopts the current high-water id and
+// delivers nothing — so a fresh start (or the existing backlog you can see as
+// "N unread" in the forge UI) doesn't flood the spool. ForgeSeeded (distinct
+// from a 0 watermark) marks that baseline so the first real notification after a
+// quiet start still delivers.
+//
+// Why this is safe vs the #251 review (which rejected an id-high-water cursor
+// over an *offset*-paginated list): there is no offset here. Notification ids
+// are stable and monotonic, so the watermark is a content identity, not a
+// position that shifts as the list mutates — the skip hazard #251 worried about
+// doesn't arise. A thread with new activity re-appears with a higher id and is
+// re-delivered (the #253 updated-thread case still works). At-least-once holds:
+// the watermark only advances after delivery, so a crash mid-poll re-surfaces
+// undelivered threads next poll.
 type forgePoller struct {
 	client ForgeClient
 	repo   string // owner/repo
 }
 
-// NewForgePoller builds the forge source draining repo (owner/repo).
+// NewForgePoller builds the read-only watermark forge source for repo (owner/repo).
 func NewForgePoller(client ForgeClient, repo string) Poller {
 	return &forgePoller{client: client, repo: repo}
 }
 
 func (p *forgePoller) Name() string { return mailbox.SourceForge }
 
-func (p *forgePoller) Poll(s *mailbox.Spool, _ *mailbox.Cursors) error {
-	limit := forge.NotificationsPageLimit()
-	for page := 0; page < maxForgeDrainPages; page++ {
-		ns, err := p.client.ListUnreadRepoNotifications(p.repo)
-		if err != nil {
-			return err
-		}
-		if len(ns) == 0 {
-			return nil // drained
-		}
-		// Ascending id for a stable surfacing order within a page.
-		sort.Slice(ns, func(i, j int) bool { return ns[i].ID < ns[j].ID })
-		for _, n := range ns {
-			// Spool deliver first, then ack: at-least-once, never lose a thread.
-			if _, err := s.Deliver(p.buildMessage(n)); err != nil {
-				return err
-			}
-			if err := p.client.MarkNotificationRead(n.ID); err != nil {
-				return err
-			}
-		}
-		if len(ns) < limit {
-			return nil // last (partial) page drained
+func (p *forgePoller) Poll(s *mailbox.Spool, c *mailbox.Cursors) error {
+	ns, err := p.client.ListUnreadRepoNotifications(p.repo)
+	if err != nil {
+		return err
+	}
+	maxID := c.ForgeWatermark
+	for _, n := range ns {
+		if n.ID > maxID {
+			maxID = n.ID
 		}
 	}
-	return fmt.Errorf("forge: repo %s unread did not drain after %d pages (notification ack failing?)", p.repo, maxForgeDrainPages)
+	// Seed once: adopt the current high-water id and deliver nothing, so the
+	// pre-existing backlog never floods the spool. Seeded is tracked separately
+	// from the watermark so a seed that finds zero unread (watermark stays 0)
+	// still delivers the first real notification later.
+	if !c.ForgeSeeded {
+		c.ForgeWatermark = maxID
+		c.ForgeSeeded = true
+		return nil
+	}
+	// Deliver only threads past the watermark, oldest-first so order is stable
+	// and the mark advances monotonically. Advance only after a successful
+	// deliver (at-least-once); a mid-poll error leaves the watermark for retry.
+	sort.Slice(ns, func(i, j int) bool { return ns[i].ID < ns[j].ID })
+	for _, n := range ns {
+		if n.ID <= c.ForgeWatermark {
+			continue // already seen
+		}
+		if _, err := s.Deliver(p.buildMessage(n)); err != nil {
+			return err
+		}
+		c.ForgeWatermark = n.ID
+	}
+	return nil
 }
 
 // buildMessage turns a forge notification into a spool message, enriched so
