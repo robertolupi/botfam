@@ -1,4 +1,4 @@
-package fam
+package irc
 
 import (
 	"bufio"

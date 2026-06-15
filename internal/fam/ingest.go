@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/irc"
 	"github.com/robertolupi/botfam/internal/mailbox"
 )
 
@@ -175,7 +176,7 @@ func (p *ircPoller) Poll(w *mailbox.Writer, c *mailbox.Cursors) error {
 		return err
 	}
 	for _, line := range lines {
-		if !isMatchingLine(line, p.matchNick) {
+		if !irc.IsMatchingLine(line, p.matchNick) {
 			continue
 		}
 		target, nick, text := parseIRCLine(line)

@@ -16,14 +16,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// HistoryEntry represents a single parsed event recorded by the scribe bot.
-type HistoryEntry struct {
-	Timestamp string `json:"timestamp"`
-	Sender    string `json:"sender"`
-	Type      string `json:"type"`
-	Target    string `json:"target"`
-	Body      string `json:"body"`
-}
+// HistoryEntry moved to the internal/irc leaf (#311); re-exported in irc.go.
 
 // ScribeCmd is the thin args/io entry point retained for tests; it builds the
 // Cobra command and runs it against args.
