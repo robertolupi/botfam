@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,11 @@ import (
 
 	"github.com/robertolupi/botfam/internal/mailbox"
 )
+
+// failWriter fails every write, modelling a broken stdout / errored redirect.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
 
 func seedSpool(t *testing.T) (dir string) {
 	t.Helper()
@@ -105,6 +111,28 @@ func TestWaitAcksDrainedMessages(t *testing.T) {
 	}
 	if !strings.Contains(s, "===== timed out =====") {
 		t.Errorf("expected timed-out footer:\n%s", s)
+	}
+}
+
+// TestWaitDoesNotAckOnWriteError: if surfaced output fails to write, the wake
+// payload must NOT be acked — it stays in new/ for the next wait to re-deliver
+// (at-least-once: a dup beats a silently-dropped wake). Regression for the
+// codex review finding on #345.
+func TestWaitDoesNotAckOnWriteError(t *testing.T) {
+	dir := seedSpool(t)
+	err := runWait(context.Background(), failWriter{}, io.Discard, dir, parseSources("irc,forge"), 2*time.Second, 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an error when surfaced output fails to write")
+	}
+	sp, err := mailbox.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if news, _ := sp.ListNew(); len(news) != 2 {
+		t.Fatalf("messages were consumed despite the write failure: new/ has %d, want 2", len(news))
+	}
+	if curs, _ := sp.ListCur(); len(curs) != 0 {
+		t.Errorf("cur/ has %d, want 0 (nothing should be acked on write failure)", len(curs))
 	}
 }
 

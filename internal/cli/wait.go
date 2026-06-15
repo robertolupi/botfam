@@ -178,22 +178,37 @@ func runWait(ctx context.Context, out, errw io.Writer, spoolDir string, want map
 		}
 
 		if len(shown) > 0 {
+			// Write all surfaced output BEFORE acking: if a write fails (broken
+			// stdout / errored redirect), return without acking so the batch stays
+			// in new/ and the next wait re-delivers it — at-least-once, dup over
+			// loss. Acking before a confirmed write would silently drop the wake.
 			for i, d := range shown {
-				emitBanner(out, i+1, len(shown), d.source, d.raw)
+				if err := emitBanner(out, i+1, len(shown), d.source, d.raw); err != nil {
+					return fmt.Errorf("wait: %w", err)
+				}
 			}
-			fmt.Fprintf(out, "===== woke: %d %s =====\n", len(shown), plural(len(shown)))
+			if _, err := fmt.Fprintf(out, "===== woke: %d %s =====\n", len(shown), plural(len(shown))); err != nil {
+				return fmt.Errorf("wait: %w", err)
+			}
+			// Output is durably written: now consume the whole drained batch
+			// (wanted + filtered-out) so coalesced traffic isn't re-surfaced.
+			for _, e := range ents {
+				if err := sp.Ack(e); err != nil {
+					return fmt.Errorf("wait: %w", err)
+				}
+			}
+			return nil
 		}
-		// Ack everything drained (wanted or not) so coalesced/filtered traffic is
-		// consumed in this wake and not re-surfaced next time.
+		// Nothing wanted surfaced: consume any filtered-out drained entries (no
+		// output was written, so there's nothing to lose) and keep waiting.
 		for _, e := range ents {
 			_ = sp.Ack(e)
 		}
-		if len(shown) > 0 {
-			return nil
-		}
 
 		if expired() {
-			fmt.Fprintln(out, "===== timed out =====")
+			if _, err := fmt.Fprintln(out, "===== timed out ====="); err != nil {
+				return fmt.Errorf("wait: %w", err)
+			}
 			return nil
 		}
 		select {
@@ -243,9 +258,13 @@ func runReplay(out, errw io.Writer, spoolDir string, want map[string]bool, since
 		}
 	}
 	for i, d := range shown {
-		emitBanner(out, i+1, len(shown), d.source, d.raw)
+		if err := emitBanner(out, i+1, len(shown), d.source, d.raw); err != nil {
+			return fmt.Errorf("wait: %w", err)
+		}
 	}
-	fmt.Fprintf(out, "===== replayed: %d %s =====\n", len(shown), plural(len(shown)))
+	if _, err := fmt.Fprintf(out, "===== replayed: %d %s =====\n", len(shown), plural(len(shown))); err != nil {
+		return fmt.Errorf("wait: %w", err)
+	}
 	return nil
 }
 
@@ -269,17 +288,27 @@ func ensureSpool(spoolDir string) error {
 
 // emitBanner prints one message: a legible banner naming its position and source,
 // then the verbatim spool bytes (with a guaranteed trailing newline + blank
-// separator so concatenated messages stay readable).
-func emitBanner(out io.Writer, n, total int, source string, raw []byte) {
+// separator so concatenated messages stay readable). It returns the first write
+// error so the caller can refuse to ack output that never reached the consumer.
+func emitBanner(out io.Writer, n, total int, source string, raw []byte) error {
 	if source == "" {
 		source = "?"
 	}
-	fmt.Fprintf(out, "===== message %d/%d · %s =====\n", n, total, source)
-	out.Write(raw)
-	if !bytes.HasSuffix(raw, []byte("\n")) {
-		fmt.Fprintln(out)
+	if _, err := fmt.Fprintf(out, "===== message %d/%d · %s =====\n", n, total, source); err != nil {
+		return err
 	}
-	fmt.Fprintln(out)
+	if _, err := out.Write(raw); err != nil {
+		return err
+	}
+	if !bytes.HasSuffix(raw, []byte("\n")) {
+		if _, err := fmt.Fprintln(out); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintln(out); err != nil {
+		return err
+	}
+	return nil
 }
 
 func plural(n int) string {
