@@ -12,12 +12,35 @@ import (
 	"strings"
 )
 
+// Resolver resolves a worktree's fam identity (root set included). GitResolver is
+// the production implementation; tests inject a fake — typically via FuncResolver
+// — so they can control the resolved identity without manipulating the process
+// environment (#334). famctx.Resolve consumes this interface: it is a live seam,
+// not a decorative one.
+type Resolver interface {
+	ResolveIdentity(workDir string) (RootInfo, error)
+}
+
+// FuncResolver adapts a plain function to the Resolver interface — the injection
+// seam tests use to return a canned RootInfo instead of standing up a git repo
+// and env.
+type FuncResolver func(workDir string) (RootInfo, error)
+
+// ResolveIdentity implements Resolver.
+func (f FuncResolver) ResolveIdentity(workDir string) (RootInfo, error) { return f(workDir) }
+
 // GitResolver derives a fam Root/Name/Actor for a worktree. It is the dependency-free
 // home of identity resolution (#311): both internal/cli and internal/mcp resolve
 // through it without importing each other.
 type GitResolver struct {
 	Env []string
 }
+
+// Compile-time checks that both resolvers satisfy the interface.
+var (
+	_ Resolver = GitResolver{}
+	_ Resolver = FuncResolver(nil)
+)
 
 // RootInfo is the resolved fam root for a worktree.
 type RootInfo struct {
@@ -289,11 +312,19 @@ func ValidateHistoryPath(path string) error {
 	return nil
 }
 
+// getenv reads key from an os.Environ()-style slice. A non-nil env is
+// authoritative: when key is absent it returns "" and does NOT fall back to the
+// process environment — that fallback was "known issue L2", which forced tests to
+// t.Setenv("COLLAB_ACTOR","") to pin the real env. A nil env still means "use the
+// process environment". This matches famctx.lookupEnv's semantics.
 func getenv(env []string, key string) string {
-	for _, item := range env {
-		if k, v, ok := strings.Cut(item, "="); ok && k == key {
-			return v
+	if env != nil {
+		for _, item := range env {
+			if k, v, ok := strings.Cut(item, "="); ok && k == key {
+				return v
+			}
 		}
+		return ""
 	}
 	return os.Getenv(key)
 }
