@@ -56,14 +56,19 @@ The nick is fam-scoped to `{{.Actor}}-{{.Fam}}` and the pass file resolves on it
 own. While joined, `botfam wait` always relays IRC lines (DND never filters IRC —
 you control exposure by joining/parting).
 
-## 3. Verifying Environment Health
+## 3. Target Branch
+
+Open PRs against **`{{.IntegrationBranch}}`** (the integration branch).
+**`{{.ReleaseBranch}}`** is the public release target — do not target it unless explicitly instructed.
+
+## 4. Verifying Environment Health
 
 Read the Model Context Protocol (MCP) root resource `botfam:///` first. It
 returns an index of all available resources and lists any active environment
 health warnings (such as missing API tokens, wrong directories, or offline IRC
 client).
 
-## 4. Warm Onboarding / Handover Snapshot
+## 5. Warm Onboarding / Handover Snapshot
 
 If you are booting to resume a task that was already in progress (e.g.
 following a Let It Crash restart):
