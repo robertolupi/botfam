@@ -60,9 +60,9 @@ and unified diff), not the live system.
   data bind-mounted, localhost-only). A hermetic test substrate exists
   (`compose.test.yaml` + `docker/test-substrate.sh`).
 - Session transcripts, retrospectives, and reviews now live on the Gitea wiki
-  (cloned locally to wiki/). Protocol docs still live under doc/. A
-  session-closure and GTD proposal is at
-  doc/protocol/session-lifecycle-and-gtd.md.
+  (cloned locally to wiki/). Protocol docs still live under doc/ (canonical:
+  doc/collab/PROTOCOL.md); superseded and historical design docs are archived
+  in the wiki (see the `Archived` index).
 - The `botfam` binary embeds its git SHA at build time and answers
   `botfam version` / `!version`.
 
