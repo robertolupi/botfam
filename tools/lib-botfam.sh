@@ -11,7 +11,7 @@
 derive_identity() {
   # actor: explicit command-line or env, else resolved via botfam whoami, else fallback
   if [ -z "${ACTOR:-}" ]; then
-    ACTOR="${BOTFAM_ACTOR:-${COLLAB_ACTOR:-}}"
+    ACTOR="${BOTFAM_ACTOR:-}"
     if [ -z "$ACTOR" ]; then
       if command -v botfam >/dev/null 2>&1 && ACTOR="$(botfam whoami 2>/dev/null)" && [ -n "$ACTOR" ]; then
         :

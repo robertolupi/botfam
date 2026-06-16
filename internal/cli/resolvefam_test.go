@@ -192,7 +192,7 @@ func TestResolverBareNameActor(t *testing.T) {
 //   - the forge MCP client    → forge.NewClient
 //   - whoami / orient         → fam.Resolver.Resolve
 //
-// All env short-circuits (GITEA_*, COLLAB_ROOT) are cleared so every path is
+// All env short-circuits (GITEA_*) are cleared so every path is
 // forced through fam.toml — if any consumer re-derived identity its own way,
 // the asserted values would drift apart.
 func TestForgeIdentityParity(t *testing.T) {

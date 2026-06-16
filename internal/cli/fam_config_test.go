@@ -95,7 +95,6 @@ func TestDefaultHistoryPath(t *testing.T) {
 	initGitRepo(t, wt)
 	homeDir := filepath.Join(root, "mockhome")
 	t.Setenv("HOME", homeDir)
-	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_FAM", "")
 
 	// No fam.toml: legacy ledger directory (falls back to git history under HOME).
@@ -134,7 +133,6 @@ func TestLoadFamRegistryRoundTripsChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 	initGitRepo(t, wt)
-	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_FAM", "")
 
 	reg := Registry{

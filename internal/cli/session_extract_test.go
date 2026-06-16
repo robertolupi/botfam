@@ -104,7 +104,6 @@ func TestDeduplicateEvents(t *testing.T) {
 }
 
 func TestSessionExtractInvalidTime(t *testing.T) {
-	t.Setenv("BOTFAM_ACTOR", "agy")
 	err := sessionExtract([]string{"--milestone", "test", "--since", "invalid-time"}, nil)
 	if err == nil {
 		t.Error("expected error for invalid --since format, got nil")

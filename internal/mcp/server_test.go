@@ -45,7 +45,6 @@ func newTestServer(t *testing.T) (*server, string) {
 	})
 
 	t.Setenv("HOME", root)
-	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_TESTING", "1")
 
 	return &server{}, root
@@ -1303,7 +1302,6 @@ harness = "antigravity"
 		t.Fatal(err)
 	}
 
-	t.Setenv("COLLAB_ACTOR", "")
 	t.Setenv("BOTFAM_FAM", "")
 	t.Setenv("PWD", wtDir)
 

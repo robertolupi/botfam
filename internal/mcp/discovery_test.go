@@ -59,7 +59,7 @@ func resolves(dirs ...string) func(string) bool {
 // TestResolveWorkDirRootsTier exercises the client `roots` tier — the path that
 // is dead code on per-project mounts (cwd!="/") and was therefore unvalidated by
 // real Claude harness boots (#136). On a system-wide mount (cwd=="/") with no
-// COLLAB_ROOT, a fam-resolvable client root must win and label as "roots".
+// ambient fam-root override, a fam-resolvable client root must win and label as "roots".
 func TestResolveWorkDirRootsTier(t *testing.T) {
 	root := "/Users/x/wt-claude"
 	requestRoots := func(ctx context.Context) (*mcplib.ListRootsResult, error) {
@@ -159,7 +159,6 @@ func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	t.Setenv("COLLAB_ACTOR", "")
 	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -181,8 +180,6 @@ func TestIRCClientHealthCheck(t *testing.T) {
 	if err := os.WriteFile(fifo, []byte(""), 0644); err != nil {
 		t.Fatal(err)
 	}
-
-	t.Setenv("COLLAB_ACTOR", actor)
 
 	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")
 	var ircCheck *healthCheck

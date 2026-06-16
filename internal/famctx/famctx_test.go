@@ -394,7 +394,7 @@ harness = "bob-code"
 	ctx, err := Resolve(context.Background(), Inputs{
 		WorkDir:  famDir,
 		Mode:     ModeRegistry,
-		Env:      []string{}, // authoritative empty env: no COLLAB_ACTOR leak
+		Env:      []string{}, // authoritative empty env: no identity env (e.g. BOTFAM_FAM) leak
 		Resolver: fake,
 	})
 	if err != nil {

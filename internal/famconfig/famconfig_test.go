@@ -94,7 +94,7 @@ func TestFindFamTOMLPath(t *testing.T) {
 	gitInit(t, wt)
 	want := filepath.Join(famDir, "fam.toml")
 
-	// Parent-of-toplevel branch (no COLLAB_ROOT).
+	// Parent-of-toplevel branch (no env root override).
 	if got := FindFamTOMLPath(wt, []string{}); got != want {
 		t.Errorf("parent-of-toplevel: got %q, want %q", got, want)
 	}
