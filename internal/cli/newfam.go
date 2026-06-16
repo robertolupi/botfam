@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/spf13/cobra"
@@ -76,14 +77,14 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 	}
 
 	// Verify we are inside a Git repository
-	repoRoot := RepoPath(".")
+	repoRoot := famconfig.RepoPath(".")
 	if repoRoot == "" {
 		return fmt.Errorf("not a git repository (run from the repository main checkout)")
 	}
 	parentDir := filepath.Dir(repoRoot)
 
 	// Resolve registry root
-	info, err := (GitResolver{}).ResolveIdentity(".")
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(".")
 	if err != nil {
 		return err
 	}
@@ -93,7 +94,7 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 
 	regPath := filepath.Join(info.FamDir, "fam.toml")
 	reg := Registry{}
-	stores, err := GitObjectStores(".")
+	stores, err := famconfig.GitObjectStores(".")
 	if err != nil {
 		return err
 	}

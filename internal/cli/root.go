@@ -3,28 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"io"
-
-	"github.com/robertolupi/botfam/internal/famconfig"
 )
-
-type GitResolver = famconfig.GitResolver
-
-type RootInfo = famconfig.RootInfo
-
-// ResolveRepoName re-exports famconfig.ResolveRepoName.
-func ResolveRepoName(workDir string) string { return famconfig.ResolveRepoName(workDir) }
-
-// ParseActor re-exports famconfig.ParseActor.
-func ParseActor(base string, repoName string) string { return famconfig.ParseActor(base, repoName) }
-
-// GitObjectStores re-exports famconfig.GitObjectStores.
-func GitObjectStores(workDir string) ([]string, error) { return famconfig.GitObjectStores(workDir) }
-
-// RepoPath re-exports famconfig.RepoPath.
-func RepoPath(workDir string) string { return famconfig.RepoPath(workDir) }
-
-// ValidateHistoryPath re-exports famconfig.ValidateHistoryPath.
-func ValidateHistoryPath(path string) error { return famconfig.ValidateHistoryPath(path) }
 
 func unique(xs []string) []string {
 	seen := map[string]bool{}

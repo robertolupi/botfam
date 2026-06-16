@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 )
 
@@ -164,7 +165,7 @@ func TestResolverBareNameActor(t *testing.T) {
 
 	agy := filepath.Join(famDir, "agy")
 	gitInit(t, agy)
-	info, err := (GitResolver{}).ResolveIdentity(agy)
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(agy)
 	if err != nil {
 		t.Fatalf("Resolve(agy): %v", err)
 	}
@@ -174,7 +175,7 @@ func TestResolverBareNameActor(t *testing.T) {
 
 	main := filepath.Join(famDir, "main")
 	gitInit(t, main)
-	info2, err := (GitResolver{}).ResolveIdentity(main)
+	info2, err := (famconfig.GitResolver{}).ResolveIdentity(main)
 	if err != nil {
 		t.Fatalf("Resolve(main): %v", err)
 	}
@@ -225,7 +226,7 @@ func TestForgeIdentityParity(t *testing.T) {
 		t.Fatalf("forge.NewClient: %v", err)
 	}
 	// 3. whoami / orient.
-	info, err := (GitResolver{}).ResolveIdentity(wt)
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(wt)
 	if err != nil {
 		t.Fatalf("Resolver.Resolve: %v", err)
 	}
@@ -280,7 +281,7 @@ func TestResolverLegacyNoFamTOML(t *testing.T) {
 		t.Setenv(k, "")
 	}
 
-	info, err := (GitResolver{}).ResolveIdentity(wt)
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(wt)
 	if err != nil {
 		t.Fatalf("Resolve with no fam.toml should fall back, got: %v", err)
 	}

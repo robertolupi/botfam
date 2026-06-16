@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -90,7 +91,7 @@ func extractSession(opts ExtractOptions, out io.Writer) error {
 	}
 
 	var actor string
-	if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
+	if info, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
 		actor = info.Actor
 	}
 

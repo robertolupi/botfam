@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ func IrcClientCmd(args []string, out io.Writer) error {
 // NewIrcClientCmd builds the `botfam irc-client` Cobra command (FIFO-driven
 // IRC client).
 func NewIrcClientCmd() *cobra.Command {
-	mainChannel, ccrepChannel := FamChannels(LoadFamRegistry("."))
+	mainChannel, ccrepChannel := famconfig.FamChannels(famconfig.LoadFamRegistry("."))
 	server := "localhost:6667"
 	channel := mainChannel + "," + ccrepChannel
 	var workDir, passFile string
@@ -74,8 +75,8 @@ func (e *emitter) emit(line string) {
 }
 
 func runIrcClient(actor, server, channel, workDir, passFile string, rawNick bool, out io.Writer) error {
-	famReg := LoadFamRegistry(".")
-	mainChannel, _ := FamChannels(famReg)
+	famReg := famconfig.LoadFamRegistry(".")
+	mainChannel, _ := famconfig.FamChannels(famReg)
 
 	// The on-server identity is fam-scoped (claude-botfam, agy-dc) so agents
 	// from different fams that share an actor name — and even the same wt-<actor>
@@ -83,11 +84,11 @@ func runIrcClient(actor, server, channel, workDir, passFile string, rawNick bool
 	// The bare actor still keys the FIFO dir (scratch/irc/<actor>) and pass-file.
 	ircNick := actor
 	if !rawNick {
-		ircNick = FamScopedNick(actor, FamSlug(famReg))
+		ircNick = famconfig.FamScopedNick(actor, famconfig.FamSlug(famReg))
 	}
 
 	if passFile == "" {
-		passFile = DefaultPassFile(FamSlug(famReg), actor)
+		passFile = famconfig.DefaultPassFile(famconfig.FamSlug(famReg), actor)
 	}
 
 	channelList, primaryChannel := ParseChannels(channel, mainChannel)

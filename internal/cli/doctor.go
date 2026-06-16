@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/spf13/cobra"
 )
@@ -122,7 +123,7 @@ func credentialHelperCheck(workDir string) doctorCheck {
 // mis-attributed even when the push helper is correct.
 func gitIdentityCheck(workDir string) doctorCheck {
 	var actor string
-	if info, err := (GitResolver{}).ResolveIdentity(workDir); err == nil {
+	if info, err := (famconfig.GitResolver{}).ResolveIdentity(workDir); err == nil {
 		actor = info.Actor
 	}
 	name, _ := gitexec.One(workDir, "config", "user.name")

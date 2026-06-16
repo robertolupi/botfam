@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -69,7 +70,7 @@ Requires the token to carry the notification scope (forge-login.sh requests it).
 
 func runForgeWait(out io.Writer, once, markRead bool, interval, timeout time.Duration) error {
 	var actor string
-	if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
+	if info, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
 		actor = info.Actor
 	}
 	client, err := forge.NewClient(".", actor)

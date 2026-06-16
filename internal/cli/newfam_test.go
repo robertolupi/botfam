@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 func TestNewfam(t *testing.T) {
@@ -45,7 +47,7 @@ func TestNewfam(t *testing.T) {
 	}
 
 	// Check if the registry fam.toml was written correctly
-	info, err := (GitResolver{}).ResolveIdentity(mainDir)
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(mainDir)
 	if err != nil {
 		t.Fatal(err)
 	}

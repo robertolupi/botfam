@@ -17,6 +17,7 @@ import (
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
 	"github.com/openai/openai-go/v2/shared"
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -523,7 +524,7 @@ func assemblePRMaterial(pr string) (string, error) {
 		return "", fmt.Errorf("invalid --pr %q: %w", pr, err)
 	}
 	var actor string
-	if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
+	if info, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
 		actor = info.Actor
 	}
 	client, err := forge.NewClient(".", actor)

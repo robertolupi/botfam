@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/memory"
 	"github.com/spf13/cobra"
@@ -36,7 +37,7 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 	if err != nil {
 		return nil, "", "", err
 	}
-	info, err := (GitResolver{}).ResolveIdentity(wd)
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(wd)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -51,7 +52,7 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 	if err != nil {
 		return nil, "", "", err
 	}
-	famSlug := FamSlug(LoadFamRegistry(wd))
+	famSlug := famconfig.FamSlug(famconfig.LoadFamRegistry(wd))
 	if famSlug == "" {
 		famSlug = "botfam"
 	}

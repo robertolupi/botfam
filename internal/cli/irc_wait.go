@@ -6,6 +6,7 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +36,7 @@ the new lines and exit.`,
 			// wake on its own traffic (#137). --raw-nick / --file opt out.
 			matchNick := nick
 			if nick != "" && !rawNick {
-				matchNick = FamScopedNick(nick, FamSlug(LoadFamRegistry(".")))
+				matchNick = famconfig.FamScopedNick(nick, famconfig.FamSlug(famconfig.LoadFamRegistry(".")))
 			}
 			if logPath == "" {
 				if nick == "" {
