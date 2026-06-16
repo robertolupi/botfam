@@ -254,12 +254,17 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			return nil, fmt.Errorf("failed to get user home dir: %w", err)
 		}
 
-		var harness string
+		var declared string
 		if haveReg {
 			if a, ok := reg.Agents[actor]; ok {
-				harness = a.Harness
+				declared = a.Harness
 			}
 		}
+		// Key the token on the harness actually running, not just whatever the
+		// fam.toml declared: detect from the inherited env (botfam runs as a child
+		// of the harness), falling back to the declared value (#371). clientInfo
+		// isn't available on this CLI/forge path, so detection here is env-only.
+		harness := famconfig.ResolveHarness(declared, "", nil).Effective
 
 		// Fail closed: the token is the canonical per-harness one. There is NO
 		// silent legacy (token-botfam-<actor>) or per-fam (token-<fam>-<actor>)

@@ -189,7 +189,11 @@ func FamScopedNick(actor, famSlug string) string {
 	return actor + "-" + famSlug
 }
 
-// HarnessTokenPath returns the per-harness token path ~/.botfam/token-<harness>.
+// HarnessTokenPath returns the per-harness token path ~/.botfam/token-<harness>,
+// keyed by the canonical harness name (see CanonicalHarness, defined in
+// harness.go) so e.g. harness 'claude' and 'claude-code' resolve to the same
+// token-claude-code (#371). Callers that have a live runtime should prefer
+// ResolveHarness(...).Effective over a raw declared value.
 func HarnessTokenPath(harness string) (string, error) {
 	if harness == "" {
 		return "", fmt.Errorf("harness is empty")
@@ -198,7 +202,7 @@ func HarnessTokenPath(harness string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home directory: %w", err)
 	}
-	return filepath.Join(home, ".botfam", "token-"+harness), nil
+	return filepath.Join(home, ".botfam", "token-"+CanonicalHarness(harness)), nil
 }
 
 // FindFamTOMLPath locates the canonical fam.toml for workDir by checking

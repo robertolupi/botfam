@@ -86,6 +86,30 @@ func TestHarnessTokenPath(t *testing.T) {
 	if _, err := HarnessTokenPath(""); err == nil {
 		t.Error("empty harness should error")
 	}
+	// The 'claude' alias must resolve to the same canonical token-claude-code so a
+	// fam that spells the harness 'claude' shares the real Claude Code token (#371).
+	aliased, err := HarnessTokenPath("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".botfam", "token-claude-code"); aliased != want {
+		t.Errorf("HarnessTokenPath(claude) = %q, want %q", aliased, want)
+	}
+}
+
+func TestCanonicalHarness(t *testing.T) {
+	cases := map[string]string{
+		"claude":      "claude-code", // #371: alias for the Claude Code harness
+		"claude-code": "claude-code", // idempotent
+		"codex":       "codex",       // untouched
+		"antigravity": "antigravity", // untouched
+		"":            "",            // pass-through
+	}
+	for in, want := range cases {
+		if got := CanonicalHarness(in); got != want {
+			t.Errorf("CanonicalHarness(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestFindFamTOMLPath(t *testing.T) {

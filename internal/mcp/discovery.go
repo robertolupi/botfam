@@ -154,15 +154,16 @@ type discoveryData struct {
 // buildDiscoveryData resolves the fam-specific runtime config for workDir. It
 // never fails: unresolved fields stay empty (rendered as <placeholders>) and
 // are surfaced as health warnings.
-func buildDiscoveryData(ctx context.Context, workDir string) discoveryData {
+func buildDiscoveryData(ctx context.Context, workDir, clientName string) discoveryData {
 	var d discoveryData
 
 	var reg famconfig.Registry
-	var harness string
+	var harness, declaredHarness string
 
 	c, err := famctx.Resolve(ctx, famctx.Inputs{
-		WorkDir: workDir,
-		Mode:    famctx.ModeRegistry,
+		WorkDir:    workDir,
+		ClientName: clientName,
+		Mode:       famctx.ModeRegistry,
 	})
 	if err == nil {
 		d.tmpl.Actor = c.Actor
@@ -172,7 +173,8 @@ func buildDiscoveryData(ctx context.Context, workDir string) discoveryData {
 			d.tmpl.Fam = c.Name
 		}
 		if c.ActorRole == famctx.RoleAgent {
-			harness = c.Agent.Harness
+			harness = c.Harness // effective (detected, else declared)
+			declaredHarness = c.Agent.Harness
 		}
 		d.resolvedVia = string(c.Source)
 	}
@@ -195,7 +197,7 @@ func buildDiscoveryData(ctx context.Context, workDir string) discoveryData {
 		})
 	}
 
-	d.health = discoveryHealth(workDir, d.tmpl, harness)
+	d.health = discoveryHealth(workDir, d.tmpl, harness, declaredHarness)
 	return d
 }
 
@@ -292,7 +294,7 @@ func fileURIToPath(uri string) string {
 	return ""
 }
 
-func discoveryHealth(workDir string, t docs.TemplateData, harness string) []healthCheck {
+func discoveryHealth(workDir string, t docs.TemplateData, harness, declaredHarness string) []healthCheck {
 	var checks []healthCheck
 
 	if t.Actor == "" {
@@ -300,6 +302,15 @@ func discoveryHealth(workDir string, t docs.TemplateData, harness string) []heal
 			"could not resolve an actor: run from an [agent.<name>] worktree or initialize with workspace roots"})
 	} else {
 		checks = append(checks, healthCheck{"actor", "ok", ""})
+	}
+
+	// Harness: when the fam.toml-declared harness disagrees with the one actually
+	// detected at runtime (MCP clientInfo / inherited env), the declaration is
+	// wrong. Token + forge access follow the detected harness, so surface the
+	// mismatch instead of letting it silently drive a divergent token path (#371).
+	if declaredHarness != "" && harness != "" && famconfig.CanonicalHarness(declaredHarness) != harness {
+		checks = append(checks, healthCheck{"harness", "warn",
+			fmt.Sprintf("fam.toml declares harness %q but this is running under %q; update the [agent.<name>] harness to match (token + forge access use the detected harness)", declaredHarness, harness)})
 	}
 
 	// Forge token: the canonical per-harness token (~/.botfam/token-<harness>),

@@ -64,11 +64,21 @@ type server struct {
 
 	mu             sync.Mutex
 	actor          string
+	clientNameVal  string // MCP initialize clientInfo.name; captured for harness detection (#371, guarded by mu)
 	cachedRoots    *mcplib.ListRootsResult
 	cachedRootsErr error
 	rootsCached    bool
 	ingestStarted  bool      // mailbox ingest goroutine launched (guarded by mu)
 	lastNudge      time.Time // last MCP notification nudge sent (#337 debounce, guarded by mu)
+}
+
+// clientName returns the connected MCP client's reported clientInfo.name, or ""
+// before the initialize handshake (or for purely-CLI invocations). Used as the
+// protocol-native harness-detection signal (#371).
+func (s *server) clientName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.clientNameVal
 }
 
 // nudgeDebounce suppresses notification nudges fired within this window of the
@@ -89,7 +99,19 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 	// WithLogging declares the logging capability so clients accept the
 	// best-effort wake nudge (#337), which rides the standard notifications/message
 	// logging channel (see nudgeMethod).
-	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots(), mcpserver.WithLogging())
+	// Capture the client's clientInfo.name from the initialize handshake — the
+	// protocol-native signal for which harness we're serving (#371). Used to
+	// detect/validate the harness so per-harness token resolution follows the
+	// harness actually connected, not a possibly-stale fam.toml declaration.
+	hooks := &mcpserver.Hooks{}
+	hooks.AddAfterInitialize(func(_ context.Context, _ any, req *mcplib.InitializeRequest, _ *mcplib.InitializeResult) {
+		name := req.Params.ClientInfo.Name
+		s.mu.Lock()
+		s.clientNameVal = name
+		s.mu.Unlock()
+		fmt.Fprintf(errout, "botfam: MCP client %q (%s) connected\n", name, req.Params.ClientInfo.Version)
+	})
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots(), mcpserver.WithLogging(), mcpserver.WithHooks(hooks))
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
@@ -288,7 +310,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 			via = "default"
 		}
 		s.maybeStartIngestForWorkDir(ctx, wd)
-		d := buildDiscoveryData(ctx, wd)
+		d := buildDiscoveryData(ctx, wd, s.clientName())
 		d.resolvedVia = via
 		body, err := renderIndexJSON(d)
 		if err != nil {
@@ -723,7 +745,7 @@ func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {
 	add("botfam:///wiki", "botfam live wiki index", "text/markdown")
 	add("botfam:///wiki/index.json", "botfam live wiki index (json)", "application/json")
 	// Fam-declared wiki projections (#120), advertised from the local registry.
-	for _, proj := range buildDiscoveryData(context.Background(), ".").projections {
+	for _, proj := range buildDiscoveryData(context.Background(), ".", "").projections {
 		add("botfam:///"+proj.Name, "botfam projection: "+proj.Name, "text/markdown")
 		add("botfam:///"+proj.Name+".json", "botfam projection: "+proj.Name, "application/json")
 	}
@@ -800,7 +822,7 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 	if targetRepoRoot != localRepoRoot {
 		dataWorkDir = targetRepoRoot
 	}
-	d := buildDiscoveryData(ctx, dataWorkDir)
+	d := buildDiscoveryData(ctx, dataWorkDir, s.clientName())
 	d.resolvedVia = resolvedVia
 
 	path := filepath.Clean(u.Path)

@@ -162,7 +162,7 @@ func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d := buildDiscoveryData(context.Background(), wt)
+	d := buildDiscoveryData(context.Background(), wt, "")
 	if d.tmpl.Fam != "myfam" {
 		t.Errorf("Fam = %q, want %q (registry name must win over the resolver id)", d.tmpl.Fam, "myfam")
 	}
@@ -181,7 +181,7 @@ func TestIRCClientHealthCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")
+	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "", "")
 	var ircCheck *healthCheck
 	for i := range checks {
 		if checks[i].Check == "irc_client" {
@@ -200,7 +200,7 @@ func TestIRCClientHealthCheck(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte("999999\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "", "")
 	for i := range checks {
 		if checks[i].Check == "irc_client" {
 			ircCheck = &checks[i]
@@ -215,7 +215,7 @@ func TestIRCClientHealthCheck(t *testing.T) {
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", myPid)), 0644); err != nil {
 		t.Fatal(err)
 	}
-	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "")
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "", "")
 	for i := range checks {
 		if checks[i].Check == "irc_client" {
 			ircCheck = &checks[i]
