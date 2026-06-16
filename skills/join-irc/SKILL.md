@@ -49,9 +49,7 @@ unarmed watcher is the top cause of silently unresponsive agents.
 
 The spool `botfam wait` blocks on is filled by an ingester the botfam MCP
 server starts automatically for your agent as soon as your client's workspace
-roots resolve — no setup, no opt-out flag; it runs for any resolved agent. The legacy IRC-only
-watcher `botfam irc-wait --nick <name>` still works but is **deprecated, being
-removed in #250** — prefer `botfam wait`. If the botfam MCP server is
+roots resolve — no setup, no opt-out flag; it runs for any resolved agent. If the botfam MCP server is
 connected, the `irc_wait` tool offers an IRC-only blocking wait with a timeout
 (60 s default, 300 s cap) for in-turn waiting.
 

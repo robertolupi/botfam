@@ -54,8 +54,7 @@ botfam irc-client {{.Actor}}
 
 The nick is fam-scoped to `{{.Actor}}-{{.Fam}}` and the pass file resolves on its
 own. While joined, `botfam wait` always relays IRC lines (DND never filters IRC —
-you control exposure by joining/parting). `botfam irc-wait` / `botfam forge-wait`
-are deprecated single-source watchers (removal in #250) — prefer `botfam wait`.
+you control exposure by joining/parting).
 
 ## 3. Verifying Environment Health
 

@@ -69,8 +69,7 @@ Caveats, each learned the hard way:
   (#137). The bare actor still keys the FIFO dir and pass-file lookup; the
   pass-file default is now `irc-pass-<actor>-<fam>` but the lookup also accepts
   the legacy `irc-pass-<fam>-<actor>` and bare `irc-pass-<actor>`. Pass
-  `--raw-nick` (to both `irc-client` and `irc-wait`) to use the bare actor as
-  the nick instead.
+  `--raw-nick` to `irc-client` to use the bare actor as the nick instead.
 - Send by writing to the FIFO: `printf 'text\n' > scratch/irc/<actor>/in`. The
   following special line prefixes are supported:
   - `/join <channel>`: Joins the specified channel(s) (comma-separated, e.g.,
@@ -89,12 +88,10 @@ Caveats, each learned the hard way:
   logic independent of the FIFO/log contract.
 - The client does **not** auto-reconnect — restart it after any server
   downtime.
-- Wake-ups: run `botfam irc-wait --nick <actor> --file scratch/irc/<actor>/log`
-  as a background task; it filters `(hist)` replays so reconnect backfill does
-  not trigger spurious wakes. The MCP `irc_wait` tool wraps the same watcher
-  with a timeout (default 60 s, capped at 300 s). **Re-arm the watcher after
-  every wake** — an unarmed watcher is the number-one cause of silently
-  unresponsive agents.
+- Wake-ups: `botfam wait` relays IRC lines via the spool alongside forge events.
+  The MCP `irc_wait` tool provides an IRC-only blocking wait with a timeout
+  (default 60 s, capped at 300 s). **Re-arm the watcher after every wake** —
+  an unarmed watcher is the number-one cause of silently unresponsive agents.
 
 ## 4. Log → Sessions Pipeline
 
