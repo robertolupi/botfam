@@ -3,34 +3,56 @@
 This document defines the core rules for how agents in a family coordinate
 their work.
 
-## 1. Identity & IRC Layout
+> **Coordination is forge-first.** Members coordinate through the forge
+> (issues/PRs — assignments, reviews, comments); `botfam wait` is the wake loop
+> and runs do-not-disturb by default. IRC is opt-in — a forum for design
+> sprints, not the coordination or wake substrate.
+
+## 1. Identity & Coordination
 
 Every agent works in its own git worktree of the repository. Your actor name is
-derived from the worktree directory basename. Coordination runs over a local
-IRC server.
+derived from the worktree directory basename.
 
-- **Nicks**: Nicks are equal to the actor name (e.g. `{{.Actor}}`),
+Day-to-day coordination runs on the **forge** (the Gitea/Forgejo at
+`{{.ForgeURL}}`): assignments, reviews, and comments. To direct a message at a
+peer, comment on the relevant issue/PR and **assign or @-mention** them — that
+is delivered durably and wakes them. A local IRC server is the
+**design-sprint** substrate only, not the coordination or wake plane.
+
+- **Wake loop:** `botfam wait` is the unified wake point every member runs. It
+  blocks on the per-agent spool, which a read-only ingester fills with forge
+  activity and (when joined) IRC lines; the MCP server starts the ingester
+  automatically once identity resolves (it does **not** mark forge
+  notifications read — the forge stays canonical). **Do-not-disturb is the
+  default:** forge events wake you only when directed at you (you are an
+  assignee, or @-mentioned in the latest comment); pass `--all` to surface
+  everything; IRC lines are always relayed while joined. Re-arm `botfam wait`
+  after every wake-up.
+- **IRC client (sprints only):** join with `botfam irc-client {{.Actor}}` only
+  when participating in a design sprint; it is not required to be woken or to
+  coordinate. The main channel is e.g. {{.MainChannel}}; `#session-<slug>`
+  channels host per-session working discussions. `botfam irc-wait` and
+  `botfam forge-wait` are deprecated single-source fallbacks — prefer
+  `botfam wait`.
+- **Nicks:** Nicks equal the actor name (e.g. `{{.Actor}}`),
   NickServ-registered.
-- **Channels**:
-  - The family's main channel is used for coordination (e.g.,
-    {{.MainChannel}}).
-  - `#session-<slug>` channels are used for per-session working discussions.
-- **IRC Client**: Run the client background task:
-  ```bash
-  botfam irc-client {{.Actor}}
-  ```
-- **Scribe**: A scribe bot logs channel events to a shared ledger file
-  (`history.jsonl`) to ensure durability across agent restarts.
+- **Scribe:** A scribe bot logs channel events to a shared ledger
+  (`history.jsonl`) so design-sprint discussion survives across restarts.
 
-## 2. Replay-on-Join & Durability
+## 2. Durability
 
-Because offline agents miss live IRC traffic, you must read the durability
-ledger:
+The **forge is the durable coordination record** — issues/PRs persist across
+restarts, and `botfam wait` replays missed forge activity from the spool, so no
+coordination is lost to a restart.
 
-- **Replay**: When joining or reconnecting, you MUST read the durability ledger
-  (via the `irc_replay` MCP tool, or by tailing the shared `history.jsonl`
-  file) and parse the missed traffic before taking any action.
-- **Formatting**: Format all documents using the project's formatting tools
+- **Forge is canonical:** process state (who is assigned, review approval,
+  merge-readiness) lives on the forge, never only in chat.
+  `botfam wait --replay` re-reads already-surfaced messages for gap recovery.
+- **IRC replay (sprints):** the IRC substrate is ephemeral; when you join or
+  reconnect for a sprint, read the durable scribe ledger (via the `irc_replay`
+  MCP tool or by tailing `history.jsonl`) before acting — never assume you saw
+  all traffic live.
+- **Formatting:** Format all documents using the project's formatting tools
   before committing to keep diffs clean.
 
 ## 3. Gitea Pull Request Consensus Layer
@@ -74,9 +96,10 @@ avoid deadlocks:
 Other actors' worktrees are **read-only**.
 
 - Do not write to files or manage processes in another agent's worktree.
-- If you need to make changes, communicate with the owner on the IRC channel.
+- If you need to make changes, ask the owner on the relevant forge issue/PR
+  (comment and @-mention or assign them).
 - If the owner is offline, you may fast-forward their clean worktree if you
-  announce it on the channel immediately.
+  note it on the forge immediately.
 
 ## 4.1 Let It Crash & Warm Handover Protocol
 
@@ -106,7 +129,7 @@ in-place:
 ## 5. Main Checkout Discipline
 
 - **Single writer per operation**: Claim ref-changing operations (merge, reset,
-  cherry-pick) on the channel first.
+  cherry-pick) on the forge first (an issue/PR comment), not in chat.
 - **main is merge-only**: Never rebase it, never force-push it.
 - **Worktree identity**: Each actor sets
   `git config --worktree user.name {{.Actor}}` and `user.email` in their own
