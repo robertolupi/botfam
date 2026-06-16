@@ -38,6 +38,25 @@ This skill is the antidote; run it deliberately.
 
 "Looks good to me" is a failure to do the job, not a result.
 
+## Before you start: ground yourself (bounded), then drop the checklist
+
+Read the named-traps corpus so your objections can name the pitfall and check
+it against the actual repo — but keep it bounded:
+
+- Start from the wiki
+  [Architecture](http://gitea:3000/botfam/botfam/wiki/Architecture) MOC (the
+  map), then read the **`antipattern-*`** pages (the traps) and the
+  **`pattern-*`** pages as relevant, plus
+  [False Starts](http://gitea:3000/botfam/botfam/wiki/FalseStarts). That set is
+  **self-maintaining** — every `pattern-*` / `antipattern-*` page is in scope
+  by naming convention; glob them, don't keep a list. (Read the local `./wiki`
+  checkout directly; don't dump the whole wiki.)
+- **Then drop the checklist.** The corpus catches the *known* traps; the
+  dangerous flaw is usually the **unnamed** one (e.g. "you can't simulate the
+  semantic part that is the system" was no antipattern — it was first
+  principles). So after the corpus pass, attack from first principles for what
+  isn't on any page.
+
 ## Procedure
 
 1. **Restate the core claim in one steelmanned line** — the real thing, so you
