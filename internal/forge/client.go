@@ -16,16 +16,6 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
-// splitOwnerRepo splits a fam.toml "owner/repo" value, reporting ok only for a
-// well-formed two-part value.
-func splitOwnerRepo(repository string) (owner, repo string, ok bool) {
-	parts := strings.Split(repository, "/")
-	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-		return parts[0], parts[1], true
-	}
-	return "", "", false
-}
-
 // defaultHTTPClient is the shared fallback used by every Client that does not
 // supply its own HTTPClient. Unlike http.DefaultClient it has a finite timeout
 // so a slow or stalled Gitea host cannot wedge a caller (e.g. the forge-wait
@@ -75,97 +65,18 @@ type Review struct {
 	} `json:"user"`
 }
 
-func parseGitRemoteURL(rawURL string) (baseURL, owner, repo string, err error) {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return "", "", "", errors.New("empty remote URL")
-	}
-
-	// Remove trailing .git
-	rawURL = strings.TrimSuffix(rawURL, ".git")
-
-	// Check if HTTP/HTTPS
-	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
-		parts := strings.Split(rawURL, "/")
-		if len(parts) < 5 {
-			return "", "", "", fmt.Errorf("invalid HTTP remote URL format: %q", rawURL)
-		}
-		repo = parts[len(parts)-1]
-		owner = parts[len(parts)-2]
-		baseURL = strings.Join(parts[:len(parts)-2], "/") + "/"
-		return baseURL, owner, repo, nil
-	}
-
-	// Check if SSH format with ssh:// prefix
-	if strings.HasPrefix(rawURL, "ssh://") {
-		trimmed := strings.TrimPrefix(rawURL, "ssh://")
-		slashIdx := strings.Index(trimmed, "/")
-		if slashIdx == -1 {
-			return "", "", "", fmt.Errorf("invalid ssh remote URL format: %q", rawURL)
-		}
-		pathPart := trimmed[slashIdx+1:]
-		parts := strings.Split(pathPart, "/")
-		if len(parts) != 2 {
-			return "", "", "", fmt.Errorf("invalid ssh remote URL path format: %q", pathPart)
-		}
-		owner = parts[0]
-		repo = parts[1]
-
-		hostPart := trimmed[:slashIdx]
-		if idx := strings.Index(hostPart, "@"); idx != -1 {
-			hostPart = hostPart[idx+1:]
-		}
-		if idx := strings.Index(hostPart, ":"); idx != -1 {
-			hostPart = hostPart[:idx]
-		}
-		if hostPart == "gitea" {
-			baseURL = "http://gitea:3000/"
-		} else {
-			baseURL = fmt.Sprintf("https://%s/", hostPart)
-		}
-		return baseURL, owner, repo, nil
-	}
-
-	// Check if SCP-like SSH format: git@gitea:botfam/botfam
-	if strings.Contains(rawURL, ":") {
-		parts := strings.SplitN(rawURL, ":", 2)
-		hostPart := parts[0]
-		pathPart := parts[1]
-
-		if idx := strings.Index(hostPart, "@"); idx != -1 {
-			hostPart = hostPart[idx+1:]
-		}
-
-		pathParts := strings.Split(pathPart, "/")
-		if len(pathParts) != 2 {
-			return "", "", "", fmt.Errorf("invalid SCP-like remote URL path: %q", pathPart)
-		}
-		owner = pathParts[0]
-		repo = pathParts[1]
-
-		if hostPart == "gitea" {
-			baseURL = "http://gitea:3000/"
-		} else {
-			baseURL = fmt.Sprintf("https://%s/", hostPart)
-		}
-		return baseURL, owner, repo, nil
-	}
-
-	return "", "", "", fmt.Errorf("unrecognized git remote URL format: %q", rawURL)
-}
-
 func NewClient(workDir string, actor string) (*Client, error) {
 	baseURL := os.Getenv("GITEA_URL")
 	owner := os.Getenv("GITEA_OWNER")
 	repo := os.Getenv("GITEA_REPO")
 	token := os.Getenv("GITEA_TOKEN")
 
-	// Resolve fam identity through the single canonical resolver (#231). A
+	// Resolve fam identity through the single canonical resolver (#231, #404). A
 	// declared [agent.<name>] worktree yields forge_url, repository, and the
 	// per-harness token path in one shot (env vars set above still win).
 	// ResolveFam fails closed outside an agent worktree, so for non-agent /
-	// legacy checkouts (and tools) we read fam.toml directly via the same leaf
-	// locator, then fall through to the git remote below.
+	// base checkouts (and tools) we fall back to ResolveConfig (the merged
+	// registry for the matching [repo.<k>] stanza), then to the git remote below.
 	var reg famconfig.Registry
 	var haveReg bool
 	if rf, err := famconfig.ResolveFam(workDir); err == nil {
@@ -175,17 +86,15 @@ func NewClient(workDir string, actor string) (*Client, error) {
 				token = strings.TrimSpace(string(b))
 			}
 		}
-	} else if p := famconfig.FindFamTOMLPath(workDir, nil); p != "" {
-		if r, rerr := famconfig.ReadRegistry(p); rerr == nil {
-			reg, haveReg = r, true
-		}
+	} else if r, rerr := famconfig.ResolveConfig(workDir); rerr == nil {
+		reg, haveReg = r, true
 	}
 	if haveReg {
 		if baseURL == "" {
 			baseURL = reg.ForgeURL
 		}
 		if owner == "" || repo == "" {
-			if o, r, ok := splitOwnerRepo(reg.Repository); ok {
+			if o, r, ok := famconfig.SplitOwnerRepo(reg.Repository); ok {
 				if owner == "" {
 					owner = o
 				}
@@ -214,7 +123,7 @@ func NewClient(workDir string, actor string) (*Client, error) {
 			var out bytes.Buffer
 			cmd.Stdout = &out
 			if err := cmd.Run(); err == nil {
-				gBase, gOwner, gRepo, parseErr := parseGitRemoteURL(out.String())
+				gBase, gOwner, gRepo, parseErr := famconfig.ParseGitRemoteURL(out.String())
 				if parseErr == nil {
 					if baseURL == "" {
 						baseURL = gBase
@@ -232,7 +141,7 @@ func NewClient(workDir string, actor string) (*Client, error) {
 	}
 
 	if baseURL == "" {
-		return nil, errors.New("cannot resolve Gitea baseURL: remote URL could not be resolved and no forge_url is configured in fam.toml")
+		return nil, errors.New("cannot resolve Gitea baseURL: remote URL could not be resolved and no forge_url is configured in ~/.botfam/config.toml")
 	}
 	if owner == "" {
 		return nil, errors.New("cannot resolve Gitea owner")
@@ -294,7 +203,7 @@ func NewClient(workDir string, actor string) (*Client, error) {
 		}
 
 		if tokenFile == "" {
-			return nil, fmt.Errorf("cannot resolve forge token: no [agent.%s] harness in fam.toml — run `botfam setup`; report this to your operator (no legacy fallback)", actor)
+			return nil, fmt.Errorf("cannot resolve forge token: no [agent.%s] harness in ~/.botfam/config.toml — run `botfam setup`; report this to your operator (no legacy fallback)", actor)
 		}
 		b, err := os.ReadFile(tokenFile)
 		if err != nil {

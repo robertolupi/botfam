@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
@@ -49,63 +48,58 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	if project == "" {
 		return fmt.Errorf("project name is required")
 	}
+	if err := validateSetupName("project", project); err != nil {
+		return err
+	}
 	for _, agent := range agents {
 		if err := validateSetupName("agent", agent); err != nil {
 			return err
 		}
 	}
-	info, err := (famconfig.GitResolver{}).ResolveIdentity(".")
+
+	// The fam dir is the parent of the git worktree top-level — the path the
+	// `[repo.<project>]` stanza is keyed by, so every worktree under it matches.
+	famDir := filepath.Dir(famconfig.RepoPath("."))
+
+	cfg, err := famconfig.LoadOrInitConfig()
 	if err != nil {
 		return err
 	}
-	stores, err := famconfig.GitObjectStores(".")
-	if err != nil {
-		return err
+	// Add any new agents to the global roster, preserving existing entries.
+	if len(agents) > 0 && cfg.Agents == nil {
+		cfg.Agents = map[string]famconfig.AgentConfig{}
 	}
-	if err := os.MkdirAll(info.FamDir, 0o755); err != nil {
-		return err
-	}
-	regPath := filepath.Join(info.FamDir, "fam.toml")
-	reg := Registry{}
-	if _, err := os.Stat(regPath); err == nil {
-		reg, err = ReadRegistry(regPath)
-		if err != nil {
-			return err
-		}
-		if !force && !hasAny(reg.ObjectStores, stores) {
-			return fmt.Errorf("%s already exists and this repo is not a registered member; use --force deliberately", info.FamDir)
+	for _, a := range agents {
+		if _, ok := cfg.Agents[a]; !ok {
+			cfg.Agents[a] = famconfig.AgentConfig{Name: a}
 		}
 	}
-	if reg.Name == "" {
-		reg.Name = project
-		reg.RootSet = info.RootSet
-		reg.CreatedAt = time.Now().UTC().Format(time.RFC3339)
-		reg.WikiProjections = []string{"memory:memory-*"}
+	// Preserve existing per-repo overrides; only (re)set the path.
+	rc := cfg.Repos[project]
+	rc.Path = famDir
+	if rc.WikiProjections == nil {
+		rc.WikiProjections = []string{"memory:memory-*"}
 	}
-	reg.Roster = unique(append(reg.Roster, agents...))
-	reg.RepoPaths = unique(append(reg.RepoPaths, famconfig.RepoPath(".")))
-	reg.ObjectStores = unique(append(reg.ObjectStores, stores...))
-	if err := WriteRegistry(regPath, reg); err != nil {
+	cfg.UpsertRepo(project, rc)
+	if err := famconfig.WriteConfig(cfg); err != nil {
 		return err
 	}
-	if err := createProjectSymlink(project, info.FamDir); err != nil {
+	cfgPath, _ := famconfig.ConfigPath()
+	fmt.Fprintf(out, "Configured [repo.%s] path=%s in %s\n", project, famDir, cfgPath)
+
+	if err := createProjectSymlink(project, famDir); err != nil {
 		return err
 	}
+	reg := famconfig.BuildRegistry(cfg, project, cfg.Repos[project], ".")
 	if err := RegisterMCPServerGlobally(reg.ForgeURL, famconfig.FamSlug(reg), out); err != nil {
 		fmt.Fprintf(out, "Warning: failed to register MCP server globally: %v\n", err)
 	}
-	fmt.Fprintf(out, "botfam root: %s\n", info.FamDir)
+	fmt.Fprintf(out, "botfam root: %s\n", famDir)
 	return nil
 }
 
 // EnsureMembership moved to the internal/provision leaf (#311); re-exported in
 // worktree.go.
-
-// ReadRegistry / WriteRegistry delegate to famconfig (#231), kept as fam-package
-// wrappers so existing callers don't change.
-func ReadRegistry(path string) (Registry, error) { return famconfig.ReadRegistry(path) }
-
-func WriteRegistry(path string, reg Registry) error { return famconfig.WriteRegistry(path, reg) }
 
 func createProjectSymlink(project, target string) error {
 	home, err := os.UserHomeDir()
@@ -144,19 +138,6 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
-}
-
-func hasAny(a, b []string) bool {
-	set := map[string]bool{}
-	for _, x := range a {
-		set[x] = true
-	}
-	for _, x := range b {
-		if set[x] {
-			return true
-		}
-	}
-	return false
 }
 
 func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) error {

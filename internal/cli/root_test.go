@@ -34,6 +34,11 @@ func TestResolver(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tempDir)
+	if eval, e := filepath.EvalSymlinks(tempDir); e == nil {
+		tempDir = eval
+	}
+	// Isolated config; populated only for the unified-layout case below.
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(tempDir, "config.toml"))
 
 	// Case 2: Inside a git repository
 	gitDir := filepath.Join(tempDir, "myrepo")
@@ -97,9 +102,9 @@ func TestResolver(t *testing.T) {
 		t.Errorf("expected subdirectory Actor to resolve to %q, got %q", "bob", infoSub.Actor)
 	}
 
-	// Assert the root is derived from git history (starts with fam-)
-	if !strings.HasPrefix(infoMain.Name, "fam-") {
-		t.Errorf("expected family name to start with 'fam-', got %q", infoMain.Name)
+	// With no matching config stanza, the fam name is the fam-dir basename.
+	if infoMain.Name != filepath.Base(infoMain.FamDir) {
+		t.Errorf("expected family name to be fam-dir basename %q, got %q", filepath.Base(infoMain.FamDir), infoMain.Name)
 	}
 
 	// Case 3: Outside a git repository
@@ -119,7 +124,7 @@ func TestResolver(t *testing.T) {
 		t.Errorf("expected error containing %q, got %q", expectedErrSub, err.Error())
 	}
 
-	// Case 4: Inside a git repository under unified layout (fam.toml in parent)
+	// Case 4: a repo registered by a [repo.<k>] stanza whose path is its parent.
 	unifiedDir := filepath.Join(tempDir, "unified-fam")
 	if err := os.Mkdir(unifiedDir, 0755); err != nil {
 		t.Fatal(err)
@@ -127,14 +132,10 @@ func TestResolver(t *testing.T) {
 	if eval, err := filepath.EvalSymlinks(unifiedDir); err == nil {
 		unifiedDir = eval
 	}
-	famTOMLContent := `name = "my-unified-fam"
-slug = "muf"
-roster = ["bob"]
-
-[agent.bob]
-harness = "test-harness"
-`
-	if err := os.WriteFile(filepath.Join(unifiedDir, "fam.toml"), []byte(famTOMLContent), 0644); err != nil {
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Agents: map[string]famconfig.AgentConfig{"bob": {Harness: "test-harness"}},
+		Repos:  map[string]famconfig.RepoConfig{"my-unified-fam": {Path: unifiedDir, Slug: "muf"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	wtBobDir := filepath.Join(unifiedDir, "bob")

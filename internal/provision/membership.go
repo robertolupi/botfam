@@ -6,36 +6,14 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
-// EnsureMembership verifies that workDir's repository belongs to the fam.
-// The fam.toml must be readable and one of the repo's git object
-// stores must be registered in object_stores — else membership is refused.
-func EnsureMembership(id famconfig.FamIdentity, workDir string) error {
-	if id.FamTOMLPath == "" {
-		return fmt.Errorf("no fam.toml resolved; refusing unverified membership")
+// EnsureMembership verifies that workDir belongs to a registered fam: a
+// `[repo.<k>]` stanza in ~/.botfam/config.toml whose path is an ancestor of
+// workDir must resolve (#404). The path match replaces the old object-store
+// check; ResolveConfig is the single matcher. The id argument is retained for
+// call-site compatibility but membership is determined by workDir alone.
+func EnsureMembership(_ famconfig.FamIdentity, workDir string) error {
+	if _, err := famconfig.ResolveConfig(workDir); err != nil {
+		return fmt.Errorf("%s is not a registered fam in ~/.botfam/config.toml; run botfam setup (%v)", workDir, err)
 	}
-	reg, err := famconfig.ReadRegistry(id.FamTOMLPath)
-	if err != nil {
-		return fmt.Errorf("fam root %s is not set up or readable; run botfam setup", id.FamDir)
-	}
-	stores, err := famconfig.GitObjectStores(workDir)
-	if err != nil {
-		return err
-	}
-	if hasAny(reg.ObjectStores, stores) {
-		return nil
-	}
-	return fmt.Errorf("repo object store is not registered for fam root %s; refusing unverified membership", id.FamDir)
-}
-
-func hasAny(a, b []string) bool {
-	set := map[string]bool{}
-	for _, x := range a {
-		set[x] = true
-	}
-	for _, y := range b {
-		if set[y] {
-			return true
-		}
-	}
-	return false
+	return nil
 }

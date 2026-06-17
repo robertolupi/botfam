@@ -27,22 +27,25 @@ func gitInit(t *testing.T, dir string) {
 	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
 }
 
+// setConfig points BOTFAM_CONFIG at a fresh temp file and writes cfg there.
+func setConfig(t *testing.T, cfg famconfig.Config) {
+	t.Helper()
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+	if err := famconfig.WriteConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestResolveWalkUp(t *testing.T) {
 	famDir := t.TempDir()
 	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
 		famDir = eval
 	}
 
-	famTOML := `name = "myfam"
-slug = "mf"
-roster = ["bob"]
-
-[agent.bob]
-harness = "bob-code"
-`
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	setConfig(t, famconfig.Config{
+		Agents: map[string]famconfig.AgentConfig{"bob": {Harness: "bob-code"}},
+		Repos:  map[string]famconfig.RepoConfig{"myfam": {Path: famDir, Slug: "mf"}},
+	})
 
 	bobDir := filepath.Join(famDir, "bob")
 	if err := os.Mkdir(bobDir, 0755); err != nil {
@@ -100,7 +103,10 @@ harness = "bob-code"
 	}
 }
 
-func TestResolveLegacyGitHashFallback(t *testing.T) {
+// TestResolveLocateNoConfig: with no matching [repo.<k>] stanza, ModeLocate no
+// longer synthesizes a git-hash fam (#404 dropped the legacy fallback). It
+// returns an empty identity plus an error diagnostic rather than failing.
+func TestResolveLocateNoConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	if eval, err := filepath.EvalSymlinks(tempDir); err == nil {
 		tempDir = eval
@@ -111,31 +117,20 @@ func TestResolveLegacyGitHashFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitInit(t, gitDir)
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml")) // nonexistent
 
 	ctx, err := Resolve(context.Background(), Inputs{
 		WorkDir: gitDir,
 		Mode:    ModeLocate,
 	})
 	if err != nil {
-		t.Fatalf("Resolve legacy git hash failed: %v", err)
+		t.Fatalf("ModeLocate should not error on an unregistered dir: %v", err)
 	}
-
-	t.Logf("Resolved Name: %q, Actor: %q, Role: %q, FamDir: %q, Source: %q", ctx.Name, ctx.Actor, ctx.ActorRole, ctx.FamDir, ctx.Source)
-
-	if ctx.FamTOMLPath != "" {
-		t.Errorf("expected FamTOMLPath to be empty, got %q", ctx.FamTOMLPath)
+	if ctx.Name != "" || ctx.Actor != "" {
+		t.Errorf("expected empty identity for an unregistered dir, got Name=%q Actor=%q", ctx.Name, ctx.Actor)
 	}
-	if !strings.HasPrefix(ctx.Name, "fam-") {
-		t.Errorf("expected legacy fam name starting with 'fam-', got %q", ctx.Name)
-	}
-	if ctx.Actor != "bob" {
-		t.Errorf("expected actor parsed from legacy wt-bob folder prefix, got %q", ctx.Actor)
-	}
-	if ctx.ActorRole != RoleUnknown {
-		t.Errorf("expected role to be RoleUnknown for legacy, got %q", ctx.ActorRole)
-	}
-	if ctx.Source != SourceGitRoots {
-		t.Errorf("expected SourceGitRoots, got %q", ctx.Source)
+	if len(ctx.Diagnostics) == 0 {
+		t.Error("expected a diagnostic when no fam context resolves")
 	}
 }
 
@@ -145,16 +140,10 @@ func TestLocationOf(t *testing.T) {
 		famDir = eval
 	}
 
-	famTOML := `name = "myfam"
-slug = "mf"
-roster = ["bob"]
-
-[agent.bob]
-harness = "bob-code"
-`
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	setConfig(t, famconfig.Config{
+		Agents: map[string]famconfig.AgentConfig{"bob": {Harness: "bob-code"}},
+		Repos:  map[string]famconfig.RepoConfig{"myfam": {Path: famDir, Slug: "mf"}},
+	})
 
 	bobDir := filepath.Join(famDir, "bob")
 	if err := os.Mkdir(bobDir, 0755); err != nil {
@@ -212,26 +201,17 @@ harness = "bob-code"
 }
 
 func TestFlagEnabled(t *testing.T) {
-	flagsTOML := `name = "myfam"
-slug = "mf"
-roster = ["bob"]
-
-[flags]
-experiment = "yes"
-wait_ingest = true
-
-[agent.bob]
-harness = "bob-code"
-[agent.bob.flags]
-wait_ingest = false
-`
 	famDir := t.TempDir()
 	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
 		famDir = eval
 	}
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(flagsTOML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	setConfig(t, famconfig.Config{
+		Flags: map[string]any{"experiment": "yes", "wait_ingest": true},
+		Agents: map[string]famconfig.AgentConfig{
+			"bob": {Harness: "bob-code", Flags: map[string]any{"wait_ingest": false}},
+		},
+		Repos: map[string]famconfig.RepoConfig{"myfam": {Path: famDir, Slug: "mf"}},
+	})
 
 	bobDir := filepath.Join(famDir, "bob")
 	if err := os.Mkdir(bobDir, 0755); err != nil {
@@ -273,19 +253,13 @@ func TestResolveRefusalModes(t *testing.T) {
 		famDir = eval
 	}
 
-	famTOML := `name = "myfam"
-slug = "mf"
+	setConfig(t, famconfig.Config{
+		Agents: map[string]famconfig.AgentConfig{"bob": {Harness: "claude-code"}},
+		Users:  map[string]famconfig.AgentConfig{"alice": {}},
+		Repos:  map[string]famconfig.RepoConfig{"myfam": {Path: famDir, Slug: "mf"}},
+	})
 
-[agent.bob]
-harness = "claude-code"
-
-[user.alice]
-`
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// 1. Missing fam.toml under ModeAgentRuntime
+	// 1. Unregistered dir (no matching stanza) under ModeAgentRuntime
 	plainDir := t.TempDir()
 	if eval, err := filepath.EvalSymlinks(plainDir); err == nil {
 		plainDir = eval
@@ -295,8 +269,8 @@ harness = "claude-code"
 		WorkDir: plainDir,
 		Mode:    ModeAgentRuntime,
 	})
-	if err == nil || !strings.Contains(err.Error(), "no readable fam.toml") {
-		t.Errorf("expected missing fam.toml error under ModeAgentRuntime, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "is not registered") {
+		t.Errorf("expected unregistered-dir error under ModeAgentRuntime, got %v", err)
 	}
 
 	// 2. User worktree under ModeAgentRuntime
@@ -361,19 +335,13 @@ func TestResolveWithInjectedResolver(t *testing.T) {
 	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
 		famDir = eval
 	}
-	famTOML := `name = "injfam"
-slug = "inj"
-roster = ["bob"]
-
-[agent.bob]
-harness = "bob-code"
-`
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	setConfig(t, famconfig.Config{
+		Agents: map[string]famconfig.AgentConfig{"bob": {Harness: "bob-code"}},
+		Repos:  map[string]famconfig.RepoConfig{"injfam": {Path: famDir, Slug: "inj"}},
+	})
 
 	// The fake supplies the identity famctx cannot otherwise get without git+env:
-	// FamDir (where the fam.toml lives) and Actor (who we are). It deliberately
+	// FamDir (where the fam lives) and Actor (who we are). It deliberately
 	// returns a BOGUS Name and ActorRole to prove famctx re-derives those from the
 	// real registry rather than parroting the resolver — so the Name/Role/Slug
 	// assertions below are genuine, not self-fulfilling.

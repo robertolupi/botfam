@@ -46,7 +46,7 @@ type mcpServer struct {
 // resolved via PATH to an absolute path; its absence is not an error.
 func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
 	if forgeURL == "" {
-		return fmt.Errorf("cannot render .mcp.json: forge_url is empty (set it in fam.toml)")
+		return fmt.Errorf("cannot render .mcp.json: forge_url is empty (set it in ~/.botfam/config.toml)")
 	}
 	if tokenPath == "" {
 		return fmt.Errorf("cannot render .mcp.json: token path is empty")

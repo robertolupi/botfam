@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 // roundTripFunc adapts a function to http.RoundTripper.
@@ -187,9 +189,9 @@ func TestParseGitRemoteURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {
-			base, owner, repo, err := parseGitRemoteURL(tt.url)
+			base, owner, repo, err := famconfig.ParseGitRemoteURL(tt.url)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("parseGitRemoteURL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("ParseGitRemoteURL() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if base != tt.wantBase {
@@ -237,31 +239,27 @@ func TestClient_RequestRespectsHTTPClientTimeout(t *testing.T) {
 }
 
 func TestNewClient_Resolution(t *testing.T) {
-	// Set up a temporary directory to act as a git worktree root
+	// Set up a temporary directory to act as a git worktree root.
 	tempDir := t.TempDir()
 	if eval, err := filepath.EvalSymlinks(tempDir); err == nil {
 		tempDir = eval
 	}
-
-	// Create a mock fam.toml in the parent directory to simulate unified-fam-config
-	// structure where famDir contains the agent worktree (tempDir)
+	// The [repo.<k>] stanza is keyed by the parent (fam) dir so tempDir matches.
 	famDir := filepath.Dir(tempDir)
-	famTOML := filepath.Join(famDir, "fam.toml")
-
-	// Clean up any existing fam.toml in parent temp directory after test
-	defer os.Remove(famTOML)
 
 	t.Setenv("GITEA_URL", "")
 	t.Setenv("GITEA_OWNER", "")
 	t.Setenv("GITEA_REPO", "")
 	t.Setenv("GITEA_TOKEN", "mock-token") // use env token to bypass token file reading
+	t.Setenv("BOTFAM_FORGE_REMOTE", "")
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
 
-	// Write unified fam.toml
-	content := `name = "test-fam"
-forge_url = "http://unified-forge:3000"
-repository = "my-owner/my-repo"
-`
-	if err := os.WriteFile(famTOML, []byte(content), 0644); err != nil {
+	// Stanza with explicit forge_url + repository.
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Repos: map[string]famconfig.RepoConfig{
+			"test-fam": {Path: famDir, ForgeURL: "http://unified-forge:3000", Repository: "my-owner/my-repo"},
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -294,9 +292,10 @@ repository = "my-owner/my-repo"
 		t.Errorf("expected Token mock-token, got %s", client.Token)
 	}
 
-	// Test fallback to git remote when fam.toml doesn't have forge_url/repository
-	contentNoForge := `name = "test-fam"`
-	if err := os.WriteFile(famTOML, []byte(contentNoForge), 0644); err != nil {
+	// Fallback to git remote when the stanza has no forge_url/repository.
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Repos: map[string]famconfig.RepoConfig{"test-fam": {Path: famDir}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -330,18 +329,17 @@ func TestNewClient_AgentWorktreeViaResolveFam(t *testing.T) {
 	t.Setenv("GITEA_REPO", "")
 	t.Setenv("GITEA_TOKEN", "")
 
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
 	famDir := t.TempDir()
 	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
 		famDir = eval
 	}
-	famTOML := `name = "test-fam"
-forge_url = "http://agent-forge:3000"
-repository = "agent-owner/agent-repo"
-
-[agent.claude]
-harness = "claude-code"
-`
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(famTOML), 0o644); err != nil {
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Agents: map[string]famconfig.AgentConfig{"claude": {Harness: "claude-code"}},
+		Repos: map[string]famconfig.RepoConfig{
+			"test-fam": {Path: famDir, ForgeURL: "http://agent-forge:3000", Repository: "agent-owner/agent-repo"},
+		},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	wt := filepath.Join(famDir, "claude")

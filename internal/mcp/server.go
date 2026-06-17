@@ -349,7 +349,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 
 	// Fail-closed serve gate
 	if c.ActorRole != famctx.RoleAgent {
-		if famTomlPresent(c.WorkDir) {
+		if famConfigured(c.WorkDir) {
 			return nil, quarantineError(fmt.Errorf("strict agent runtime required: resolved role is %s (actor: %s)", c.ActorRole, c.Actor))
 		}
 		if err := provision.EnsureMembership(c.FamIdentity, c.WorkDir); err != nil {
@@ -781,32 +781,23 @@ func (s *server) handleReadResource(ctx context.Context, req mcplib.ReadResource
 		if (errCtx == nil && u.Host == localCtx.Name) || u.Host == localCtx.Registry.Name || u.Host == localCtx.Slug {
 			targetRepoRoot = localRepoRoot
 		} else {
-			// Cross-fam: search ~/.botfam/ for a family matching name or slug.
-			home, err := os.UserHomeDir()
+			// Cross-fam: search ~/.botfam/config.toml for a [repo.<k>] stanza
+			// whose key or slug matches the authority, and use its path as root.
+			cfg, err := famconfig.LoadConfig()
 			if err != nil {
-				return nil, err
-			}
-			botfamDir := filepath.Join(home, ".botfam")
-			entries, err := os.ReadDir(botfamDir)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read ~/.botfam: %w", err)
+				return nil, fmt.Errorf("failed to read ~/.botfam/config.toml: %w", err)
 			}
 			found := false
-			for _, entry := range entries {
-				if !entry.IsDir() {
-					continue
+			for key, rc := range cfg.Repos {
+				slug := rc.Slug
+				if slug == "" {
+					slug = key
 				}
-				tomlPath := filepath.Join(botfamDir, entry.Name(), "fam.toml")
-				if _, err := os.Stat(tomlPath); err == nil {
-					reg, err := famconfig.ReadRegistry(tomlPath)
-					if err == nil {
-						if reg.Name == u.Host || reg.Slug == u.Host {
-							if len(reg.RepoPaths) > 0 {
-								targetRepoRoot = reg.RepoPaths[0]
-								found = true
-								break
-							}
-						}
+				if key == u.Host || slug == u.Host {
+					if rc.Path != "" {
+						targetRepoRoot = famconfig.ExpandPath(rc.Path)
+						found = true
+						break
 					}
 				}
 			}

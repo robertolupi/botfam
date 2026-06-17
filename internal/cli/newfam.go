@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/gitexec"
@@ -92,36 +91,44 @@ func runNewfam(projectName string, agents []string, out io.Writer) error {
 		return err
 	}
 
-	regPath := filepath.Join(info.FamDir, "fam.toml")
-	reg := Registry{}
-	stores, err := famconfig.GitObjectStores(".")
+	// Roster (agents + human).
+	roster := unique(append(agents, humanActor))
+
+	// Write the global roster + the [repo.<project>] stanza (#404). Agents go in
+	// the global [agent.*] table; the human in [user.*]; existing entries kept.
+	cfg, err := famconfig.LoadOrInitConfig()
 	if err != nil {
 		return err
 	}
-
-	// Setup roster (agents + human) and worktrees
-	roster := unique(append(agents, humanActor))
-	var worktrees []string
-	for _, actor := range roster {
-		worktrees = append(worktrees, filepath.Join(parentDir, "wt-"+actor))
+	if cfg.Agents == nil {
+		cfg.Agents = map[string]famconfig.AgentConfig{}
 	}
-
-	reg.Name = projectName
-	reg.RootSet = info.RootSet
-	reg.CreatedAt = time.Now().UTC().Format(time.RFC3339)
-	reg.Roster = roster
-	reg.RepoPaths = unique(append(append([]string{repoRoot}, worktrees...), reg.RepoPaths...))
-	reg.ObjectStores = unique(append(reg.ObjectStores, stores...))
-	reg.WikiProjections = []string{"memory:memory-*"}
-
-	if err := WriteRegistry(regPath, reg); err != nil {
+	if cfg.Users == nil {
+		cfg.Users = map[string]famconfig.AgentConfig{}
+	}
+	for _, a := range agents {
+		if _, ok := cfg.Agents[a]; !ok {
+			cfg.Agents[a] = famconfig.AgentConfig{Name: a}
+		}
+	}
+	if _, ok := cfg.Users[humanActor]; !ok {
+		cfg.Users[humanActor] = famconfig.AgentConfig{Name: humanActor}
+	}
+	rc := cfg.Repos[projectName]
+	rc.Path = info.FamDir
+	if rc.WikiProjections == nil {
+		rc.WikiProjections = []string{"memory:memory-*"}
+	}
+	cfg.UpsertRepo(projectName, rc)
+	if err := famconfig.WriteConfig(cfg); err != nil {
 		return err
 	}
 	if err := createProjectSymlink(projectName, info.FamDir); err != nil {
 		return err
 	}
 
-	fmt.Fprintf(out, "Created Gitea registry: %s\n", regPath)
+	cfgPath, _ := famconfig.ConfigPath()
+	fmt.Fprintf(out, "Configured [repo.%s] in %s\n", projectName, cfgPath)
 	fmt.Fprintf(out, "Roster: %s\n", strings.Join(roster, ", "))
 
 	// Write Claude settings and generate agent docs in the main checkout

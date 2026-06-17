@@ -2,7 +2,6 @@ package cli
 
 import (
 	"io"
-	"path/filepath"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/provision"
@@ -43,15 +42,13 @@ func NewWorktreeCmd() *cobra.Command {
 	c.AddCommand(
 		sub("init <actor> [path]", "Initialize a worktree's git identity", provision.InitWorktree),
 		sub("sync [path]", "Sync a worktree with the fam object stores", provision.SyncWorktree),
-		sub("register [path]", "Register all worktrees of this repo into the fam registry", provision.RegisterWorktrees),
 	)
 	return c
 }
 
-// EnsureMembership re-exports provision.EnsureMembership.
+// EnsureMembership re-exports provision.EnsureMembership. Membership is now
+// determined by workDir matching a [repo.<k>] stanza (#404); root is retained
+// for call-site compatibility.
 func EnsureMembership(root string, workDir string) error {
-	return provision.EnsureMembership(famconfig.FamIdentity{
-		FamDir:      root,
-		FamTOMLPath: filepath.Join(root, "fam.toml"),
-	}, workDir)
+	return provision.EnsureMembership(famconfig.FamIdentity{FamDir: root}, workDir)
 }

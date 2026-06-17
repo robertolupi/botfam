@@ -15,7 +15,7 @@ type ResolveMode int
 
 const (
 	ModeLocate       ResolveMode = iota // fam may be missing; return diagnostics
-	ModeRegistry                        // require fam.toml, allow user/base
+	ModeRegistry                        // require a matching [repo.<k>] stanza, allow user/base
 	ModeAgentRuntime                    // require declared [agent.<name>]
 )
 
@@ -205,156 +205,107 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			evalRoot = eval
 		}
 
-		tomlPath := filepath.Join(evalRoot, "fam.toml")
-		var reg famconfig.Registry
-		var role ActorRole = RoleUnknown
-		var agent famconfig.AgentConfig
-		var cFamTOMLPath string
-
-		if fileExists(tomlPath) {
-			cFamTOMLPath = tomlPath
-			reg, err = famconfig.ReadRegistry(tomlPath)
-			if err != nil {
-				if inputs.Mode == ModeRegistry {
-					return Context{}, fmt.Errorf("no readable fam.toml at %s: run `botfam setup`; if it persists, report to your operator (%v)", tomlPath, err)
-				}
-				if resolveErr == nil {
-					resolveErr = err
-				}
-				continue
-			}
-
-			// Determine actor and role
-			actor := info.Actor
-			// Bound actor overrides (only for permissive modes)
-			if actor == "" {
-				if inputs.CallActor != "" {
-					actor = inputs.CallActor
-				} else if inputs.BoundActor != "" {
-					actor = inputs.BoundActor
-				}
-			}
-
-			isAgent := false
-			isUser := false
-			if actor != "" {
-				agent, isAgent = reg.Agents[actor]
-				_, isUser = reg.Users[actor]
-				if isAgent {
-					role = RoleAgent
-				} else if isUser {
-					role = RoleUser
-				} else {
-					role = RoleUnknown
-				}
-			} else {
-				// empty actor: check if it's the base checkout
-				gitRoot, _ := gitexec.One(dir, "rev-parse", "--show-toplevel")
-				if eval, err := filepath.EvalSymlinks(gitRoot); err == nil {
-					gitRoot = eval
-				}
-				if gitRoot != "" && gitRoot == evalRoot {
-					role = RoleBase
-				}
-			}
-
-			// Resolve the effective harness from runtime signals (MCP clientInfo,
-			// then inherited env), falling back to the declared fam.toml value, and
-			// key the token path on it (#371). A declared-vs-detected mismatch is a
-			// misconfigured fam.toml: surface it rather than silently following the
-			// runtime.
-			var hres famconfig.HarnessResolution
-			tokenPath := ""
-			if isAgent {
-				hres = famconfig.ResolveHarness(agent.Harness, inputs.ClientName, inputs.Env)
-				if hres.Effective != "" {
-					if tp, err := famconfig.HarnessTokenPath(hres.Effective); err == nil {
-						tokenPath = tp
-					}
-				}
-			}
-
-			slug := famconfig.FamSlug(reg)
-			identity := info.FamIdentity
-			identity.Actor = actor
-			identity.ActorRole = role
-			identity.Source = cSource
-			identity.FamTOMLPath = cFamTOMLPath
-			identity.Name = reg.Name
-
-			c := Context{
-				FamIdentity:  identity,
-				Slug:         slug,
-				Registry:     reg,
-				WorktreeRoot: gitRoot(dir),
-				WorkDir:      dir,
-				Agent:        agent,
-				Flags:        famconfig.ResolveFlags(reg, actor),
-				Harness:      hres.Effective,
-				SpoolDir:     filepath.Join(evalRoot, "spool", actor),
-				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
-				TokenPath:    tokenPath,
-				ScopedNick:   famconfig.FamScopedNick(actor, slug),
-				RootSet:      info.RootSet,
-				RootSetID:    info.RootSetID,
-			}
-			if hres.Mismatch {
-				c.Diagnostics = append(c.Diagnostics, Diagnostic{
-					Severity: "warning",
-					Message: fmt.Sprintf("fam.toml declares harness %q for [agent.%s] but this is running under %q (via %s); using %q. Fix the fam.toml harness to match.",
-						hres.Declared, actor, hres.Detected, hres.Source, hres.Effective),
-				})
-			}
-			return c, nil
-
-		} else {
-			// fam.toml does NOT exist
+		// Resolve the merged Registry from ~/.botfam/config.toml (#404). No
+		// matching [repo.<k>] stanza is a loud failure (fail-loud invariant);
+		// there is no legacy git-history fallback. ModeLocate records the error
+		// and falls through to its diagnostic, ModeRegistry returns it.
+		reg, regErr := famconfig.ResolveConfig(dir)
+		if regErr != nil {
 			if inputs.Mode == ModeRegistry {
-				// ModeRegistry requires fam.toml
-				resolveErr = fmt.Errorf("no readable fam.toml at %s: run `botfam setup`; if it persists, report to your operator (file not found)", tomlPath)
-				continue
+				return Context{}, regErr
 			}
+			if resolveErr == nil {
+				resolveErr = regErr
+			}
+			continue
+		}
+		cfgPath, _ := famconfig.ConfigPath()
 
-			// Permissive legacy git-history fallback!
-			cSource = SourceGitRoots
-			actor := info.Actor
-			if actor == "" {
-				if inputs.CallActor != "" {
-					actor = inputs.CallActor
-				} else if inputs.BoundActor != "" {
-					actor = inputs.BoundActor
+		var agent famconfig.AgentConfig
+		role := RoleUnknown
+
+		// Determine actor and role
+		actor := info.Actor
+		// Bound actor overrides (only for permissive modes)
+		if actor == "" {
+			if inputs.CallActor != "" {
+				actor = inputs.CallActor
+			} else if inputs.BoundActor != "" {
+				actor = inputs.BoundActor
+			}
+		}
+
+		isAgent := false
+		isUser := false
+		if actor != "" {
+			agent, isAgent = reg.Agents[actor]
+			_, isUser = reg.Users[actor]
+			if isAgent {
+				role = RoleAgent
+			} else if isUser {
+				role = RoleUser
+			} else {
+				role = RoleUnknown
+			}
+		} else {
+			// empty actor: check if it's the base checkout
+			gitRoot, _ := gitexec.One(dir, "rev-parse", "--show-toplevel")
+			if eval, err := filepath.EvalSymlinks(gitRoot); err == nil {
+				gitRoot = eval
+			}
+			if gitRoot != "" && gitRoot == evalRoot {
+				role = RoleBase
+			}
+		}
+
+		// Resolve the effective harness from runtime signals (MCP clientInfo,
+		// then inherited env), falling back to the declared roster value, and key
+		// the token path on it (#371). A declared-vs-detected mismatch is a
+		// misconfigured roster: surface it rather than silently following the
+		// runtime.
+		var hres famconfig.HarnessResolution
+		tokenPath := ""
+		if isAgent {
+			hres = famconfig.ResolveHarness(agent.Harness, inputs.ClientName, inputs.Env)
+			if hres.Effective != "" {
+				if tp, err := famconfig.HarnessTokenPath(hres.Effective); err == nil {
+					tokenPath = tp
 				}
 			}
-
-			slug := info.Name
-			var diags []Diagnostic
-			diags = append(diags, Diagnostic{
-				Severity: "warning",
-				Message:  "Using legacy git-history fallback. Run 'botfam setup' to migrate.",
-			})
-
-			identity := info.FamIdentity
-			identity.Actor = actor
-			identity.ActorRole = RoleUnknown
-			identity.Source = cSource
-			identity.FamTOMLPath = ""
-
-			c := Context{
-				FamIdentity:  identity,
-				Slug:         slug,
-				Registry:     famconfig.Registry{Name: info.Name},
-				WorktreeRoot: gitRoot(dir),
-				WorkDir:      dir,
-				Flags:        nil,
-				SpoolDir:     filepath.Join(evalRoot, "spool", actor),
-				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
-				ScopedNick:   famconfig.FamScopedNick(actor, slug),
-				RootSet:      info.RootSet,
-				RootSetID:    info.RootSetID,
-				Diagnostics:  diags,
-			}
-			return c, nil
 		}
+
+		slug := famconfig.FamSlug(reg)
+		identity := info.FamIdentity
+		identity.Actor = actor
+		identity.ActorRole = role
+		identity.Source = cSource
+		identity.FamTOMLPath = cfgPath
+		identity.Name = reg.Name
+
+		c := Context{
+			FamIdentity:  identity,
+			Slug:         slug,
+			Registry:     reg,
+			WorktreeRoot: gitRoot(dir),
+			WorkDir:      dir,
+			Agent:        agent,
+			Flags:        famconfig.ResolveFlags(reg, actor),
+			Harness:      hres.Effective,
+			SpoolDir:     filepath.Join(evalRoot, "spool", actor),
+			IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
+			TokenPath:    tokenPath,
+			ScopedNick:   famconfig.FamScopedNick(actor, slug),
+			RootSet:      info.RootSet,
+			RootSetID:    info.RootSetID,
+		}
+		if hres.Mismatch {
+			c.Diagnostics = append(c.Diagnostics, Diagnostic{
+				Severity: "warning",
+				Message: fmt.Sprintf("config.toml declares harness %q for [agent.%s] but this is running under %q (via %s); using %q. Fix the roster harness to match.",
+					hres.Declared, actor, hres.Detected, hres.Source, hres.Effective),
+			})
+		}
+		return c, nil
 	}
 
 	if inputs.Mode == ModeLocate {
@@ -377,7 +328,7 @@ func ResolveAgentRuntime(workDir string) (Context, error) {
 	})
 }
 
-// ResolveRegistry resolves the registry/fam.toml for workDir.
+// ResolveRegistry resolves the merged Registry (from ~/.botfam/config.toml) for workDir.
 func ResolveRegistry(workDir string) (Context, error) {
 	return Resolve(context.Background(), Inputs{
 		WorkDir: workDir,

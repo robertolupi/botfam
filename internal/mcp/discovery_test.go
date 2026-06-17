@@ -11,6 +11,7 @@ import (
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/robertolupi/botfam/internal/docs"
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 func TestFileURIToPath(t *testing.T) {
@@ -32,7 +33,10 @@ func TestFileURIToPath(t *testing.T) {
 // preamble (#132).
 func TestOrientToolReturnsDiscoveryRoot(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Repos: map[string]famconfig.RepoConfig{"myfam": {Path: root}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	s := &server{}
@@ -159,7 +163,10 @@ func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte("name = \"myfam\"\n"), 0o644); err != nil {
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Repos: map[string]famconfig.RepoConfig{"myfam": {Path: root}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	d := buildDiscoveryData(context.Background(), wt, "")

@@ -3,7 +3,6 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
@@ -95,27 +94,23 @@ func TestDefaultHistoryPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	initGitRepo(t, wt)
-	homeDir := filepath.Join(root, "mockhome")
-	t.Setenv("HOME", homeDir)
-	t.Setenv("BOTFAM_FAM", "")
 
-	// No fam.toml: legacy ledger directory (falls back to git history under HOME).
+	// No matching config stanza: legacy ledger directory under the fam dir.
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
 	got, err := famconfig.DefaultHistoryPath(wt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotInfo, err := (famconfig.GitResolver{Env: []string{"HOME=" + homeDir}}).ResolveIdentity(wt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := filepath.Join(homeDir, ".botfam", gotInfo.Name, "botfam-collab", "history.jsonl")
+	want := filepath.Join(root, "botfam-collab", "history.jsonl")
 	if got != want {
 		t.Errorf("no registry: DefaultHistoryPath = %q, want %q", got, want)
 	}
 
-	// With a named fam.toml: per-fam ledger directory (resolves to root via unified layout).
-	reg := Registry{Name: "deep-cuts", CreatedAt: "2026-06-12T00:00:00Z"}
-	if err := WriteRegistry(filepath.Join(root, "fam.toml"), reg); err != nil {
+	// With a [repo.deep-cuts] stanza at root: per-fam ledger directory.
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Repos: map[string]famconfig.RepoConfig{"deep-cuts": {Path: root}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err = famconfig.DefaultHistoryPath(wt)
@@ -128,41 +123,30 @@ func TestDefaultHistoryPath(t *testing.T) {
 	}
 }
 
-func TestLoadFamRegistryRoundTripsChannels(t *testing.T) {
+func TestLoadFamRegistryFromConfig(t *testing.T) {
 	root := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(root); err == nil {
+		root = eval
+	}
 	wt := filepath.Join(root, "wt-agy")
 	if err := os.MkdirAll(wt, 0755); err != nil {
 		t.Fatal(err)
 	}
 	initGitRepo(t, wt)
-	t.Setenv("BOTFAM_FAM", "")
-
-	reg := Registry{
-		Name:      "deep-cuts",
-		Channels:  []string{"#deep-cuts", "#deep-cuts-ccrep"},
-		CreatedAt: "2026-06-12T00:00:00Z",
-	}
-	if err := WriteRegistry(filepath.Join(root, "fam.toml"), reg); err != nil {
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Repos: map[string]famconfig.RepoConfig{"deep-cuts": {Path: root, Slug: "dc"}},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got := famconfig.LoadFamRegistry(wt)
 	if got.Name != "deep-cuts" {
 		t.Errorf("Name = %q, want deep-cuts", got.Name)
 	}
-	if strings.Join(got.Channels, ",") != "#deep-cuts,#deep-cuts-ccrep" {
-		t.Errorf("Channels = %v, want [#deep-cuts #deep-cuts-ccrep]", got.Channels)
-	}
-
-	// A fam.toml without channels must not grow a channels key on rewrite.
-	if err := WriteRegistry(filepath.Join(root, "fam.toml"), Registry{Name: "deep-cuts"}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(filepath.Join(root, "fam.toml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "channels") {
-		t.Errorf("channel-less registry serialized a channels key:\n%s", data)
+	// Channels are derived from the slug (no explicit channels in config).
+	main, ccrep := famconfig.FamChannels(got)
+	if main != "#dc" || ccrep != "#dc-ccrep" {
+		t.Errorf("channels = (%q,%q), want (#dc,#dc-ccrep)", main, ccrep)
 	}
 }
 
@@ -253,80 +237,19 @@ func TestFamScopedNick(t *testing.T) {
 	}
 }
 
-func TestRegistrySlugRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "fam.toml")
-
-	// Slug present: persists and parses back.
-	if err := WriteRegistry(path, Registry{Name: "deep-cuts", Slug: "dc"}); err != nil {
-		t.Fatal(err)
+func TestFamSlugAndBranchFallback(t *testing.T) {
+	// Slug present wins; absent falls back to the name.
+	if got := famconfig.FamSlug(Registry{Name: "deep-cuts", Slug: "dc"}); got != "dc" {
+		t.Errorf("FamSlug = %q, want dc", got)
 	}
-	got, err := ReadRegistry(path)
-	if err != nil {
-		t.Fatal(err)
+	if got := famconfig.FamSlug(Registry{Name: "deep-cuts"}); got != "deep-cuts" {
+		t.Errorf("FamSlug fallback = %q, want deep-cuts", got)
 	}
-	if got.Slug != "dc" {
-		t.Errorf("Slug = %q, want dc", got.Slug)
+	// Branch: explicit integration_branch wins; absent derives <slug>-next.
+	if got := famconfig.FamBranch(Registry{Name: "deep-cuts", IntegrationBranch: "dc-next"}); got != "dc-next" {
+		t.Errorf("FamBranch = %q, want dc-next", got)
 	}
-	if famconfig.FamSlug(got) != "dc" {
-		t.Errorf("FamSlug = %q, want dc", famconfig.FamSlug(got))
-	}
-
-	// No slug: key is omitted on write and FamSlug falls back to the name.
-	if err := WriteRegistry(path, Registry{Name: "deep-cuts"}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "slug") {
-		t.Errorf("slug-less registry serialized a slug key:\n%s", data)
-	}
-	got, err = ReadRegistry(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if famconfig.FamSlug(got) != "deep-cuts" {
-		t.Errorf("FamSlug fallback = %q, want deep-cuts", famconfig.FamSlug(got))
-	}
-}
-
-func TestRegistryBranchRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	path := filepath.Join(root, "fam.toml")
-
-	// Branch present: persists and parses back.
-	if err := WriteRegistry(path, Registry{Name: "deep-cuts", Branch: "dc-next"}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ReadRegistry(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Branch != "dc-next" {
-		t.Errorf("Branch = %q, want dc-next", got.Branch)
-	}
-	if famconfig.FamBranch(got) != "dc-next" {
-		t.Errorf("FamBranch = %q, want dc-next", famconfig.FamBranch(got))
-	}
-
-	// No branch: key is omitted on write and FamBranch falls back.
-	if err := WriteRegistry(path, Registry{Name: "deep-cuts"}); err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(data), "branch") {
-		t.Errorf("branch-less registry serialized a branch key:\n%s", data)
-	}
-	got, err = ReadRegistry(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if famconfig.FamBranch(got) != "deep-cuts-next" {
-		t.Errorf("FamBranch fallback = %q, want deep-cuts-next", famconfig.FamBranch(got))
+	if got := famconfig.FamBranch(Registry{Name: "deep-cuts"}); got != "deep-cuts-next" {
+		t.Errorf("FamBranch fallback = %q, want deep-cuts-next", got)
 	}
 }

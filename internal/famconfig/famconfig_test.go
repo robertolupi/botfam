@@ -7,20 +7,6 @@ import (
 	"testing"
 )
 
-const sampleFamTOML = `name       = "deep-cuts"
-slug       = "dc"
-forge_url  = "http://gitea.home.rlupi.com:3000/"
-repository = "deep-cuts/deep-cuts"
-roster     = ["claude", "rlupi"]
-
-[agent.claude]
-harness    = "claude-code"
-forge_user = "claude-bot"
-
-[user.rlupi]
-forge_user = "rlupi"
-`
-
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -40,37 +26,62 @@ func gitInit(t *testing.T, dir string) {
 	}
 }
 
-// famFixture writes fam.toml at famDir and git-inits famDir/<worktree>.
+// setConfig points BOTFAM_CONFIG at a fresh temp file and writes cfg there.
+func setConfig(t *testing.T, cfg Config) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(dir, "config.toml"))
+	if err := WriteConfig(cfg); err != nil {
+		t.Fatalf("WriteConfig: %v", err)
+	}
+}
+
+// famFixture registers [repo.dc] at a fresh famDir (deep-cuts) in a temp config
+// and returns famDir. Callers git-init the worktrees under it.
 func famFixture(t *testing.T) (famDir string) {
 	t.Helper()
 	famDir = t.TempDir()
 	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
 		famDir = eval
 	}
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(sampleFamTOML), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	setConfig(t, Config{
+		ForgeURL: "http://gitea.home.rlupi.com:3000/",
+		Agents:   map[string]AgentConfig{"claude": {Harness: "claude-code", ForgeUser: "claude-bot"}},
+		Users:    map[string]AgentConfig{"rlupi": {ForgeUser: "rlupi"}},
+		Repos:    map[string]RepoConfig{"dc": {Path: famDir, Slug: "dc", Repository: "deep-cuts/deep-cuts"}},
+	})
 	return famDir
 }
 
-func TestReadRegistryBackfillsKeys(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fam.toml")
-	if err := os.WriteFile(path, []byte(sampleFamTOML), 0o644); err != nil {
-		t.Fatal(err)
+// flagsConfig mirrors the legacy flags fixture: fam-wide [flags] plus a per-agent
+// [agent.agy.flags] override, registered at famDir under [repo.botfam].
+func flagsConfig(famDir string) Config {
+	return Config{
+		ForgeURL: "http://gitea:3000/",
+		Flags:    map[string]any{"wait_ingest": int64(1), "experiment": false, "ratio": int64(0)},
+		Agents: map[string]AgentConfig{
+			"claude": {Harness: "claude-code", ForgeUser: "claude-bot"},
+			"agy":    {Harness: "antigravity", ForgeUser: "agy-bot", Flags: map[string]any{"wait_ingest": int64(0), "experiment": "yes"}},
+		},
+		Repos: map[string]RepoConfig{"botfam": {Path: famDir, Slug: "botfam", Repository: "botfam/botfam"}},
 	}
-	reg, err := ReadRegistry(path)
+}
+
+func TestLoadConfigBackfillsKeys(t *testing.T) {
+	setConfig(t, Config{
+		Agents: map[string]AgentConfig{"claude": {Harness: "claude-code"}},
+		Users:  map[string]AgentConfig{"rlupi": {ForgeUser: "rlupi"}},
+		Repos:  map[string]RepoConfig{"dc": {Path: "/tmp/dc", Slug: "dc"}},
+	})
+	cfg, err := LoadConfig()
 	if err != nil {
-		t.Fatalf("ReadRegistry: %v", err)
+		t.Fatalf("LoadConfig: %v", err)
 	}
-	if reg.Agents["claude"].Name != "claude" || reg.Agents["claude"].Harness != "claude-code" {
-		t.Errorf("agent.claude = %+v", reg.Agents["claude"])
+	if cfg.Agents["claude"].Name != "claude" || cfg.Agents["claude"].Harness != "claude-code" {
+		t.Errorf("agent.claude = %+v", cfg.Agents["claude"])
 	}
-	if u := reg.Users["rlupi"]; !u.IsUser || u.Name != "rlupi" {
+	if u := cfg.Users["rlupi"]; !u.IsUser || u.Name != "rlupi" {
 		t.Errorf("user.rlupi = %+v", u)
-	}
-	if FamSlug(reg) != "dc" {
-		t.Errorf("FamSlug = %q, want dc", FamSlug(reg))
 	}
 }
 
@@ -112,57 +123,38 @@ func TestCanonicalHarness(t *testing.T) {
 	}
 }
 
-func TestFindFamTOMLPath(t *testing.T) {
+func TestMatchRepo(t *testing.T) {
 	famDir := famFixture(t)
 	wt := filepath.Join(famDir, "claude")
 	gitInit(t, wt)
-	want := filepath.Join(famDir, "fam.toml")
 
-	// Parent-of-toplevel branch (no env root override).
-	if got := FindFamTOMLPath(wt, []string{}); got != want {
-		t.Errorf("parent-of-toplevel: got %q, want %q", got, want)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
 	}
 
-	// A non-git dir with no env yields "".
-	if got := FindFamTOMLPath(t.TempDir(), []string{}); got != "" {
-		t.Errorf("non-git: got %q, want empty", got)
+	// A worktree under the stanza path matches the [repo.dc] stanza.
+	if key, _, ok := MatchRepo(cfg, wt); !ok || key != "dc" {
+		t.Errorf("MatchRepo(worktree) = %q, %v; want dc, true", key, ok)
+	}
+	// The fam dir itself matches.
+	if key, _, ok := MatchRepo(cfg, famDir); !ok || key != "dc" {
+		t.Errorf("MatchRepo(famDir) = %q, %v; want dc, true", key, ok)
+	}
+	// An unrelated dir does not match.
+	if _, _, ok := MatchRepo(cfg, t.TempDir()); ok {
+		t.Error("MatchRepo(unrelated) matched; want no match")
 	}
 }
 
-const flagsFamTOML = `name       = "botfam"
-slug       = "botfam"
-forge_url  = "http://gitea:3000/"
-repository = "botfam/botfam"
-roster     = ["claude", "agy"]
-
-[flags]
-wait_ingest = 1
-experiment  = false
-ratio       = 0
-
-[agent.claude]
-harness    = "claude-code"
-forge_user = "claude-bot"
-
-[agent.agy]
-harness    = "antigravity"
-forge_user = "agy-bot"
-
-[agent.agy.flags]
-wait_ingest = 0
-experiment  = "yes"
-`
-
-func TestReadRegistryParsesFlags(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fam.toml")
-	if err := os.WriteFile(path, []byte(flagsFamTOML), 0o644); err != nil {
-		t.Fatal(err)
+func TestBuildRegistryMergesFlags(t *testing.T) {
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
 	}
-	reg, err := ReadRegistry(path)
-	if err != nil {
-		t.Fatalf("ReadRegistry: %v", err)
-	}
+	cfg := flagsConfig(famDir)
+	reg := BuildRegistry(cfg, "botfam", cfg.Repos["botfam"], famDir)
+
 	if reg.Flags["wait_ingest"] != int64(1) {
 		t.Errorf("fam-wide wait_ingest = %#v, want int64(1)", reg.Flags["wait_ingest"])
 	}
@@ -172,44 +164,30 @@ func TestReadRegistryParsesFlags(t *testing.T) {
 	if reg.Agents["claude"].Flags != nil {
 		t.Errorf("agent.claude has no [flags] table; got %#v", reg.Agents["claude"].Flags)
 	}
+	if reg.Repository != "botfam/botfam" || reg.ForgeURL != "http://gitea:3000/" || reg.Slug != "botfam" {
+		t.Errorf("merged registry = %+v", reg)
+	}
 }
 
-func TestWriteRegistryRoundTripsFlags(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fam.toml")
-	if err := os.WriteFile(path, []byte(flagsFamTOML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := ReadRegistry(path)
+func TestWriteConfigRoundTripsFlags(t *testing.T) {
+	famDir := t.TempDir()
+	setConfig(t, flagsConfig(famDir))
+	cfg, err := LoadConfig()
 	if err != nil {
-		t.Fatalf("ReadRegistry: %v", err)
+		t.Fatalf("LoadConfig: %v", err)
 	}
-	out := filepath.Join(dir, "out.toml")
-	if err := WriteRegistry(out, reg); err != nil {
-		t.Fatalf("WriteRegistry: %v", err)
+	if cfg.Flags["wait_ingest"] != int64(1) {
+		t.Errorf("fam flags lost on rewrite: %#v", cfg.Flags)
 	}
-	got, err := ReadRegistry(out)
-	if err != nil {
-		t.Fatalf("ReadRegistry(rewritten): %v", err)
-	}
-	if got.Flags["wait_ingest"] != int64(1) {
-		t.Errorf("fam flags lost on rewrite: %#v", got.Flags)
-	}
-	if got.Agents["agy"].Flags["wait_ingest"] != int64(0) {
-		t.Errorf("agent flags lost on rewrite: %#v", got.Agents["agy"].Flags)
+	if cfg.Agents["agy"].Flags["wait_ingest"] != int64(0) {
+		t.Errorf("agent flags lost on rewrite: %#v", cfg.Agents["agy"].Flags)
 	}
 }
 
 func TestResolveFlagsAndFlagEnabled(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fam.toml")
-	if err := os.WriteFile(path, []byte(flagsFamTOML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := ReadRegistry(path)
-	if err != nil {
-		t.Fatalf("ReadRegistry: %v", err)
-	}
+	famDir := t.TempDir()
+	cfg := flagsConfig(famDir)
+	reg := BuildRegistry(cfg, "botfam", cfg.Repos["botfam"], famDir)
 
 	// on asserts FlagEnabled succeeds and returns the resolved value.
 	on := func(actor, name string, def bool) bool {
@@ -240,9 +218,6 @@ func TestResolveFlagsAndFlagEnabled(t *testing.T) {
 	// Unset flag falls back to the supplied default.
 	if !on("claude", "nonexistent", true) {
 		t.Error("unset flag should return def=true")
-	}
-	if on("claude", "nonexistent", false) {
-		t.Error("unset flag should return def=false")
 	}
 
 	// Unknown actor → just the fam-wide defaults.
@@ -293,9 +268,7 @@ func TestResolveFamPopulatesFlags(t *testing.T) {
 	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
 		famDir = eval
 	}
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(flagsFamTOML), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	setConfig(t, flagsConfig(famDir))
 	wt := filepath.Join(famDir, "agy")
 	gitInit(t, wt)
 

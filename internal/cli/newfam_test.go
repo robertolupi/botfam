@@ -23,6 +23,7 @@ func TestNewfam(t *testing.T) {
 	// Set environment variables for the test
 	t.Setenv("USER", "testoperator")
 	t.Setenv("HOME", tempDir)
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(tempDir, ".botfam", "config.toml"))
 
 	// Create mock home .botfam directory to hold symlinks
 	if err := os.MkdirAll(filepath.Join(tempDir, ".botfam"), 0755); err != nil {
@@ -46,36 +47,38 @@ func TestNewfam(t *testing.T) {
 		t.Fatalf("NewfamCmd failed: %v\nOutput:\n%s", err, out.String())
 	}
 
-	// Check if the registry fam.toml was written correctly
+	// Check the [repo.myproject] stanza + global roster were written (#404).
 	info, err := (famconfig.GitResolver{}).ResolveIdentity(mainDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	regPath := filepath.Join(info.FamDir, "fam.toml")
-	reg, err := ReadRegistry(regPath)
+	cfg, err := famconfig.LoadConfig()
 	if err != nil {
-		t.Fatalf("failed to read registry at %s: %v", regPath, err)
+		t.Fatalf("failed to load config: %v", err)
 	}
-	if reg.Name != "myproject" {
-		t.Errorf("expected registry name 'myproject', got %q", reg.Name)
+	rc, ok := cfg.Repos["myproject"]
+	if !ok {
+		t.Fatalf("missing [repo.myproject] stanza; repos=%v", cfg.Repos)
 	}
-	if len(reg.WikiProjections) == 0 || reg.WikiProjections[0] != "memory:memory-*" {
-		t.Errorf("expected WikiProjections to contain 'memory:memory-*', got %v", reg.WikiProjections)
+	if rc.Path != info.FamDir {
+		t.Errorf("stanza path = %q, want fam dir %q", rc.Path, info.FamDir)
+	}
+	if len(rc.WikiProjections) == 0 || rc.WikiProjections[0] != "memory:memory-*" {
+		t.Errorf("expected WikiProjections to contain 'memory:memory-*', got %v", rc.WikiProjections)
 	}
 
-	// Verify that roster contains all agents and the operator
-	expectedRoster := []string{"agy", "claude", "testoperator"}
-	rosterMap := make(map[string]bool)
-	for _, member := range reg.Roster {
-		rosterMap[member] = true
-	}
-	for _, member := range expectedRoster {
-		if !rosterMap[member] {
-			t.Errorf("missing %q from roster: %v", member, reg.Roster)
+	// Verify the global roster contains all agents and the operator (a user).
+	for _, a := range []string{"agy", "claude"} {
+		if _, ok := cfg.Agents[a]; !ok {
+			t.Errorf("missing agent %q from global roster: %v", a, cfg.Agents)
 		}
+	}
+	if _, ok := cfg.Users["testoperator"]; !ok {
+		t.Errorf("missing user testoperator from global roster: %v", cfg.Users)
 	}
 
 	// Verify that the worktree directories exist
+	expectedRoster := []string{"agy", "claude", "testoperator"}
 	for _, actor := range expectedRoster {
 		wtDir := filepath.Join(tempDir, "wt-"+actor)
 		if _, err := os.Stat(wtDir); os.IsNotExist(err) {
@@ -268,6 +271,7 @@ func TestNewfamMCPSelfDiscoverability(t *testing.T) {
 	// Set environment variables for the test
 	t.Setenv("USER", "testoperator")
 	t.Setenv("HOME", tempDir)
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(tempDir, ".botfam", "config.toml"))
 
 	// Create mock home .botfam directory to hold symlinks
 	if err := os.MkdirAll(filepath.Join(tempDir, ".botfam"), 0755); err != nil {
