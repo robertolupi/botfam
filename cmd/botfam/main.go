@@ -8,7 +8,9 @@ import (
 )
 
 func main() {
-	if err := cli.Execute(os.Args[1:]); err != nil {
+	root := cli.NewRootCmd()
+	root.SetArgs(os.Args[1:])
+	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "botfam:", err)
 		os.Exit(1)
 	}

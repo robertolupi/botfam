@@ -15,13 +15,6 @@ const (
 	groupServer = "server"
 )
 
-// Execute builds the Cobra command tree and runs it against args (os.Args[1:]).
-func Execute(args []string) error {
-	root := NewRootCmd()
-	root.SetArgs(args)
-	return root.Execute()
-}
-
 // NewRootCmd builds the full `botfam` command tree: the CLI command builders
 // plus the MCP serve/mcp subcommands. cmd/botfam is a thin wrapper over this.
 func NewRootCmd() *cobra.Command {
