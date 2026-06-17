@@ -25,13 +25,11 @@ import (
 //go:embed rules/forge_lint.mg
 var forgeLintRules string
 
-// ExportOptions selects which slice of forge history to materialize. At most
-// one selector should be set; none means the full history (--all).
+// ExportOptions selects which slice of forge history to materialize (forge.Scope)
+// and whether to pull per-PR commits.
 type ExportOptions struct {
-	WithCommits bool   // pull per-PR commits (author identity) — the slow part
-	Milestone   string // issues whose milestone title matches
-	Label       string // issues carrying this label
-	Epic        int    // issue number; export its transitive #N closure
+	forge.Scope
+	WithCommits bool // pull per-PR commits (author identity) — the slow part
 }
 
 // ExportStats reports what was materialized and how long acquisition took.
@@ -39,15 +37,6 @@ type ExportStats struct {
 	Issues, Pulls, Commits int
 	Duration               time.Duration
 }
-
-// closesRe matches Gitea's auto-close keywords; mentionRe matches bare #N.
-var (
-	closesRe  = regexp.MustCompile(`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)`)
-	mentionRe = regexp.MustCompile(`#(\d+)`)
-	// taskRefRe matches an epic's structural children: task-list checkboxes
-	// `- [ ] #N` / `- [x] #N`. Used for --epic closure (not prose mentions).
-	taskRefRe = regexp.MustCompile(`(?m)^\s*[-*]\s*\[[ xX]\]\s*#(\d+)`)
-)
 
 // Export materializes forge history (optionally a subset) as Mangle facts.
 func Export(c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error) {
@@ -58,10 +47,10 @@ func Export(c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error
 	if err != nil {
 		return st, fmt.Errorf("list issues: %w", err)
 	}
-	target := selectIssues(issues, opt) // nil => everything
+	target := forge.SelectIssues(issues, opt.Scope) // nil => everything
 
 	fmt.Fprintf(w, "# botfam forge history -> Mangle facts (%s/%s)\n", c.Owner, c.Repo)
-	fmt.Fprintf(w, "# generated %s; scope=%s\n\n", time.Now().UTC().Format(time.RFC3339), scopeLabel(opt))
+	fmt.Fprintf(w, "# generated %s; scope=%s\n\n", time.Now().UTC().Format(time.RFC3339), opt.Scope.String())
 
 	for _, iss := range issues {
 		if target != nil && !target[iss.Number] {
@@ -85,8 +74,8 @@ func Export(c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error
 		return st, fmt.Errorf("list pulls: %w", err)
 	}
 	for _, pr := range pulls {
-		closes := refs(closesRe, pr.Title+"\n"+pr.Body)
-		mentions := refs(mentionRe, pr.Title+"\n"+pr.Body)
+		closes := forge.ClosesRefs(pr.Title + "\n" + pr.Body)
+		mentions := forge.MentionRefs(pr.Title + "\n" + pr.Body)
 		if target != nil && !intersects(target, closes) && !intersects(target, mentions) {
 			continue
 		}
@@ -126,70 +115,6 @@ func Export(c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error
 
 	st.Duration = time.Since(start)
 	return st, nil
-}
-
-// selectIssues returns the target issue-number set for the selector, or nil
-// for the full history. Epic uses a transitive #N closure over issue bodies
-// (the same closure botfam sprint needs for CattleSprintScope).
-func selectIssues(issues []*forge.Issue, opt ExportOptions) map[int]bool {
-	switch {
-	case opt.Epic > 0:
-		byNum := make(map[int]*forge.Issue, len(issues))
-		for _, iss := range issues {
-			byNum[iss.Number] = iss
-		}
-		seen := map[int]bool{}
-		queue := []int{opt.Epic}
-		for len(queue) > 0 {
-			n := queue[0]
-			queue = queue[1:]
-			if seen[n] {
-				continue
-			}
-			seen[n] = true
-			if iss := byNum[n]; iss != nil {
-				for ref := range refs(taskRefRe, iss.Body) {
-					if !seen[ref] {
-						queue = append(queue, ref)
-					}
-				}
-			}
-		}
-		return seen
-	case opt.Milestone != "":
-		out := map[int]bool{}
-		for _, iss := range issues {
-			if iss.Milestone != nil && iss.Milestone.Title == opt.Milestone {
-				out[iss.Number] = true
-			}
-		}
-		return out
-	case opt.Label != "":
-		out := map[int]bool{}
-		for _, iss := range issues {
-			for _, l := range iss.Labels {
-				if l.Name == opt.Label {
-					out[iss.Number] = true
-				}
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
-func scopeLabel(opt ExportOptions) string {
-	switch {
-	case opt.Epic > 0:
-		return fmt.Sprintf("epic #%d", opt.Epic)
-	case opt.Milestone != "":
-		return "milestone " + opt.Milestone
-	case opt.Label != "":
-		return "label " + opt.Label
-	default:
-		return "all"
-	}
 }
 
 // Eval loads ruleFile + storeFile into the engine and queries every head
@@ -239,18 +164,6 @@ func Lint(c *forge.Client, opt ExportOptions, progress io.Writer) ([]interp.Resu
 }
 
 // ---- helpers ----------------------------------------------------------------
-
-func refs(re *regexp.Regexp, s string) map[int]bool {
-	out := map[int]bool{}
-	for _, m := range re.FindAllStringSubmatch(s, -1) {
-		var n int
-		fmt.Sscanf(m[1], "%d", &n)
-		if n > 0 {
-			out[n] = true
-		}
-	}
-	return out
-}
 
 func intersects(set map[int]bool, sub map[int]bool) bool {
 	for n := range sub {
