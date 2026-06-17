@@ -320,7 +320,7 @@ function draw(nodes,links){
   node.append("circle").attr("r",function(d){return d.epic?11:5;}).attr("fill",color);
   node.append("title").text(function(d){return "#"+d.n+" "+d.t+" ("+d.state+")";});
   node.append("text").attr("x",function(d){return d.epic?14:7;}).attr("y",3)
-     .text(function(d){return "#"+d.n+(d.epic?" "+d.t.slice(0,40):"");});
+     .text(function(d){var m=d.epic?52:36;var t=d.t.length>m?d.t.slice(0,m-1)+"…":d.t;return "#"+d.n+" "+t;});
   sim=d3.forceSimulation(nodes)
      .force("link",d3.forceLink(links).id(function(d){return d.id;}).distance(70))
      .force("charge",d3.forceManyBody().strength(-180))
