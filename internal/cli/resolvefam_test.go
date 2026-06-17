@@ -147,6 +147,33 @@ func TestResolveFamRefusesBaseCheckout(t *testing.T) {
 	}
 }
 
+// TestResolveFamFromWiki: ResolveFam resolves the enclosing agent worktree when
+// called from inside a nested wiki/ git repo, not the nested repo itself. This is
+// the acceptance gate for issue #264: `botfam memory list` must work from wiki/.
+func TestResolveFamFromWiki(t *testing.T) {
+	famDir := resolveFamFixture(t)
+	wt := filepath.Join(famDir, "claude")
+	gitInit(t, wt)
+
+	// A nested git repo simulating the wiki checkout at <worktree>/wiki.
+	wikiDir := filepath.Join(wt, "wiki")
+	gitInit(t, wikiDir)
+
+	rf, err := ResolveFam(wikiDir)
+	if err != nil {
+		t.Fatalf("ResolveFam from wiki/: %v", err)
+	}
+	if rf.Actor != "claude" {
+		t.Errorf("actor = %q, want claude", rf.Actor)
+	}
+	if rf.WorktreeRoot != wt {
+		t.Errorf("WorktreeRoot = %q, want %q", rf.WorktreeRoot, wt)
+	}
+	if rf.Slug != "dc" {
+		t.Errorf("slug = %q, want dc", rf.Slug)
+	}
+}
+
 // TestResolverBareNameActor: the core Resolver (used by whoami and friends)
 // resolves a bare-name worktree's actor against the merged roster (the wt-
 // prefix is retired); the base/main checkout (not a roster member) gets none.

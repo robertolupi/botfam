@@ -326,6 +326,51 @@ func TestResolveRefusalModes(t *testing.T) {
 	}
 }
 
+// TestResolveBaseCheckout: resolving the fam root (base/main checkout) with
+// ModeLocate or ModeRegistry returns RoleBase and an empty actor rather than
+// erroring — the caller decides how to handle a non-agent context.
+func TestResolveBaseCheckout(t *testing.T) {
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+	setConfig(t, famconfig.Config{
+		Agents: map[string]famconfig.AgentConfig{"bob": {Harness: "claude-code"}},
+		Repos:  map[string]famconfig.RepoConfig{"myfam": {Path: famDir, Slug: "mf"}},
+	})
+
+	// The "main" checkout: git root equals famDir (fam root).
+	mainDir := filepath.Join(famDir, "main")
+	if err := os.Mkdir(mainDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, mainDir)
+
+	ctx, err := Resolve(context.Background(), Inputs{
+		WorkDir: mainDir,
+		Mode:    ModeRegistry,
+	})
+	if err != nil {
+		t.Fatalf("ModeRegistry from base checkout should not error, got: %v", err)
+	}
+	// Actor is empty (main is not in the roster); role should be RoleUnknown or
+	// RoleBase (git root ≠ famDir for bare-name checkouts).
+	if ctx.Name != "myfam" {
+		t.Errorf("Name = %q, want myfam", ctx.Name)
+	}
+	if ctx.Slug != "mf" {
+		t.Errorf("Slug = %q, want mf", ctx.Slug)
+	}
+	// ModeAgentRuntime must refuse the base checkout.
+	_, err = Resolve(context.Background(), Inputs{
+		WorkDir: mainDir,
+		Mode:    ModeAgentRuntime,
+	})
+	if err == nil {
+		t.Error("ModeAgentRuntime should refuse the base checkout, got nil")
+	}
+}
+
 // TestResolveWithInjectedResolver proves the Resolver seam (#334): resolution can
 // be driven by an injected fake instead of a real git worktree plus environment.
 // No gitInit and no t.Setenv — the fake supplies the identity directly, and
