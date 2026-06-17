@@ -33,20 +33,29 @@ then spawn a consolidation subagent (do NOT read the raw reviews into context).
 
 Models talk to providers over the OpenAI-compatible chat API (one client for
 all). Pick models via repeatable flags (no baked-in defaults):
-  --ollama MODEL    local ollama (OLLAMA_HOST, default http://localhost:11434)
-  --openai MODEL    OpenAI         (needs OPENAI_API_KEY)
-  --gemini MODEL    Gemini         (needs GEMINI_API_KEY)
+  --ollama MODEL     local ollama    (OLLAMA_HOST, default http://localhost:11434)
+  --lmstudio MODEL   local LM Studio  (LMSTUDIO_HOST, default http://localhost:1234)
+  --openai MODEL     OpenAI           (needs OPENAI_API_KEY)
+  --gemini MODEL     Gemini           (needs GEMINI_API_KEY)
+  --anthropic MODEL  Anthropic        (needs ANTHROPIC_API_KEY)
 
   --pr <index>         synthesize the material from a Gitea PR (metadata, description,
                        discussion, reviews, unified diff) via the forge; slug pr-<index>.
   --session-file <pat> ingest an extracted milestone session markdown file directly.
   --milestone <name>   automatically extract milestone session and run reviews on it.
+  --wiki PAGE          review a wiki page by name, read from the local wiki checkout
+                       ($BOTFAM_WIKI_DIR or ./wiki); repeatable.
   --prompt FILE        canonical prompt (default doc/review/EXTERNAL-REVIEW-PROMPT.md);
                        only text below the "PROMPT BEGINS BELOW THIS LINE" marker is used.
+  --design             shortcut for the adversarial design-review prompt
+                       (doc/review/DESIGN-REVIEW-PROMPT.md), for reviewing a spec/page.
+  --secrets FILE       load provider API keys from a dotenv-style KEY=VALUE file instead
+                       of the environment (e.g. OPENAI_API_KEY=...). Keys are never printed.
   --out DIR            output dir.
 
-Keys are read from the environment only and never printed. Unreachable ollama or
-an unset API key is skipped with a warning, not a hard failure.
+API keys come from --secrets FILE (if given) then the environment; they are never
+printed. An unreachable local host or an unset API key is skipped with a warning,
+not a hard failure.
 `
 
 type erProvider struct {
@@ -71,10 +80,49 @@ type externalReviewOpts struct {
 	withDiffs         bool
 	interactionOnly   bool
 	allowZeroReviews  bool
+	design            bool
+	secretsFile       string
+	lmstudioHost      string
+	wikiDir           string
 	ollama            []string
+	lmstudio          []string
 	openaiM           []string
 	gemini            []string
+	anthropic         []string
+	wiki              []string
 	materials         []string
+}
+
+// defaultDesignPrompt is the canonical adversarial design-review prompt,
+// selected by --design (vs the session-review default).
+const defaultDesignPrompt = "doc/review/DESIGN-REVIEW-PROMPT.md"
+
+// loadSecrets parses a dotenv-style KEY=VALUE file into a map. Blank lines and
+// '#' comments are skipped; surrounding quotes on the value are stripped. Values
+// are never logged. It is the file-backed bridge to the #393 secret store: keys
+// stay out of the environment, the shell history, and the agent's context.
+func loadSecrets(path string) (map[string]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("secrets file: %w", err)
+	}
+	m := map[string]string{}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		k = strings.TrimSpace(k)
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		if k != "" {
+			m[k] = v
+		}
+	}
+	return m, nil
 }
 
 // ExternalReviewCmd is the thin args/io entry point retained for tests; it
@@ -92,6 +140,10 @@ func NewExternalReviewCmd() *cobra.Command {
 	if defaultOllamaHost == "" {
 		defaultOllamaHost = "http://localhost:11434"
 	}
+	defaultLMStudioHost := os.Getenv("LMSTUDIO_HOST")
+	if defaultLMStudioHost == "" {
+		defaultLMStudioHost = "http://localhost:1234"
+	}
 	c := &cobra.Command{
 		Use:           "external-review [flags] [MATERIAL...]",
 		Short:         "Fan a review prompt across one or more LLMs",
@@ -101,6 +153,10 @@ func NewExternalReviewCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.redact = opts.redact && !noRedact
 			opts.materials = args
+			// --design selects the design prompt unless --prompt was set explicitly.
+			if opts.design && !cmd.Flags().Changed("prompt") {
+				opts.promptFile = defaultDesignPrompt
+			}
 			return runExternalReview(opts, cmd.OutOrStdout())
 		},
 	}
@@ -109,11 +165,18 @@ func NewExternalReviewCmd() *cobra.Command {
 	f.StringVar(&opts.sessionFile, "session-file", "", "ingest an extracted milestone session markdown file")
 	f.StringVar(&opts.milestoneName, "milestone", "", "extract a milestone session and review it")
 	f.StringArrayVar(&opts.ollama, "ollama", nil, "ollama model to run (repeatable)")
+	f.StringArrayVar(&opts.lmstudio, "lmstudio", nil, "LM Studio model to run (repeatable)")
 	f.StringArrayVar(&opts.openaiM, "openai", nil, "OpenAI model to run (repeatable; needs OPENAI_API_KEY)")
 	f.StringArrayVar(&opts.gemini, "gemini", nil, "Gemini model to run (repeatable; needs GEMINI_API_KEY)")
+	f.StringArrayVar(&opts.anthropic, "anthropic", nil, "Anthropic model to run (repeatable; needs ANTHROPIC_API_KEY)")
+	f.StringArrayVar(&opts.wiki, "wiki", nil, "review a wiki page by name from the local checkout (repeatable)")
 	f.StringVar(&opts.promptFile, "prompt", "doc/review/EXTERNAL-REVIEW-PROMPT.md", "canonical prompt file")
+	f.BoolVar(&opts.design, "design", false, "use the adversarial design-review prompt ("+defaultDesignPrompt+")")
+	f.StringVar(&opts.secretsFile, "secrets", "", "load provider API keys from a dotenv-style file instead of the environment")
 	f.StringVar(&opts.outDir, "out", "", "output dir (default $BOTFAM_REVIEW_DIR/<ts>-<slug>)")
 	f.StringVar(&opts.ollamaHost, "ollama-host", defaultOllamaHost, "ollama host URL")
+	f.StringVar(&opts.lmstudioHost, "lmstudio-host", defaultLMStudioHost, "LM Studio host URL")
+	f.StringVar(&opts.wikiDir, "wiki-dir", "", "local wiki checkout dir (default $BOTFAM_WIKI_DIR or ./wiki)")
 	f.StringVar(&opts.since, "since", "", "milestone sugar: only events at/after this RFC3339 timestamp")
 	f.StringVar(&opts.until, "until", "", "milestone sugar: only events at/before this RFC3339 timestamp")
 	f.StringVar(&opts.snapshotTimestamp, "snapshot-timestamp", "", "milestone sugar: freeze the timeline at this RFC3339 timestamp")
@@ -141,11 +204,48 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 	materials := opts.materials
 	allowZeroReviews := opts.allowZeroReviews
 
-	if len(materials) == 0 && pr == "" && sessionFile == "" && milestoneName == "" {
-		return fmt.Errorf("no material file(s) and no --pr <index>, --session-file <path>, or --milestone <name> (see --help)")
+	// Resolve --wiki PAGE names to files in the local wiki checkout and treat
+	// them as ordinary material.
+	if len(opts.wiki) > 0 {
+		wikiDir := opts.wikiDir
+		if wikiDir == "" {
+			wikiDir = os.Getenv("BOTFAM_WIKI_DIR")
+		}
+		if wikiDir == "" {
+			wikiDir = "wiki"
+		}
+		for _, page := range opts.wiki {
+			name := strings.TrimSuffix(page, ".md")
+			path := filepath.Join(wikiDir, name+".md")
+			if _, err := os.Stat(path); err != nil {
+				return fmt.Errorf("wiki page %q not found at %s (set --wiki-dir or $BOTFAM_WIKI_DIR)", page, path)
+			}
+			materials = append(materials, path)
+		}
 	}
-	if len(ollama)+len(openaiM)+len(gemini) == 0 {
-		return fmt.Errorf("no models selected — pass at least one --ollama/--openai/--gemini (see --help)")
+
+	// API keys: --secrets file (if any) takes precedence over the environment;
+	// values are never printed.
+	var secrets map[string]string
+	if opts.secretsFile != "" {
+		s, err := loadSecrets(opts.secretsFile)
+		if err != nil {
+			return err
+		}
+		secrets = s
+	}
+	lookupKey := func(env string) string {
+		if v, ok := secrets[env]; ok && v != "" {
+			return v
+		}
+		return os.Getenv(env)
+	}
+
+	if len(materials) == 0 && pr == "" && sessionFile == "" && milestoneName == "" {
+		return fmt.Errorf("no material — pass MATERIAL file(s), --wiki <page>, --pr <index>, --session-file <path>, or --milestone <name> (see --help)")
+	}
+	if len(ollama)+len(opts.lmstudio)+len(openaiM)+len(gemini)+len(opts.anthropic) == 0 {
+		return fmt.Errorf("no models selected — pass at least one --ollama/--lmstudio/--openai/--gemini/--anthropic (see --help)")
 	}
 	promptText, err := promptBelowMarker(promptFile)
 	if err != nil {
@@ -257,8 +357,10 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 
 	providers := []erProvider{
 		{name: "ollama", models: ollama, baseURL: strings.TrimSuffix(ollamaHost, "/") + "/v1", keyEnv: ""},
+		{name: "lmstudio", models: opts.lmstudio, baseURL: strings.TrimSuffix(opts.lmstudioHost, "/") + "/v1", keyEnv: ""},
 		{name: "openai", models: openaiM, baseURL: "https://api.openai.com/v1", keyEnv: "OPENAI_API_KEY"},
 		{name: "gemini", models: gemini, baseURL: "https://generativelanguage.googleapis.com/v1beta/openai", keyEnv: "GEMINI_API_KEY"},
+		{name: "anthropic", models: opts.anthropic, baseURL: "https://api.anthropic.com/v1", keyEnv: "ANTHROPIC_API_KEY"},
 	}
 
 	fmt.Fprintf(out, "running reviews into %s ...\n", outDir)
@@ -304,7 +406,7 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 		}
 		key := ""
 		if p.keyEnv != "" {
-			key = os.Getenv(p.keyEnv)
+			key = lookupKey(p.keyEnv)
 			if key == "" {
 				fmt.Fprintf(out, "  %s unset — skipping %d %s model(s)\n", p.keyEnv, len(p.models), p.name)
 				continue
@@ -312,7 +414,8 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "  %s: dispatching %d model(s)\n", p.name, len(p.models))
 		if p.keyEnv == "" {
-			// Local provider (ollama): serialize its own models in one goroutine.
+			// Local provider (ollama / lmstudio): serialize its own models in one
+			// goroutine (a single GPU host can't serve concurrent requests well).
 			p, key := p, key
 			wg.Add(1)
 			go func() {

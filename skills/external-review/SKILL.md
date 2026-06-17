@@ -51,8 +51,15 @@ botfam external-review --pr 34 --gemini gemini-2.5-pro --openai gpt-5
 Provider/model selection (repeatable — pass as many as you like):
 
 - `--ollama MODEL` — run a local ollama model (e.g. `--ollama qwen3.5:35b`).
-- `--gemini MODEL` — run a Gemini model; needs `GEMINI_API_KEY` in the env.
-- `--openai MODEL` — run an OpenAI model; needs `OPENAI_API_KEY` in the env.
+- `--lmstudio MODEL` — run a local LM Studio model (`LMSTUDIO_HOST`, default
+  `http://localhost:1234`).
+- `--gemini MODEL` — run a Gemini model; needs `GEMINI_API_KEY`.
+- `--openai MODEL` — run an OpenAI model; needs `OPENAI_API_KEY`.
+- `--anthropic MODEL` — run an Anthropic model; needs `ANTHROPIC_API_KEY`.
+
+API keys come from `--secrets FILE` (if given) then the environment, and are
+never printed. `meta.ai` has no API and cannot be automated — run it by hand and
+fold its review in manually if you want it.
 
 Options:
 
@@ -60,6 +67,16 @@ Options:
   `doc/review/EXTERNAL-REVIEW-PROMPT.md`. Only the text **below** the
   `PROMPT BEGINS BELOW THIS LINE` marker is used; the operator instructions
   above it are skipped.
+- `--design` — shortcut selecting `doc/review/DESIGN-REVIEW-PROMPT.md`, the
+  adversarial design-review prompt (find THE load-bearing flaw, cite the exact
+  text, fluent agreement = fail). Use this to review a **design doc / wiki page
+  / spec** rather than a session. `--prompt` wins if both are given.
+- `--wiki PAGE` — review a wiki page by name, read from the local checkout
+  (`$BOTFAM_WIKI_DIR` or `./wiki`); repeatable. Equivalent to passing
+  `wiki/PAGE.md` as material.
+- `--secrets FILE` — load provider API keys from a dotenv-style `KEY=VALUE`
+  file instead of the environment (the file-backed bridge to the #393 secret
+  store). Keys are never printed.
 - `--pr <index>` — review a Gitea PR directly (see above); used instead of
   MATERIAL files.
 - `--out DIR` — output dir; default
@@ -76,6 +93,16 @@ botfam external-review \
   --ollama qwen3.5:35b \
   --ollama gemma4:31b \
   wiki/session-2026-06-12-doc-update.md
+```
+
+Example — adversarial design review of a wiki page across local + frontier
+models, keys from a secrets file:
+
+```sh
+botfam external-review --design --wiki CattleActorCQRS \
+  --secrets ~/.botfam/review-keys.env \
+  --lmstudio gemma-3-26b --lmstudio qwen3.6-35b \
+  --gemini gemini-3-flash --openai gpt-5.5 --anthropic claude-opus-4-8
 ```
 
 `botfam external-review` is a Go subcommand: all providers are reached over the

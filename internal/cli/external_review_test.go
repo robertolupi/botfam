@@ -135,3 +135,106 @@ func TestExternalReviewWritesAllModelReviews(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSecrets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.env")
+	content := "# a comment\n\nOPENAI_API_KEY=sk-plain\nGEMINI_API_KEY=\"sk-quoted\"\n  ANTHROPIC_API_KEY = sk-spaced \nNOEQUALS\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := loadSecrets(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"OPENAI_API_KEY":    "sk-plain",
+		"GEMINI_API_KEY":    "sk-quoted",
+		"ANTHROPIC_API_KEY": "sk-spaced",
+	}
+	for k, v := range want {
+		if m[k] != v {
+			t.Errorf("loadSecrets[%s] = %q, want %q", k, m[k], v)
+		}
+	}
+	if _, ok := m["NOEQUALS"]; ok {
+		t.Errorf("line without '=' should be skipped, got %q", m["NOEQUALS"])
+	}
+	if len(m) != 3 {
+		t.Errorf("expected 3 keys, got %d: %v", len(m), m)
+	}
+}
+
+// TestExternalReviewWikiAndLMStudio drives the LM Studio provider and the
+// --wiki material source end to end against the chat-completions stub.
+func TestExternalReviewWikiAndLMStudio(t *testing.T) {
+	server := chatCompletionStub(t)
+	defer server.Close()
+
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.md")
+	if err := os.WriteFile(promptFile, []byte("critique this.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wikiDir := filepath.Join(dir, "wiki")
+	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wikiDir, "MyPage.md"), []byte("# MyPage\nthe design\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outDir := filepath.Join(dir, "out")
+
+	opts := externalReviewOpts{
+		promptFile:   promptFile,
+		outDir:       outDir,
+		lmstudioHost: server.URL,
+		lmstudio:     []string{"local-m"},
+		wiki:         []string{"MyPage"}, // also exercises the .md-suffix-stripping path below
+		wikiDir:      wikiDir,
+	}
+
+	var out bytes.Buffer
+	if err := runExternalReview(opts, &out); err != nil {
+		t.Fatalf("runExternalReview failed: %v\noutput:\n%s", err, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "review-lmstudio-local-m.md")); err != nil {
+		t.Errorf("expected lmstudio review file: %v", err)
+	}
+	combined, err := os.ReadFile(filepath.Join(outDir, "combined-prompt.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(combined), "the design") {
+		t.Errorf("combined prompt should include the wiki page content:\n%s", string(combined))
+	}
+}
+
+func TestExternalReviewWikiPageNotFound(t *testing.T) {
+	dir := t.TempDir()
+	opts := externalReviewOpts{
+		outDir:   filepath.Join(dir, "out"),
+		wikiDir:  dir, // empty, page absent
+		wiki:     []string{"Missing"},
+		lmstudio: []string{"m"},
+	}
+	err := runExternalReview(opts, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "wiki page") {
+		t.Fatalf("expected a 'wiki page ... not found' error, got: %v", err)
+	}
+}
+
+// TestExternalReviewDesignFlag verifies --design selects the design prompt path
+// (here surfaced as a not-found error citing that path, which proves the wiring
+// without depending on the repo file being reachable from the test cwd).
+func TestExternalReviewDesignFlag(t *testing.T) {
+	dir := t.TempDir()
+	mat := filepath.Join(dir, "m.md")
+	if err := os.WriteFile(mat, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := ExternalReviewCmd([]string{"--design", "--lmstudio", "m", "--out", filepath.Join(dir, "o"), mat}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), defaultDesignPrompt) {
+		t.Fatalf("expected --design to select %s, got err: %v", defaultDesignPrompt, err)
+	}
+}
