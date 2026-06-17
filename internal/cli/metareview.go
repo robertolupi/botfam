@@ -11,6 +11,7 @@ import (
 
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/gitexec"
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/metareview"
 	"github.com/robertolupi/botfam/internal/wiki"
 	"github.com/spf13/cobra"
@@ -149,7 +150,7 @@ func runMetaReview(num int, opts metaReviewOpts, out io.Writer) error {
 	}
 
 	var actor string
-	if info, err := (GitResolver{}).ResolveIdentity("."); err == nil {
+	if info, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
 		actor = info.Actor
 	}
 	client, err := forge.NewClient(".", actor)

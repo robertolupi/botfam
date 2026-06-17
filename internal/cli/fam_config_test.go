@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 func TestFamChannels(t *testing.T) {
@@ -58,7 +60,7 @@ func TestFamChannels(t *testing.T) {
 		},
 	}
 	for _, tc := range cases {
-		main, ccrep := FamChannels(tc.reg)
+		main, ccrep := famconfig.FamChannels(tc.reg)
 		if main != tc.wantMain || ccrep != tc.wantCcrep {
 			t.Errorf("%s: FamChannels() = (%q, %q), want (%q, %q)",
 				tc.name, main, ccrep, tc.wantMain, tc.wantCcrep)
@@ -77,7 +79,7 @@ func TestFamLedgerDirName(t *testing.T) {
 		{Registry{Name: "deep-cuts", Slug: "dc"}, "dc-collab"},
 	}
 	for _, tc := range cases {
-		if got := FamLedgerDirName(tc.reg); got != tc.want {
+		if got := famconfig.FamLedgerDirName(tc.reg); got != tc.want {
 			t.Errorf("FamLedgerDirName(%+v) = %q, want %q", tc.reg, got, tc.want)
 		}
 	}
@@ -98,11 +100,11 @@ func TestDefaultHistoryPath(t *testing.T) {
 	t.Setenv("BOTFAM_FAM", "")
 
 	// No fam.toml: legacy ledger directory (falls back to git history under HOME).
-	got, err := DefaultHistoryPath(wt)
+	got, err := famconfig.DefaultHistoryPath(wt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotInfo, err := (GitResolver{Env: []string{"HOME=" + homeDir}}).ResolveIdentity(wt)
+	gotInfo, err := (famconfig.GitResolver{Env: []string{"HOME=" + homeDir}}).ResolveIdentity(wt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +118,7 @@ func TestDefaultHistoryPath(t *testing.T) {
 	if err := WriteRegistry(filepath.Join(root, "fam.toml"), reg); err != nil {
 		t.Fatal(err)
 	}
-	got, err = DefaultHistoryPath(wt)
+	got, err = famconfig.DefaultHistoryPath(wt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +145,7 @@ func TestLoadFamRegistryRoundTripsChannels(t *testing.T) {
 	if err := WriteRegistry(filepath.Join(root, "fam.toml"), reg); err != nil {
 		t.Fatal(err)
 	}
-	got := LoadFamRegistry(wt)
+	got := famconfig.LoadFamRegistry(wt)
 	if got.Name != "deep-cuts" {
 		t.Errorf("Name = %q, want deep-cuts", got.Name)
 	}
@@ -181,30 +183,30 @@ func TestDefaultPassFile(t *testing.T) {
 	}
 
 	// Neither file exists: anonymous connect.
-	if got := DefaultPassFile("deep-cuts", "claude"); got != "" {
+	if got := famconfig.DefaultPassFile("deep-cuts", "claude"); got != "" {
 		t.Errorf("no pass files: got %q, want empty", got)
 	}
 
 	// Legacy file only: fall back to it.
 	legacy := writePass("irc-pass-claude")
-	if got := DefaultPassFile("deep-cuts", "claude"); got != legacy {
+	if got := famconfig.DefaultPassFile("deep-cuts", "claude"); got != legacy {
 		t.Errorf("legacy only: got %q, want %q", got, legacy)
 	}
 
 	// Fam-scoped file wins over legacy.
 	scoped := writePass("irc-pass-deep-cuts-claude")
-	if got := DefaultPassFile("deep-cuts", "claude"); got != scoped {
+	if got := famconfig.DefaultPassFile("deep-cuts", "claude"); got != scoped {
 		t.Errorf("fam-scoped present: got %q, want %q", got, scoped)
 	}
 
 	// No fam name: only the legacy candidate is tried.
-	if got := DefaultPassFile("", "claude"); got != legacy {
+	if got := famconfig.DefaultPassFile("", "claude"); got != legacy {
 		t.Errorf("no fam name: got %q, want %q", got, legacy)
 	}
 
 	// Slug-scoped file (e.g. irc-pass-dc-agy) resolves via the slug.
 	dcScoped := writePass("irc-pass-dc-claude")
-	if got := DefaultPassFile("dc", "claude"); got != dcScoped {
+	if got := famconfig.DefaultPassFile("dc", "claude"); got != dcScoped {
 		t.Errorf("slug-scoped: got %q, want %q", got, dcScoped)
 	}
 }
@@ -228,7 +230,7 @@ func TestDefaultPassFilePrefersActorSlug(t *testing.T) {
 	// Both orderings present: the going-forward actor-slug ordering wins (#137).
 	write("irc-pass-botfam-claude") // legacy slug-actor
 	actorSlug := write("irc-pass-claude-botfam")
-	if got := DefaultPassFile("botfam", "claude"); got != actorSlug {
+	if got := famconfig.DefaultPassFile("botfam", "claude"); got != actorSlug {
 		t.Errorf("both orderings: got %q, want actor-slug %q", got, actorSlug)
 	}
 }
@@ -245,7 +247,7 @@ func TestFamScopedNick(t *testing.T) {
 		{"agy-dc", "dc", "agy-dc"},                   // idempotent
 	}
 	for _, tc := range cases {
-		if got := FamScopedNick(tc.actor, tc.slug); got != tc.want {
+		if got := famconfig.FamScopedNick(tc.actor, tc.slug); got != tc.want {
 			t.Errorf("FamScopedNick(%q, %q) = %q, want %q", tc.actor, tc.slug, got, tc.want)
 		}
 	}
@@ -266,8 +268,8 @@ func TestRegistrySlugRoundTrip(t *testing.T) {
 	if got.Slug != "dc" {
 		t.Errorf("Slug = %q, want dc", got.Slug)
 	}
-	if FamSlug(got) != "dc" {
-		t.Errorf("FamSlug = %q, want dc", FamSlug(got))
+	if famconfig.FamSlug(got) != "dc" {
+		t.Errorf("FamSlug = %q, want dc", famconfig.FamSlug(got))
 	}
 
 	// No slug: key is omitted on write and FamSlug falls back to the name.
@@ -285,8 +287,8 @@ func TestRegistrySlugRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if FamSlug(got) != "deep-cuts" {
-		t.Errorf("FamSlug fallback = %q, want deep-cuts", FamSlug(got))
+	if famconfig.FamSlug(got) != "deep-cuts" {
+		t.Errorf("FamSlug fallback = %q, want deep-cuts", famconfig.FamSlug(got))
 	}
 }
 
@@ -305,8 +307,8 @@ func TestRegistryBranchRoundTrip(t *testing.T) {
 	if got.Branch != "dc-next" {
 		t.Errorf("Branch = %q, want dc-next", got.Branch)
 	}
-	if FamBranch(got) != "dc-next" {
-		t.Errorf("FamBranch = %q, want dc-next", FamBranch(got))
+	if famconfig.FamBranch(got) != "dc-next" {
+		t.Errorf("FamBranch = %q, want dc-next", famconfig.FamBranch(got))
 	}
 
 	// No branch: key is omitted on write and FamBranch falls back.
@@ -324,7 +326,7 @@ func TestRegistryBranchRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if FamBranch(got) != "deep-cuts-next" {
-		t.Errorf("FamBranch fallback = %q, want deep-cuts-next", FamBranch(got))
+	if famconfig.FamBranch(got) != "deep-cuts-next" {
+		t.Errorf("FamBranch fallback = %q, want deep-cuts-next", famconfig.FamBranch(got))
 	}
 }

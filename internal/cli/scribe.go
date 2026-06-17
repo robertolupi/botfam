@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +27,7 @@ func ScribeCmd(args []string, out io.Writer) error {
 
 // NewScribeCmd builds the `botfam scribe` Cobra command (Go IRC scribe bot).
 func NewScribeCmd() *cobra.Command {
-	mainChannel, ccrepChannel := FamChannels(LoadFamRegistry("."))
+	mainChannel, ccrepChannel := famconfig.FamChannels(famconfig.LoadFamRegistry("."))
 	server := "localhost:6667"
 	channel := mainChannel + "," + ccrepChannel
 	nick := "scribe"
@@ -56,14 +57,14 @@ func runScribe(server, channel, nick, historyFile string, out io.Writer) error {
 
 	if historyFile == "" {
 		var err error
-		historyFile, err = DefaultHistoryPath(".")
+		historyFile, err = famconfig.DefaultHistoryPath(".")
 		if err != nil {
 			return errors.New("COLLAB_HISTORY is unset and family root could not be resolved")
 		}
 	}
 
 	// Validate history file path
-	if err := ValidateHistoryPath(historyFile); err != nil {
+	if err := famconfig.ValidateHistoryPath(historyFile); err != nil {
 		return err
 	}
 

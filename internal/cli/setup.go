@@ -54,11 +54,11 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 			return err
 		}
 	}
-	info, err := (GitResolver{}).ResolveIdentity(".")
+	info, err := (famconfig.GitResolver{}).ResolveIdentity(".")
 	if err != nil {
 		return err
 	}
-	stores, err := GitObjectStores(".")
+	stores, err := famconfig.GitObjectStores(".")
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 		reg.WikiProjections = []string{"memory:memory-*"}
 	}
 	reg.Roster = unique(append(reg.Roster, agents...))
-	reg.RepoPaths = unique(append(reg.RepoPaths, RepoPath(".")))
+	reg.RepoPaths = unique(append(reg.RepoPaths, famconfig.RepoPath(".")))
 	reg.ObjectStores = unique(append(reg.ObjectStores, stores...))
 	if err := WriteRegistry(regPath, reg); err != nil {
 		return err
@@ -91,7 +91,7 @@ func runSetup(project string, agents []string, force bool, out io.Writer) error 
 	if err := createProjectSymlink(project, info.FamDir); err != nil {
 		return err
 	}
-	if err := RegisterMCPServerGlobally(reg.ForgeURL, FamSlug(reg), out); err != nil {
+	if err := RegisterMCPServerGlobally(reg.ForgeURL, famconfig.FamSlug(reg), out); err != nil {
 		fmt.Fprintf(out, "Warning: failed to register MCP server globally: %v\n", err)
 	}
 	fmt.Fprintf(out, "botfam root: %s\n", info.FamDir)

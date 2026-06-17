@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/spf13/cobra"
 )
@@ -53,7 +54,7 @@ func runVerify(sha string, pkgs []string, race bool, out io.Writer) error {
 		pkgs = []string{"./..."}
 	}
 
-	repo := RepoPath(".")
+	repo := famconfig.RepoPath(".")
 
 	// Resolve the sha to a concrete commit so the report and the worktree
 	// reference the same revision, and so we fail early on a bad ref.

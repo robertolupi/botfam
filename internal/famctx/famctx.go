@@ -56,6 +56,7 @@ type Inputs struct {
 	Env         []string // testable env, nil means os.Environ()
 	PWD         string   // launching shell PWD for system-wide MCP mounts
 	ClientRoots []string // MCP roots, already decoded from file:// URIs
+	ClientName  string   // MCP initialize clientInfo.name; "" outside a live serve session
 	Mode        ResolveMode
 	CallActor   string
 	BoundActor  string
@@ -86,6 +87,13 @@ type Context struct {
 
 	Agent famconfig.AgentConfig
 	Flags map[string]any
+
+	// Harness is the effective harness: the runtime-detected one (MCP clientInfo
+	// or inherited env) when available, else the fam.toml-declared value. Token
+	// resolution and the health report key on this, not Agent.Harness, so a
+	// misdeclared fam.toml can't diverge the token path from the harness actually
+	// running (#371). Empty for non-agent contexts.
+	Harness string
 
 	SpoolDir   string
 	IRCLogDir  string
@@ -250,10 +258,19 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				}
 			}
 
+			// Resolve the effective harness from runtime signals (MCP clientInfo,
+			// then inherited env), falling back to the declared fam.toml value, and
+			// key the token path on it (#371). A declared-vs-detected mismatch is a
+			// misconfigured fam.toml: surface it rather than silently following the
+			// runtime.
+			var hres famconfig.HarnessResolution
 			tokenPath := ""
-			if isAgent && agent.Harness != "" {
-				if tp, err := famconfig.HarnessTokenPath(agent.Harness); err == nil {
-					tokenPath = tp
+			if isAgent {
+				hres = famconfig.ResolveHarness(agent.Harness, inputs.ClientName, inputs.Env)
+				if hres.Effective != "" {
+					if tp, err := famconfig.HarnessTokenPath(hres.Effective); err == nil {
+						tokenPath = tp
+					}
 				}
 			}
 
@@ -273,12 +290,20 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				WorkDir:      dir,
 				Agent:        agent,
 				Flags:        famconfig.ResolveFlags(reg, actor),
+				Harness:      hres.Effective,
 				SpoolDir:     filepath.Join(evalRoot, "spool", actor),
 				IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
 				TokenPath:    tokenPath,
 				ScopedNick:   famconfig.FamScopedNick(actor, slug),
 				RootSet:      info.RootSet,
 				RootSetID:    info.RootSetID,
+			}
+			if hres.Mismatch {
+				c.Diagnostics = append(c.Diagnostics, Diagnostic{
+					Severity: "warning",
+					Message: fmt.Sprintf("fam.toml declares harness %q for [agent.%s] but this is running under %q (via %s); using %q. Fix the fam.toml harness to match.",
+						hres.Declared, actor, hres.Detected, hres.Source, hres.Effective),
+				})
 			}
 			return c, nil
 

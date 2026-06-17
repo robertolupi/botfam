@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/skills"
 	"github.com/spf13/cobra"
 )
@@ -68,7 +69,7 @@ func NewAgentDocsCmd() *cobra.Command {
 			SilenceUsage:  true,
 			SilenceErrors: true,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				if err := GenerateAgentDocs(RepoPath(".")); err != nil {
+				if err := GenerateAgentDocs(famconfig.RepoPath(".")); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Generated %s\n", strings.Join(agentDocFiles, ", "))
@@ -82,7 +83,7 @@ func NewAgentDocsCmd() *cobra.Command {
 			SilenceUsage:  true,
 			SilenceErrors: true,
 			RunE: func(cmd *cobra.Command, args []string) error {
-				stale, err := CheckAgentDocs(RepoPath("."))
+				stale, err := CheckAgentDocs(famconfig.RepoPath("."))
 				if err != nil {
 					return err
 				}

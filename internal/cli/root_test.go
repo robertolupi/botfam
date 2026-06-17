@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 func initGitRepo(t *testing.T, dir string) {
@@ -21,30 +23,6 @@ func initGitRepo(t *testing.T, dir string) {
 	runCmd("git", "config", "user.name", "test")
 	runCmd("git", "config", "user.email", "test@example.com")
 	runCmd("git", "commit", "--allow-empty", "-m", "initial commit")
-}
-
-func TestParseActor(t *testing.T) {
-	cases := []struct {
-		base     string
-		repoName string
-		want     string
-	}{
-		{"wt-claude", "botfam", "claude"},
-		{"botfam-codex", "botfam", "codex"},
-		{"wt-my-agent", "botfam", "my-agent"},
-		{"deep-cuts-agy", "deep-cuts", "agy"},
-		{"wt-deep-cuts-claude", "deep-cuts", "claude"},
-		{"deep-cuts", "deep-cuts", ""}, // no actor remainder
-		{"myrepo", "botfam", ""},
-		{"wt-", "botfam", ""}, // empty remainder
-		{"botfam-", "botfam", ""},
-		{"wt-bad.name", "botfam", ""},
-	}
-	for _, tc := range cases {
-		if got := ParseActor(tc.base, tc.repoName); got != tc.want {
-			t.Errorf("ParseActor(%q, %q) = %q, want %q", tc.base, tc.repoName, got, tc.want)
-		}
-	}
 }
 
 func TestResolver(t *testing.T) {
@@ -71,7 +49,7 @@ func TestResolver(t *testing.T) {
 	}
 
 	// Resolve from main checkout directory
-	rMain := GitResolver{
+	rMain := famconfig.GitResolver{
 		Env: []string{},
 	}
 	infoMain, err := rMain.ResolveIdentity(gitDir)
@@ -80,7 +58,7 @@ func TestResolver(t *testing.T) {
 	}
 
 	// Resolve from worktree directory
-	rWt := GitResolver{
+	rWt := famconfig.GitResolver{
 		Env: []string{},
 	}
 	infoWt, err := rWt.ResolveIdentity(wtDir)
@@ -108,7 +86,7 @@ func TestResolver(t *testing.T) {
 	}
 
 	// Resolve from the nested subdirectory inside the worktree
-	rSub := GitResolver{
+	rSub := famconfig.GitResolver{
 		Env: []string{},
 	}
 	infoSub, err := rSub.ResolveIdentity(nestedSubDir)
@@ -129,7 +107,7 @@ func TestResolver(t *testing.T) {
 	if err := os.Mkdir(nonGitDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	rNonGit := GitResolver{
+	rNonGit := famconfig.GitResolver{
 		Env: []string{},
 	}
 	_, err = rNonGit.ResolveIdentity(nonGitDir)
@@ -165,7 +143,7 @@ harness = "test-harness"
 	}
 	initGitRepo(t, wtBobDir)
 
-	rUnified := GitResolver{
+	rUnified := famconfig.GitResolver{
 		Env: []string{},
 	}
 	infoUnified, err := rUnified.ResolveIdentity(wtBobDir)

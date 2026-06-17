@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -360,7 +361,7 @@ func runIrclog2Sessions(logs []string, outDir string, gapMinutes float64, includ
 	written, skippedOpen := 0, 0
 	// Sessions on the fam's main channel get no dirname suffix; every other
 	// channel is suffixed with its name.
-	mainChannel, _ := FamChannels(LoadFamRegistry("."))
+	mainChannel, _ := famconfig.FamChannels(famconfig.LoadFamRegistry("."))
 	taken := map[string]bool{}
 	for _, channel := range chans {
 		var chanEvents []ircEvent

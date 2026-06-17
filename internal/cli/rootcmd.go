@@ -8,6 +8,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	groupSetup  = "setup"
+	groupOps    = "ops"
+	groupReview = "review"
+	groupServer = "server"
+)
+
 // Execute builds the Cobra command tree and runs it against args (os.Args[1:]).
 //
 // The global --json/-j flag is honoured in any position (matching the legacy
@@ -62,32 +69,55 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 	// Keep the command surface lean — no generated completion subcommand.
 	root.CompletionOptions.DisableDefaultCmd = true
 
-	root.AddCommand(
-		newVersionCmd(),
-		newServeCmd(),
-		NewWorktreeCmd(),
-		NewSetupCmd(),
-		NewInitCmd(),
-		NewCloneCmd(),
-		NewMintCmd(),
+	root.AddGroup(
+		&cobra.Group{ID: groupSetup, Title: "Setup & provisioning:"},
+		&cobra.Group{ID: groupOps, Title: "Runtime & ops:"},
+		&cobra.Group{ID: groupReview, Title: "Review & analysis:"},
+		&cobra.Group{ID: groupServer, Title: "Server:"},
+	)
+
+	addTo := func(groupID string, cmds ...*cobra.Command) {
+		for _, c := range cmds {
+			c.GroupID = groupID
+			root.AddCommand(c)
+		}
+	}
+
+	addTo(groupSetup,
 		NewNewfamCmd(),
-		NewSessionCmd(),
-		NewVerifyCmd(),
+		NewCloneCmd(),
+		NewInitCmd(),
+		NewSetupCmd(),
+		NewWorktreeCmd(),
+		NewMintCmd(),
+		NewCredentialCmd(),
+		NewDoctorCmd(),
 		NewAgentDocsCmd(),
-		mcp.NewMcpCmd(),
+	)
+	addTo(groupOps,
+		NewWaitCmd(),
+		NewForgeWaitCmd(),
 		NewIrcClientCmd(),
 		NewIrcWaitCmd(),
-		NewForgeWaitCmd(),
-		NewWaitCmd(),
-		NewExternalReviewCmd(),
-		NewMetaReviewCmd(),
 		NewScribeCmd(),
 		NewIrclog2SessionsCmd(),
+		NewSessionCmd(),
 		NewWhoamiCmd(),
 		NewMemoryCmd(),
-		NewDoctorCmd(),
-		NewCredentialCmd(),
 	)
+	addTo(groupReview,
+		NewExternalReviewCmd(),
+		NewMetaReviewCmd(),
+		NewVerifyCmd(),
+	)
+	addTo(groupServer,
+		newServeCmd(),
+		mcp.NewMcpCmd(),
+	)
+
+	// version has no group — floats to "Additional Commands" alongside help.
+	root.AddCommand(newVersionCmd())
+
 	return root
 }
 

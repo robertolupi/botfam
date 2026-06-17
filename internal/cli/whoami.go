@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,7 @@ func NewWhoamiCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			info, err := (GitResolver{}).ResolveIdentity(wd)
+			info, err := (famconfig.GitResolver{}).ResolveIdentity(wd)
 			if err != nil {
 				return err
 			}
