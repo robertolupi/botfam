@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/issuegraph"
 	"github.com/robertolupi/botfam/internal/mangle"
 	"github.com/spf13/cobra"
 )
@@ -43,14 +44,14 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
   botfam forge graph --all --format html --out g.html  # interactive d3 page
   botfam forge graph --milestone M7 --format dot | dot -Tsvg > m7.svg`,
 	}
-	build := exportSelectors(cmd, nil)
+	build := exportSelectors(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		switch format {
 		case "mermaid", "dot", "html":
 		default:
 			return fmt.Errorf("--format must be 'mermaid', 'dot', or 'html', got %q", format)
 		}
-		opt, err := build()
+		sc, err := build()
 		if err != nil {
 			return err
 		}
@@ -58,7 +59,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		if err != nil {
 			return err
 		}
-		g, err := mangle.BuildGraph(c, mangle.GraphOptions{ExportOptions: opt, WithMentions: withMentions})
+		g, err := issuegraph.Build(c, issuegraph.Options{Scope: sc, WithMentions: withMentions})
 		if err != nil {
 			return err
 		}
@@ -73,12 +74,12 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		}
 		switch format {
 		case "dot":
-			err = mangle.RenderDOT(g, w)
+			err = issuegraph.RenderDOT(g, w)
 		case "html":
 			issueBase := strings.TrimSuffix(c.BaseURL, "/") + "/" + c.Owner + "/" + c.Repo + "/issues/"
-			err = mangle.RenderHTML(g, issueBase, w)
+			err = issuegraph.RenderHTML(g, issueBase, w)
 		default:
-			err = mangle.RenderMermaid(g, w)
+			err = issuegraph.RenderMermaid(g, w)
 		}
 		if err != nil {
 			return err
@@ -101,9 +102,9 @@ func newForgeLintCmd() *cobra.Command {
 rule set (misattributed work, double-close, merged-but-open). Exits non-zero
 when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 	}
-	build := exportSelectors(cmd, nil)
+	build := exportSelectors(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		opt, err := build()
+		sc, err := build()
 		if err != nil {
 			return err
 		}
@@ -111,7 +112,7 @@ when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 		if err != nil {
 			return err
 		}
-		results, ls, err := mangle.Lint(c, opt, cmd.ErrOrStderr())
+		results, ls, err := mangle.Lint(c, mangle.ExportOptions{Scope: sc, WithCommits: true}, cmd.ErrOrStderr())
 		if err != nil {
 			return err
 		}

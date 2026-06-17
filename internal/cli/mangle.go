@@ -42,17 +42,18 @@ func newForgeClient() (*forge.Client, error) {
 	return forge.NewClient(".", actor)
 }
 
-// exportSelectors adds the scope flags shared by `export` and `eval --all` and
-// returns a builder that validates them into ExportOptions.
-func exportSelectors(cmd *cobra.Command, withCommits *bool) func() (mangle.ExportOptions, error) {
+// exportSelectors adds the scope flags shared by `mangle export/eval`,
+// `forge lint`, and `forge graph`, and returns a builder that validates them
+// into a forge.Scope.
+func exportSelectors(cmd *cobra.Command) func() (forge.Scope, error) {
 	var all bool
 	var milestone, label string
 	var epic int
-	cmd.Flags().BoolVar(&all, "all", false, "export the full forge history")
+	cmd.Flags().BoolVar(&all, "all", false, "the full forge history")
 	cmd.Flags().StringVar(&milestone, "milestone", "", "only issues in this milestone (by title)")
 	cmd.Flags().StringVar(&label, "label", "", "only issues carrying this label")
 	cmd.Flags().IntVar(&epic, "epic", 0, "only this issue and its transitive #N closure")
-	return func() (mangle.ExportOptions, error) {
+	return func() (forge.Scope, error) {
 		n := 0
 		for _, set := range []bool{all, milestone != "", label != "", epic > 0} {
 			if set {
@@ -60,17 +61,12 @@ func exportSelectors(cmd *cobra.Command, withCommits *bool) func() (mangle.Expor
 			}
 		}
 		if n == 0 {
-			return mangle.ExportOptions{}, fmt.Errorf("specify a scope: --all | --milestone | --label | --epic")
+			return forge.Scope{}, fmt.Errorf("specify a scope: --all | --milestone | --label | --epic")
 		}
 		if n > 1 {
-			return mangle.ExportOptions{}, fmt.Errorf("scope selectors are mutually exclusive")
+			return forge.Scope{}, fmt.Errorf("scope selectors are mutually exclusive")
 		}
-		return mangle.ExportOptions{
-			WithCommits: withCommits == nil || *withCommits,
-			Milestone:   milestone,
-			Label:       label,
-			Epic:        epic,
-		}, nil
+		return forge.Scope{All: all, Milestone: milestone, Label: label, Epic: epic}, nil
 	}
 }
 
@@ -81,14 +77,12 @@ func newMangleExportCmd() *cobra.Command {
 		Use:   "export",
 		Short: "Write forge history as Mangle facts",
 	}
-	withCommits := true
-	build := exportSelectors(cmd, &withCommits)
+	build := exportSelectors(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		opt, err := build()
+		sc, err := build()
 		if err != nil {
 			return err
 		}
-		opt.WithCommits = !noCommits
 		c, err := newForgeClient()
 		if err != nil {
 			return err
@@ -102,7 +96,7 @@ func newMangleExportCmd() *cobra.Command {
 			defer f.Close()
 			w = f
 		}
-		st, err := mangle.Export(c, opt, w)
+		st, err := mangle.Export(c, mangle.ExportOptions{Scope: sc, WithCommits: !noCommits}, w)
 		if err != nil {
 			return err
 		}
@@ -122,7 +116,7 @@ func newMangleEvalCmd() *cobra.Command {
 		Use:   "eval",
 		Short: "Evaluate a Mangle rule file against forge facts",
 	}
-	build := exportSelectors(cmd, nil)
+	build := exportSelectors(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if ruleFile == "" {
 			return fmt.Errorf("--file RULES.mg is required")
@@ -130,7 +124,7 @@ func newMangleEvalCmd() *cobra.Command {
 		store := fromStore
 		if store == "" {
 			// no prior store: a scope selector must materialize one first
-			opt, err := build()
+			sc, err := build()
 			if err != nil {
 				return err
 			}
@@ -143,7 +137,7 @@ func newMangleEvalCmd() *cobra.Command {
 				return err
 			}
 			defer os.Remove(f.Name())
-			st, err := mangle.Export(c, opt, f)
+			st, err := mangle.Export(c, mangle.ExportOptions{Scope: sc, WithCommits: true}, f)
 			f.Close()
 			if err != nil {
 				return err

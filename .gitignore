@@ -12,6 +12,3 @@ scratch/
 doc/collab/history.jsonl
 .DS_Store
 .obsidian/
-
-# Generated issue/epic map (regenerate with tools/epic-map.sh)
-docs/epic-map.html

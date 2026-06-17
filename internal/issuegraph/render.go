@@ -1,128 +1,11 @@
-package mangle
-
-// Issue-dependency DAG extraction and rendering. Reuses the same issue
-// selection (selectIssues) and task-list edge parsing (taskRefRe) as the
-// Mangle exporter, so `botfam forge graph` and `botfam forge lint` agree on
-// what an "epic closure" is. Backs wiki CattleEpicLedger / sprint scoping.
+package issuegraph
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
-
-	"github.com/robertolupi/botfam/internal/forge"
 )
-
-// GraphOptions selects the scope (embeds the exporter's selectors) and tunes
-// which edge kinds to include.
-type GraphOptions struct {
-	ExportOptions
-	WithMentions bool // also draw prose `#N` mention edges (dashed), not just task-list subtasks
-}
-
-// Graph is an issue DAG: nodes are issues in scope, edges are issue→issue.
-type Graph struct {
-	Nodes []GraphNode
-	Edges []GraphEdge
-}
-
-// GraphNode is one issue.
-type GraphNode struct {
-	Number int
-	Title  string
-	State  string // "open" | "closed"
-	IsEpic bool   // has at least one in-scope subtask child
-}
-
-// GraphEdge is a directed issue→issue dependency.
-type GraphEdge struct {
-	From, To int
-	Kind     string // "subtask" (task-list `- [ ] #N`) | "mention" (prose `#N`)
-}
-
-// BuildGraph extracts the issue DAG for the selected scope. Pull requests are
-// excluded (this is an issue graph); edges are kept only when both endpoints
-// are in scope.
-func BuildGraph(c *forge.Client, opt GraphOptions) (Graph, error) {
-	issues, err := c.ListAllIssues()
-	if err != nil {
-		return Graph{}, fmt.Errorf("list issues: %w", err)
-	}
-	return buildGraph(issues, opt), nil
-}
-
-// buildGraph is the pure core of BuildGraph (no forge I/O), exercised by tests.
-func buildGraph(issues []*forge.Issue, opt GraphOptions) Graph {
-	var g Graph
-	target := selectIssues(issues, opt.ExportOptions) // nil => all
-	inScope := func(n int) bool { return target == nil || target[n] }
-
-	byNum := make(map[int]*forge.Issue, len(issues))
-	for _, iss := range issues {
-		byNum[iss.Number] = iss
-	}
-
-	// Nodes: in-scope issues that are not PRs.
-	nodes := map[int]*GraphNode{}
-	for _, iss := range issues {
-		if iss.PullRequest != nil || !inScope(iss.Number) {
-			continue
-		}
-		nodes[iss.Number] = &GraphNode{Number: iss.Number, Title: iss.Title, State: iss.State}
-	}
-
-	// Edges: subtask (task-list) always; mention (prose #N) optionally. Both
-	// endpoints must be nodes.
-	seen := map[string]bool{}
-	addEdge := func(from, to int, kind string) {
-		if from == to || nodes[from] == nil || nodes[to] == nil {
-			return
-		}
-		key := fmt.Sprintf("%d->%d:%s", from, to, kind)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		g.Edges = append(g.Edges, GraphEdge{From: from, To: to, Kind: kind})
-		if kind == "subtask" {
-			nodes[from].IsEpic = true
-		}
-	}
-	for n := range nodes {
-		iss := byNum[n]
-		if iss == nil {
-			continue
-		}
-		for child := range refs(taskRefRe, iss.Body) {
-			addEdge(n, child, "subtask")
-		}
-		if opt.WithMentions {
-			subtasks := refs(taskRefRe, iss.Body)
-			for ref := range refs(mentionRe, iss.Body) {
-				if !subtasks[ref] { // a subtask is not also a bare mention
-					addEdge(n, ref, "mention")
-				}
-			}
-		}
-	}
-
-	for _, node := range nodes {
-		g.Nodes = append(g.Nodes, *node)
-	}
-	sort.Slice(g.Nodes, func(i, j int) bool { return g.Nodes[i].Number < g.Nodes[j].Number })
-	sort.Slice(g.Edges, func(i, j int) bool {
-		if g.Edges[i].From != g.Edges[j].From {
-			return g.Edges[i].From < g.Edges[j].From
-		}
-		if g.Edges[i].To != g.Edges[j].To {
-			return g.Edges[i].To < g.Edges[j].To
-		}
-		return g.Edges[i].Kind < g.Edges[j].Kind
-	})
-	return g
-}
 
 // truncTitle clamps a title to n runes for legibility in graph labels.
 func truncTitle(s string, n int) string {
@@ -151,7 +34,6 @@ func RenderMermaid(g Graph, w io.Writer) error {
 			fmt.Fprintf(b, "  i%d --> i%d\n", e.From, e.To)
 		}
 	}
-	// Styling: closed = greyed, epic = bold border.
 	var closed, epics []string
 	for _, n := range g.Nodes {
 		if n.State == "closed" {
@@ -202,12 +84,11 @@ func RenderDOT(g Graph, w io.Writer) error {
 	return err
 }
 
-// RenderHTML writes a self-contained d3.js force-directed view of the graph.
-// issueBase is the URL prefix for an issue (e.g.
-// "http://gitea:3000/botfam/botfam/issues/"); clicking a node opens it. The page
-// has toggles to hide closed/isolated nodes and to show only epics + children —
-// the readable view a hierarchical `dot` layout can't give for a shallow,
-// singleton-heavy graph.
+// RenderHTML writes a self-contained d3.js force-directed view. issueBase is the
+// URL prefix for an issue (e.g. "http://gitea:3000/botfam/botfam/issues/");
+// clicking a node opens it. Toggles hide closed/isolated nodes or show only
+// epics + children — the readable view a hierarchical `dot` layout can't give
+// for a shallow, singleton-heavy graph.
 func RenderHTML(g Graph, issueBase string, w io.Writer) error {
 	type jnode struct {
 		ID    string `json:"id"`

@@ -1,4 +1,4 @@
-package mangle
+package issuegraph
 
 import (
 	"fmt"
@@ -26,10 +26,9 @@ func graphFixture() []*forge.Issue {
 	return []*forge.Issue{epic, child2, child3, other4, pr5}
 }
 
-func TestBuildGraphSubtaskEdgesAndPRExclusion(t *testing.T) {
-	g := buildGraph(graphFixture(), GraphOptions{})
+func TestBuildSubtaskEdgesAndPRExclusion(t *testing.T) {
+	g := build(graphFixture(), Options{})
 
-	// PR #5 must not be a node.
 	for _, n := range g.Nodes {
 		if n.Number == 5 {
 			t.Fatalf("PR #5 should be excluded from the issue graph")
@@ -39,7 +38,6 @@ func TestBuildGraphSubtaskEdgesAndPRExclusion(t *testing.T) {
 		t.Errorf("expected 4 issue nodes (1-4), got %d", len(g.Nodes))
 	}
 
-	// Subtask edges 1->2, 1->3 only (no mention edges by default).
 	want := map[string]bool{"1->2:subtask": true, "1->3:subtask": true}
 	got := map[string]bool{}
 	for _, e := range g.Edges {
@@ -54,7 +52,6 @@ func TestBuildGraphSubtaskEdgesAndPRExclusion(t *testing.T) {
 		t.Errorf("expected 2 subtask edges, got %d: %v", len(g.Edges), got)
 	}
 
-	// #1 is an epic (has subtask children); #3 is closed.
 	for _, n := range g.Nodes {
 		if n.Number == 1 && !n.IsEpic {
 			t.Errorf("#1 should be flagged IsEpic")
@@ -65,8 +62,8 @@ func TestBuildGraphSubtaskEdgesAndPRExclusion(t *testing.T) {
 	}
 }
 
-func TestBuildGraphWithMentions(t *testing.T) {
-	g := buildGraph(graphFixture(), GraphOptions{WithMentions: true})
+func TestBuildWithMentions(t *testing.T) {
+	g := build(graphFixture(), Options{WithMentions: true})
 	var hasMention bool
 	for _, e := range g.Edges {
 		if e.From == 2 && e.To == 4 && e.Kind == "mention" {
@@ -74,13 +71,13 @@ func TestBuildGraphWithMentions(t *testing.T) {
 		}
 	}
 	if !hasMention {
-		t.Errorf("expected a dashed mention edge 2->4 with --with-mentions; edges: %v", g.Edges)
+		t.Errorf("expected a dashed mention edge 2->4 with WithMentions; edges: %v", g.Edges)
 	}
 }
 
-func TestBuildGraphEpicScope(t *testing.T) {
-	// --epic 1 closes over the task list → {1,2,3}; #4 falls out of scope.
-	g := buildGraph(graphFixture(), GraphOptions{ExportOptions: ExportOptions{Epic: 1}})
+func TestBuildEpicScope(t *testing.T) {
+	// Epic 1 closes over the task list → {1,2,3}; #4 falls out of scope.
+	g := build(graphFixture(), Options{Scope: forge.Scope{Epic: 1}})
 	for _, n := range g.Nodes {
 		if n.Number == 4 {
 			t.Errorf("#4 is not in epic #1's closure and should be excluded")
@@ -92,7 +89,7 @@ func TestBuildGraphEpicScope(t *testing.T) {
 }
 
 func TestRenderMermaidAndDOT(t *testing.T) {
-	g := buildGraph(graphFixture(), GraphOptions{})
+	g := build(graphFixture(), Options{})
 
 	var mm strings.Builder
 	if err := RenderMermaid(g, &mm); err != nil {
@@ -118,7 +115,7 @@ func TestRenderMermaidAndDOT(t *testing.T) {
 }
 
 func TestRenderHTML(t *testing.T) {
-	g := buildGraph(graphFixture(), GraphOptions{})
+	g := build(graphFixture(), Options{})
 	var h strings.Builder
 	if err := RenderHTML(g, "http://gitea:3000/botfam/botfam/issues/", &h); err != nil {
 		t.Fatal(err)
@@ -132,7 +129,6 @@ func TestRenderHTML(t *testing.T) {
 			t.Errorf("html missing %q", want)
 		}
 	}
-	// Placeholders must all be substituted.
 	if strings.Contains(out, "__NODES__") || strings.Contains(out, "__LINKS__") || strings.Contains(out, "__ISSUEBASE__") {
 		t.Errorf("unsubstituted placeholder remains in HTML output")
 	}

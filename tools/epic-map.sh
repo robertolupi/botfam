@@ -3,13 +3,13 @@
 # and writes a self-contained interactive d3 page (no build step to view —
 # just open it). Run on demand; wire into CI nightly if you want it committed.
 #
-#   tools/epic-map.sh            # -> docs/epic-map.html
+#   tools/epic-map.sh            # -> wiki/epic-map.html (the wiki checkout)
 #   tools/epic-map.sh out.html   # custom path
 #
 # Uses an installed `botfam` if on PATH, else `go run ./cmd/botfam`.
 set -eu
 
-out="${1:-docs/epic-map.html}"
+out="${1:-wiki/epic-map.html}"
 mkdir -p "$(dirname "$out")"
 
 # Prefer the in-repo source build (the installed botfam may predate
