@@ -1,0 +1,141 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/robertolupi/botfam/internal/mangle"
+	"github.com/spf13/cobra"
+)
+
+// NewMangleCmd builds `botfam mangle` — export forge history as Mangle
+// (temporal Datalog) facts and evaluate rule files against them. Backs the
+// Cattle invariants/hazards work (wiki CattleInvariantsAsLogic). Experimental.
+func NewMangleCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mangle",
+		Short: "Export forge history as Datalog facts and evaluate rule files (experimental)",
+		Long: `Materialize botfam forge history as Mangle (temporal Datalog) facts and
+evaluate rule files against them — the engine for Cattle invariants, crashpoints
+and hazard detection (wiki CattleInvariantsAsLogic).
+
+  botfam mangle export --all --store FILE         # forge -> facts
+  botfam mangle eval --from-store FILE --file RULES.mg
+  botfam mangle eval --all --file RULES.mg        # export to a temp store, then eval
+
+Materialize-then-evaluate: facts are pulled once into a snapshot, never resolved
+lazily during evaluation (the engine re-scans relations, so lazy forge calls
+would multiply RPC).`,
+	}
+	cmd.AddCommand(newMangleExportCmd(), newMangleEvalCmd())
+	return cmd
+}
+
+func newForgeClient() (*forge.Client, error) {
+	actor := ""
+	if id, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
+		actor = id.Actor
+	}
+	return forge.NewClient(".", actor)
+}
+
+func newMangleExportCmd() *cobra.Command {
+	var all, noCommits bool
+	var store string
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Write forge history as Mangle facts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !all {
+				return fmt.Errorf("specify --all (subset selectors come later)")
+			}
+			c, err := newForgeClient()
+			if err != nil {
+				return err
+			}
+			w := cmd.OutOrStdout()
+			if store != "" {
+				f, err := os.Create(store)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				w = f
+			}
+			st, err := mangle.Export(c, mangle.ExportOptions{WithCommits: !noCommits}, w)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(),
+				"exported %d issues, %d pulls, %d commits in %s\n",
+				st.Issues, st.Pulls, st.Commits, st.Duration.Round(time.Millisecond))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "export the full forge history")
+	cmd.Flags().BoolVar(&noCommits, "no-commits", false, "skip per-PR commit/author facts (faster)")
+	cmd.Flags().StringVar(&store, "store", "", "write facts to FILE (default stdout)")
+	return cmd
+}
+
+func newMangleEvalCmd() *cobra.Command {
+	var all bool
+	var fromStore, ruleFile, prefix string
+	cmd := &cobra.Command{
+		Use:   "eval",
+		Short: "Evaluate a Mangle rule file against forge facts",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if ruleFile == "" {
+				return fmt.Errorf("--file RULES.mg is required")
+			}
+			store := fromStore
+			if all {
+				// materialize to a temp store first
+				c, err := newForgeClient()
+				if err != nil {
+					return err
+				}
+				f, err := os.CreateTemp("", "botfam-mangle-*.mg")
+				if err != nil {
+					return err
+				}
+				defer os.Remove(f.Name())
+				st, err := mangle.Export(c, mangle.ExportOptions{WithCommits: true}, f)
+				f.Close()
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "materialized %d issues, %d pulls, %d commits in %s\n",
+					st.Issues, st.Pulls, st.Commits, st.Duration.Round(time.Millisecond))
+				store = f.Name()
+			}
+			if store == "" {
+				return fmt.Errorf("specify --from-store FILE or --all")
+			}
+			results, dur, err := mangle.Eval(ruleFile, store, prefix, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			total := 0
+			for _, r := range results {
+				fmt.Fprintf(out, "== %s: %d ==\n", r.Predicate, len(r.Rows))
+				for _, row := range r.Rows {
+					fmt.Fprintf(out, "  %s\n", row)
+				}
+				total += len(r.Rows)
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "evaluated in %s; %d total rows across %d predicates\n",
+				dur.Round(time.Millisecond), total, len(results))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "materialize the full forge history first, then eval")
+	cmd.Flags().StringVar(&fromStore, "from-store", "", "evaluate against a previously exported fact file")
+	cmd.Flags().StringVar(&ruleFile, "file", "", "Mangle rule file to evaluate")
+	cmd.Flags().StringVar(&prefix, "prefix", "violation", "query head predicates with this name prefix")
+	return cmd
+}

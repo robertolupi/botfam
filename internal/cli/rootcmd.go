@@ -109,6 +109,7 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		NewExternalReviewCmd(),
 		NewMetaReviewCmd(),
 		NewVerifyCmd(),
+		NewMangleCmd(),
 	)
 	addTo(groupServer,
 		newServeCmd(),
