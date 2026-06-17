@@ -10,8 +10,10 @@
 package mangle
 
 import (
+	_ "embed"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -19,6 +21,9 @@ import (
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mangle/interp"
 )
+
+//go:embed rules/forge_lint.mg
+var forgeLintRules string
 
 // ExportOptions selects which slice of forge history to materialize. At most
 // one selector should be set; none means the full history (--all).
@@ -192,6 +197,45 @@ func scopeLabel(opt ExportOptions) string {
 // and the engine wall-clock.
 func Eval(ruleFile, storeFile, prefix string, out io.Writer) ([]interp.Result, time.Duration, error) {
 	return interp.Run(ruleFile, storeFile, prefix, out)
+}
+
+// LintStats reports the forge-linter run timing.
+type LintStats struct {
+	Export   ExportStats
+	EvalTime time.Duration
+}
+
+// Lint materializes a forge snapshot for the selected scope and evaluates the
+// embedded curated rule set (rules/forge_lint.mg) over it — the forge-linter
+// (botfam#389, use case C). Returns per-rule violations.
+func Lint(c *forge.Client, opt ExportOptions, progress io.Writer) ([]interp.Result, LintStats, error) {
+	var ls LintStats
+
+	facts, err := os.CreateTemp("", "botfam-lint-facts-*.mg")
+	if err != nil {
+		return nil, ls, err
+	}
+	defer os.Remove(facts.Name())
+	st, err := Export(c, opt, facts)
+	facts.Close()
+	if err != nil {
+		return nil, ls, err
+	}
+	ls.Export = st
+
+	rules, err := os.CreateTemp("", "botfam-lint-rules-*.mg")
+	if err != nil {
+		return nil, ls, err
+	}
+	defer os.Remove(rules.Name())
+	if _, err := io.WriteString(rules, forgeLintRules); err != nil {
+		return nil, ls, err
+	}
+	rules.Close()
+
+	results, dur, err := interp.Run(rules.Name(), facts.Name(), "violation", progress)
+	ls.EvalTime = dur
+	return results, ls, err
 }
 
 // ---- helpers ----------------------------------------------------------------
