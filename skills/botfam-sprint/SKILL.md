@@ -11,8 +11,10 @@ narrower skills — lean on them rather than duplicating their detail:
 
 - **`forge-autonomy`** — how to review a PR correctly (read the diff at the
   *actual tip*, build + test, never approve on assumption) and how
-  `botfam forge-wait` wakes you on assigned work.
-- **`join-irc`** — how to connect to the fam channel and send/read messages.
+  `botfam wait` wakes you on directed forge activity (do-not-disturb by
+  default).
+- **`join-irc`** — optional: how to join an IRC design sprint. IRC is not the
+  coordination or wake plane; the forge + `botfam wait` are.
 
 Coordination consensus is Gitea PR reviews + native branch protection (PROTOCOL
 §3), not the deleted ccrep bang-verbs. The integration branch is
@@ -38,7 +40,8 @@ Each iteration, in order:
      Snapshot** (distilled goals, decisions, branch, blocker, next step) to the
      forge issue/PR, and crash/exit. The harness supervisor will perform a warm
      restart.
-3. **Open a PR**: Target `botfam-next` and announce it.
+3. **Open a PR**: Target `botfam-next`; the PR is the announcement (@-mention a
+   peer to request review).
 4. **Review**: Review one peer PR, if any is open (full `forge-autonomy`
    discipline). Use peer reviews for critique/judgment, never
    co-authoring/co-execution (**Diversity for Critique**).
@@ -49,8 +52,9 @@ with your own in-flight work, **and** no peer PR left to review. When the only
 remaining issues are blocked on your own PRs merging, don't spin — watch
 `botfam-next` and resume when it advances.
 
-Announce each transition (claim / PR opened / review posted) on the fam channel
-so peers don't double-work. The fam moves fast; a stale plan collides.
+Record each transition (claim / PR opened / review posted) on the forge — the
+assignee field plus issue/PR comments — so peers don't double-work. The fam
+moves fast; a stale plan collides.
 
 ## 0. Set up once
 
@@ -63,8 +67,10 @@ Resolve your own identity and the forge's before touching anything:
 - **Repo**: `botfam/botfam` on the `gitea` remote (`git remote -v`).
 - **Token** (for raw API calls the MCP doesn't cover):
   `~/.botfam/token-botfam-<actor>`.
-- **Connect to IRC** (`join-irc`) and replay history before acting — this is
-  your coordination channel for claims, hand-offs, and merge nudges.
+- **Arm the wake loop**: start `botfam wait` (do-not-disturb by default — forge
+  events wake you when you are assigned or @-mentioned). The forge is your
+  coordination plane for claims, hand-offs, and merge nudges; join IRC
+  (`join-irc`) only if a design sprint is running.
 
 Then survey the board: forge MCP `list_issues {state: open}` and
 `list_pull_requests {state: open}`.
@@ -110,15 +116,15 @@ Pick an issue that:
 
 ## 2. Claim it
 
-Two steps, both required, and check for a race first (scan the channel + the
-assignee API — a peer may have claimed it seconds ago):
+Two steps, both required, and check for a race first (the assignee API — a peer
+may have claimed it seconds ago):
 
 1. Assign on the forge (the control plane): MCP
    `issue_write {method: "update", issue_number: N, assignees: ["<actor>-bot"]}`.
    (For a coupled cluster, claim **all** issues in that cluster).
-2. Announce on IRC:
+2. Record the claim on the forge — a brief issue comment, e.g.
    `Claimed #N (<title>) [coupled cluster: #A, #B, ...]. Fixing + will open a PR.`
-   (or note if decoupled).
+   The assignee + comment is the durable, peer-visible announcement.
 
 ## 3. Resolve it
 
@@ -195,8 +201,8 @@ and Supervise** pattern:
 MCP
 `pull_request_write {method: "create", base: "botfam-next", head: "<branch>", title, body}`.
 Mirror the commit's reasoning in the body and state the verification you ran
-(build/test/-race/vet/gofmt/mdformat all clean). Then announce on IRC with the
-PR number.
+(build/test/-race/vet/gofmt/mdformat all clean). The PR is the announcement;
+@-mention a peer to request review.
 
 ## 5. Review a peer PR
 
@@ -220,9 +226,9 @@ Before approving a doc change, confirm any new links/paths resolve.
 Each iteration, check your open PRs
 (`pull_request_read {method: "get_reviews"}` and the issue comments endpoint).
 On a `REQUEST_CHANGES` or a substantive comment: make the fix, push, and
-re-announce. Approvals **dismiss on a new commit** (branch protection), so
-expect to re-request review after any push. Empty or approving reviews need no
-action.
+re-request review on the PR. Approvals **dismiss on a new commit** (branch
+protection), so expect to re-request review after any push. Empty or approving
+reviews need no action.
 
 ## Avoiding self-collision
 
@@ -250,13 +256,19 @@ git ls-remote gitea refs/heads/botfam-next | cut -c1-7   # poll for change
 
 ## Coordinate, don't collide
 
-IRC is the steering wheel. Use it to:
+The forge is the coordination plane. Use it to:
 
-- announce claims/PRs/reviews so peers don't double-work;
+- announce claims/PRs/reviews via the assignee field and issue/PR comments so
+  peers don't double-work;
 - **nudge merges** — your approved PRs unblock both your follow-ups and other
-  agents' issues; ask the operator (who merges) to prioritize them;
-- flag merge-order or conflict risks you notice between open PRs;
-- hand off when you're blocked or out of non-conflicting work.
+  agents' issues; @-mention the operator (who merges) on the PR to prioritize
+  them;
+- flag merge-order or conflict risks you notice as comments on the affected
+  PRs;
+- hand off when you're blocked or out of non-conflicting work (a Handover
+  Snapshot on the issue/PR).
+
+IRC is opt-in and only for design sprints — not for backlog coordination.
 
 When you think a PR conflicts, **verify before crying wolf** — a Gitea
 `mergeable: false` can be a transient recompute after the base moved. Confirm
