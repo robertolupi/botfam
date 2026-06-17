@@ -50,12 +50,19 @@ type RootInfo struct {
 }
 
 // ResolveIdentity resolves the full git-specific identity including root set.
+// Identity is now config-backed (#404): the fam dir is the parent of the git
+// worktree top-level, and the fam Name/Actor/role come from the matched
+// `[repo.<k>]` stanza in ~/.botfam/config.toml. There is no home-dir fam
+// synthesis: when no stanza matches, Name falls back to the fam-dir basename and
+// the role stays Unknown (permissive callers handle that; the strict ResolveFam
+// path fails loud via ResolveConfig).
 func (r GitResolver) ResolveIdentity(workDir string) (RootInfo, error) {
 	repoName := ResolveRepoName(workDir)
 	var parsedActor string
-	var unifiedRoot string
-	var unifiedName string
+	var famDir, name string
 	var gitRoot string
+	var haveReg bool
+	var reg Registry
 
 	if absDir, err := filepath.Abs(workDir); err == nil {
 		if evalDir, err := filepath.EvalSymlinks(absDir); err == nil {
@@ -77,31 +84,26 @@ func (r GitResolver) ResolveIdentity(workDir string) (RootInfo, error) {
 			}
 			curr = filepath.Dir(curr)
 		}
-		// Bare-name worktrees: the wt- prefix is retired (agent name =
-		// basename). When the prefix-based ParseActor finds nothing, accept the
-		// worktree-root basename if it is a declared [agent.<name>]/[user.<name>]
-		// in the canonical fam.toml. Locate+read it through the shared famconfig
-		// primitives — the one fam.toml finder every consumer uses (#252) —
-		// rather than re-deriving <fam-dir>/fam.toml here. ResolveFam isn't used
-		// directly: it fail-closes on [user.<name>]/base checkouts, which Resolve
-		// must still derive a Root/Name for. (FindFamTOMLPath, not
-		// LoadFamRegistry, so we don't recurse back through Resolve.)
 		if gitRoot != "" {
-			if famTOMLPath := FindFamTOMLPath(workDir, r.Env); famTOMLPath != "" {
-				if reg, err := ReadRegistry(famTOMLPath); err == nil {
-					famDir := filepath.Dir(famTOMLPath)
+			famDir = filepath.Dir(gitRoot)
+			// Bare-name worktrees (the wt- prefix is retired): accept the
+			// worktree-root basename when it is a declared [agent.<name>]/
+			// [user.<name>] in the matched config stanza.
+			if cfg, err := LoadConfig(); err == nil {
+				if key, rc, ok := MatchRepo(cfg, workDir); ok {
+					reg = BuildRegistry(cfg, key, rc, workDir)
+					haveReg = true
+					name = reg.Name
 					base := filepath.Base(gitRoot)
 					if _, ok := reg.Agents[base]; ok {
 						parsedActor = base
 					} else if _, ok := reg.Users[base]; ok {
 						parsedActor = base
 					}
-					unifiedRoot = famDir
-					unifiedName = reg.Name
-					if unifiedName == "" {
-						unifiedName = filepath.Base(famDir)
-					}
 				}
+			}
+			if name == "" {
+				name = filepath.Base(famDir)
 			}
 		}
 	}
@@ -114,55 +116,26 @@ func (r GitResolver) ResolveIdentity(workDir string) (RootInfo, error) {
 	sum := sha256.Sum256([]byte(strings.Join(roots, "\n")))
 	id := hex.EncodeToString(sum[:])[:12]
 
-	var role ActorRole = RoleUnknown
-	var source Source = SourceWorkDir
-	var tomlPath string
-
-	if unifiedRoot != "" {
-		tomlPath = filepath.Join(unifiedRoot, "fam.toml")
-		if reg, err := ReadRegistry(tomlPath); err == nil {
-			if _, ok := reg.Agents[parsedActor]; ok {
-				role = RoleAgent
-			} else if _, ok := reg.Users[parsedActor]; ok {
-				role = RoleUser
-			} else {
-				// empty actor: check if base checkout
-				if gitRoot != "" && gitRoot == unifiedRoot {
-					role = RoleBase
-				}
-			}
+	role := RoleUnknown
+	if haveReg {
+		if _, ok := reg.Agents[parsedActor]; ok {
+			role = RoleAgent
+		} else if _, ok := reg.Users[parsedActor]; ok {
+			role = RoleUser
+		} else if gitRoot != "" && gitRoot == famDir {
+			role = RoleBase
 		}
-		return RootInfo{
-			FamIdentity: FamIdentity{
-				FamDir:      unifiedRoot,
-				FamTOMLPath: tomlPath,
-				Name:        unifiedName,
-				Actor:       parsedActor,
-				ActorRole:   role,
-				Source:      source,
-			},
-			RootSet:   roots,
-			RootSetID: id,
-		}, nil
 	}
 
-	name := "fam-" + id
-	if suffix := getenv(r.Env, "BOTFAM_FAM"); suffix != "" {
-		name += "-" + sanitizeSuffix(suffix)
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return RootInfo{}, err
-	}
-	famDir := filepath.Join(home, ".botfam", name)
+	cfgPath, _ := ConfigPath()
 	return RootInfo{
 		FamIdentity: FamIdentity{
 			FamDir:      famDir,
-			FamTOMLPath: "",
+			FamTOMLPath: cfgPath,
 			Name:        name,
 			Actor:       parsedActor,
-			ActorRole:   RoleUnknown,
-			Source:      SourceGitRoots,
+			ActorRole:   role,
+			Source:      SourceWorkDir,
 		},
 		RootSet:   roots,
 		RootSetID: id,
@@ -308,36 +281,6 @@ func ValidateHistoryPath(path string) error {
 	return nil
 }
 
-// getenv reads key from an os.Environ()-style slice. A non-nil env is
-// authoritative: when key is absent it returns "" and does NOT fall back to the
-// process environment — that fallback was "known issue L2", which forced tests to
-// t.Setenv("COLLAB_ACTOR","") to pin the real env. A nil env still means "use the
-// process environment". This matches famctx.lookupEnv's semantics.
-func getenv(env []string, key string) string {
-	if env != nil {
-		for _, item := range env {
-			if k, v, ok := strings.Cut(item, "="); ok && k == key {
-				return v
-			}
-		}
-		return ""
-	}
-	return os.Getenv(key)
-}
-
-func sanitizeSuffix(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			b.WriteRune(r)
-		}
-	}
-	if b.Len() == 0 {
-		return "default"
-	}
-	return b.String()
-}
-
 func unique(xs []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -351,40 +294,18 @@ func unique(xs []string) []string {
 }
 
 func makeNoGitHistoryError() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return errors.New("not inside a fam worktree and no git history could be used to derive a fam root; run from a member worktree or run botfam setup")
-	}
-	botfamDir := filepath.Join(home, ".botfam")
-	entries, err := os.ReadDir(botfamDir)
-	if err != nil {
-		return errors.New("not inside a fam worktree and no git history could be used to derive a fam root; run from a member worktree or run botfam setup")
+	generic := errors.New("not inside a fam worktree and no git history could be used to derive a fam root; run from a member worktree or run botfam setup")
+	cfg, err := LoadConfig()
+	if err != nil || len(cfg.Repos) == 0 {
+		return generic
 	}
 
 	var sb strings.Builder
 	sb.WriteString("not inside a fam worktree and no git history could be used to derive a fam root.\n")
 	sb.WriteString("To fix this, run from inside a member worktree or run 'botfam setup'.\n\n")
-
-	var fams []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		tomlPath := filepath.Join(botfamDir, entry.Name(), "fam.toml")
-		if _, err := os.Stat(tomlPath); err == nil {
-			reg, err := ReadRegistry(tomlPath)
-			if err == nil {
-				fams = append(fams, fmt.Sprintf("  - %s (at ~/.botfam/%s)\n    Member repos:\n      * %s",
-					reg.Name, entry.Name(), strings.Join(reg.RepoPaths, "\n      * ")))
-			}
-		}
-	}
-
-	if len(fams) > 0 {
-		sb.WriteString("Available families under ~/.botfam:\n")
-		sb.WriteString(strings.Join(fams, "\n") + "\n")
-	} else {
-		sb.WriteString("No configured families found under ~/.botfam. Run 'botfam setup' to initialize one.\n")
+	sb.WriteString("Configured fams in ~/.botfam/config.toml:\n")
+	for key, rc := range cfg.Repos {
+		fmt.Fprintf(&sb, "  - %s (path %s)\n", key, rc.Path)
 	}
 	return errors.New(strings.TrimSuffix(sb.String(), "\n"))
 }

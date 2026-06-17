@@ -11,66 +11,6 @@ import (
 	"github.com/robertolupi/botfam/internal/forge"
 )
 
-const sampleFamTOML = `name       = "deep-cuts"
-slug       = "dc"
-forge_url  = "http://gitea.home.rlupi.com:3000/"
-repository = "deep-cuts/deep-cuts"
-roster     = ["claude", "agy", "rlupi"]
-
-[agent.claude]
-harness    = "claude-code"
-forge_user = "claude-bot"
-
-[agent.agy]
-harness    = "antigravity"
-forge_user = "agy-bot"
-email      = "roberto.lupi+agy@gmail.com"
-
-[user.rlupi]
-forge_user = "rlupi"
-`
-
-func TestReadRegistryAgentTables(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "fam.toml")
-	if err := os.WriteFile(path, []byte(sampleFamTOML), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	reg, err := ReadRegistry(path)
-	if err != nil {
-		t.Fatalf("ReadRegistry: %v", err)
-	}
-	if reg.Name != "deep-cuts" || reg.Slug != "dc" {
-		t.Errorf("name/slug = %q/%q, want deep-cuts/dc", reg.Name, reg.Slug)
-	}
-	if reg.ForgeURL != "http://gitea.home.rlupi.com:3000/" {
-		t.Errorf("forge_url = %q", reg.ForgeURL)
-	}
-	if reg.Repository != "deep-cuts/deep-cuts" {
-		t.Errorf("repository = %q", reg.Repository)
-	}
-	claude, ok := reg.Agents["claude"]
-	if !ok {
-		t.Fatalf("agent.claude missing; agents=%v", reg.Agents)
-	}
-	if claude.Name != "claude" || claude.Harness != "claude-code" || claude.ForgeUser != "claude-bot" {
-		t.Errorf("agent.claude = %+v", claude)
-	}
-	if claude.IsUser {
-		t.Errorf("agent.claude should not be IsUser")
-	}
-	if agy := reg.Agents["agy"]; agy.Email != "roberto.lupi+agy@gmail.com" {
-		t.Errorf("agent.agy email = %q", agy.Email)
-	}
-	rlupi, ok := reg.Users["rlupi"]
-	if !ok || !rlupi.IsUser || rlupi.Name != "rlupi" {
-		t.Errorf("user.rlupi = %+v ok=%v", rlupi, ok)
-	}
-	if _, isAgent := reg.Agents["rlupi"]; isAgent {
-		t.Errorf("rlupi must be a user, not an agent")
-	}
-}
-
 // gitInit creates a real git repo at dir so ResolveFam's `git rev-parse
 // --show-toplevel` resolves to it.
 func gitInit(t *testing.T, dir string) {
@@ -92,17 +32,67 @@ func gitInit(t *testing.T, dir string) {
 	}
 }
 
-// resolveFamFixture writes fam.toml at famDir and git-inits famDir/<worktree>.
+// deepCutsConfig is the canonical test config: the deep-cuts fam ([repo.deep-cuts]
+// slug dc) registered at famDir, with the standard roster.
+func deepCutsConfig(famDir string) famconfig.Config {
+	return famconfig.Config{
+		ForgeURL: "http://gitea.home.rlupi.com:3000/",
+		Agents: map[string]famconfig.AgentConfig{
+			"claude": {Harness: "claude-code", ForgeUser: "claude-bot"},
+			"agy":    {Harness: "antigravity", ForgeUser: "agy-bot", Email: "roberto.lupi+agy@gmail.com"},
+		},
+		Users: map[string]famconfig.AgentConfig{"rlupi": {ForgeUser: "rlupi"}},
+		Repos: map[string]famconfig.RepoConfig{
+			"deep-cuts": {Path: famDir, Slug: "dc", Repository: "deep-cuts/deep-cuts"},
+		},
+	}
+}
+
+// resolveFamFixture points BOTFAM_CONFIG at a temp config registering the
+// deep-cuts fam at a fresh famDir, and returns famDir. Callers git-init the
+// worktrees under it.
 func resolveFamFixture(t *testing.T) (famDir string) {
 	t.Helper()
 	famDir = t.TempDir()
 	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
 		famDir = eval
 	}
-	if err := os.WriteFile(filepath.Join(famDir, "fam.toml"), []byte(sampleFamTOML), 0o644); err != nil {
+	cfgDir := t.TempDir()
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(cfgDir, "config.toml"))
+	if err := famconfig.WriteConfig(deepCutsConfig(famDir)); err != nil {
 		t.Fatal(err)
 	}
 	return famDir
+}
+
+func TestRegistryAgentTables(t *testing.T) {
+	famDir := t.TempDir()
+	cfg := deepCutsConfig(famDir)
+	reg := famconfig.BuildRegistry(cfg, "deep-cuts", cfg.Repos["deep-cuts"], famDir)
+
+	if reg.Name != "deep-cuts" || reg.Slug != "dc" {
+		t.Errorf("name/slug = %q/%q, want deep-cuts/dc", reg.Name, reg.Slug)
+	}
+	if reg.ForgeURL != "http://gitea.home.rlupi.com:3000/" {
+		t.Errorf("forge_url = %q", reg.ForgeURL)
+	}
+	if reg.Repository != "deep-cuts/deep-cuts" {
+		t.Errorf("repository = %q", reg.Repository)
+	}
+	claude, ok := reg.Agents["claude"]
+	if !ok || claude.Name != "claude" || claude.Harness != "claude-code" || claude.ForgeUser != "claude-bot" || claude.IsUser {
+		t.Errorf("agent.claude = %+v ok=%v", claude, ok)
+	}
+	if agy := reg.Agents["agy"]; agy.Email != "roberto.lupi+agy@gmail.com" {
+		t.Errorf("agent.agy email = %q", agy.Email)
+	}
+	rlupi, ok := reg.Users["rlupi"]
+	if !ok || !rlupi.IsUser || rlupi.Name != "rlupi" {
+		t.Errorf("user.rlupi = %+v ok=%v", rlupi, ok)
+	}
+	if _, isAgent := reg.Agents["rlupi"]; isAgent {
+		t.Errorf("rlupi must be a user, not an agent")
+	}
 }
 
 func TestResolveFamAgentWorktree(t *testing.T) {
@@ -158,7 +148,7 @@ func TestResolveFamRefusesBaseCheckout(t *testing.T) {
 }
 
 // TestResolverBareNameActor: the core Resolver (used by whoami and friends)
-// resolves a bare-name worktree's actor against the fam.toml roster (the wt-
+// resolves a bare-name worktree's actor against the merged roster (the wt-
 // prefix is retired); the base/main checkout (not a roster member) gets none.
 func TestResolverBareNameActor(t *testing.T) {
 	famDir := resolveFamFixture(t)
@@ -187,15 +177,8 @@ func TestResolverBareNameActor(t *testing.T) {
 // TestForgeIdentityParity is the #231/#252 acceptance test: the three
 // independent consumers of fam identity resolve IDENTICAL forge_url / owner/repo
 // / token / actor for one worktree, proving the "one resolver" goal (no #183
-// divergence). The consumers exercised:
-//
-//   - `botfam credential`     → famconfig.ResolveFam (via fam.ResolveFam)
-//   - the forge MCP client    → forge.NewClient
-//   - whoami / orient         → fam.Resolver.Resolve
-//
-// All env short-circuits (GITEA_*) are cleared so every path is
-// forced through fam.toml — if any consumer re-derived identity its own way,
-// the asserted values would drift apart.
+// divergence). All env short-circuits (GITEA_*) are cleared so every path is
+// forced through ~/.botfam/config.toml.
 func TestForgeIdentityParity(t *testing.T) {
 	famDir := resolveFamFixture(t)
 	wt := filepath.Join(famDir, "claude") // [agent.claude], harness claude-code
@@ -240,13 +223,13 @@ func TestForgeIdentityParity(t *testing.T) {
 		t.Errorf("forge_url diverges: NewClient=%q ResolveFam=%q", cl.BaseURL, wantBase)
 	}
 
-	// owner/repo parity (fam.toml repository is "owner/repo").
+	// owner/repo parity (config repository is "owner/repo").
 	parts := strings.SplitN(rf.Repository, "/", 2)
 	if len(parts) != 2 {
 		t.Fatalf("repository %q is not owner/repo", rf.Repository)
 	}
 	if cl.Owner != parts[0] || cl.Repo != parts[1] {
-		t.Errorf("owner/repo diverges: NewClient=%q/%q fam.toml=%q/%q", cl.Owner, cl.Repo, parts[0], parts[1])
+		t.Errorf("owner/repo diverges: NewClient=%q/%q config=%q/%q", cl.Owner, cl.Repo, parts[0], parts[1])
 	}
 
 	// token parity: NewClient's token == contents of the file ResolveFam points at.
@@ -270,35 +253,41 @@ func TestForgeIdentityParity(t *testing.T) {
 	}
 }
 
-// TestResolverLegacyNoFamTOML guards the non-agent escape hatch #252 must keep
-// intact: a repo with NO fam.toml still resolves a (hashed) fam root via git
-// history rather than erroring.
-func TestResolverLegacyNoFamTOML(t *testing.T) {
-	famDir := t.TempDir() // deliberately no fam.toml
+// TestResolverNoConfig: a repo with NO matching [repo.<k>] stanza still resolves
+// a fam dir (parent of the git toplevel) and an actor without erroring — the
+// permissive path used by whoami/doctor; only the strict ResolveFam fails loud.
+func TestResolverNoConfig(t *testing.T) {
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+	// Isolated, nonexistent config: no stanza matches.
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
 	wt := filepath.Join(famDir, "legacy")
 	gitInit(t, wt)
-	for _, k := range []string{"BOTFAM_FAM"} {
-		t.Setenv(k, "")
-	}
 
 	info, err := (famconfig.GitResolver{}).ResolveIdentity(wt)
 	if err != nil {
-		t.Fatalf("Resolve with no fam.toml should fall back, got: %v", err)
+		t.Fatalf("Resolve with no config should not error, got: %v", err)
 	}
 	if info.Actor != "" {
-		t.Errorf("actor = %q, want empty (no fam.toml roster)", info.Actor)
+		t.Errorf("actor = %q, want empty (no roster)", info.Actor)
 	}
-	if !strings.HasPrefix(info.Name, "fam-") {
-		t.Errorf("name = %q, want hashed fam-<id> fallback", info.Name)
+	if info.FamDir != famDir {
+		t.Errorf("famDir = %q, want %q", info.FamDir, famDir)
+	}
+	if info.Name != filepath.Base(famDir) {
+		t.Errorf("name = %q, want fam-dir basename %q", info.Name, filepath.Base(famDir))
 	}
 }
 
-func TestResolveFamMissingFamTOML(t *testing.T) {
-	famDir := t.TempDir() // no fam.toml
+func TestResolveFamNoConfig(t *testing.T) {
+	famDir := t.TempDir()
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml")) // nonexistent
 	wt := filepath.Join(famDir, "claude")
 	gitInit(t, wt)
 
 	if _, err := ResolveFam(wt); err == nil {
-		t.Fatal("expected loud error when fam.toml is absent, got nil")
+		t.Fatal("expected loud error when no config stanza matches, got nil")
 	}
 }

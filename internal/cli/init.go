@@ -14,8 +14,9 @@ const initHelp = `Usage:
   botfam init [dir]
 
 Initialize a new botfam project (greenfield).
-It creates the specified directory, scaffolds a placeholder fam.toml,
-and initializes a fresh Git repository in the "main" subdirectory.
+It creates the specified directory and initializes a fresh Git repository in the
+"main" subdirectory. Configuration is global (~/.botfam/config.toml); run
+'botfam setup <name>' from the main checkout to register the fam.
 `
 
 // NewInitCmd builds the `botfam init` Cobra command.
@@ -54,38 +55,9 @@ func runInit(dir string, out io.Writer) error {
 		return fmt.Errorf("failed to create project directory: %w", err)
 	}
 
-	// Scaffold fam.toml if not already present
-	tomlPath := filepath.Join(absDir, "fam.toml")
-	if _, err := os.Stat(tomlPath); os.IsNotExist(err) {
-		placeholderTOML := fmt.Sprintf(`name       = %q
-slug       = %q
-forge_url  = ""
-repository = ""
-
-# AI agents - uncomment and configure as needed
-# [agent.claude]
-# harness    = "claude-code"
-# forge_user = "claude-bot"
-
-# [agent.agy]
-# harness    = "antigravity"
-# forge_user = "agy-bot"
-
-# [agent.codex]
-# harness    = "codex"
-# forge_user = "codex-bot"
-
-# Humans - uncomment and configure as needed
-# [user.rlupi]
-# forge_user = "rlupi"
-`, name, name)
-		if err := os.WriteFile(tomlPath, []byte(placeholderTOML), 0o644); err != nil {
-			return fmt.Errorf("failed to scaffold fam.toml: %w", err)
-		}
-		fmt.Fprintf(out, "Scaffolded placeholder fam.toml at %s\n", tomlPath)
-	} else {
-		fmt.Fprintf(out, "fam.toml already exists at %s\n", tomlPath)
-	}
+	// Configuration is now global (~/.botfam/config.toml), not a per-fam
+	// fam.toml (#404). `botfam setup <name>` (run from the main checkout) writes
+	// the [repo.<name>] stanza; greenfield init just lays out the directory.
 
 	// Initialize Git repository in main/
 	mainDir := filepath.Join(absDir, "main")
@@ -105,10 +77,10 @@ repository = ""
 	// Print next steps
 	fmt.Fprintln(out, "\nbotfam initialization complete.")
 	fmt.Fprintln(out, "Next steps:")
-	fmt.Fprintln(out, "  1. Open fam.toml and configure your forge_url, repository, and agents/users roster.")
-	fmt.Fprintln(out, "  2. Create the remote repository on your forge (Gitea/Forgejo).")
-	fmt.Fprintf(out, "  3. Add the remote in your main checkout:\n     cd %s && git remote add origin <url>\n", mainDir)
-	fmt.Fprintf(out, "  4. Run setup to configure your environment and worktrees:\n     botfam setup %s\n", mainDir)
+	fmt.Fprintln(out, "  1. Create the remote repository on your forge (Gitea/Forgejo).")
+	fmt.Fprintf(out, "  2. Add the remote in your main checkout:\n     cd %s && git remote add origin <url>\n", mainDir)
+	fmt.Fprintf(out, "  3. Configure forge_url + global [agent.<name>] roster in ~/.botfam/config.toml.\n")
+	fmt.Fprintf(out, "  4. Register this fam (writes the [repo.<name>] stanza):\n     botfam setup %s\n", name)
 
 	return nil
 }

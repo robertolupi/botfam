@@ -23,7 +23,7 @@ func TestNewClientNoLegacyFallback(t *testing.T) {
 		}
 	}
 	t.Setenv("HOME", home)
-	t.Setenv("BOTFAM_FAM", "testfam")
+	t.Setenv("BOTFAM_CONFIG", "") // config resolves under the temp HOME (absent)
 	t.Setenv("GITEA_TOKEN", "")
 	t.Setenv("GITEA_URL", "http://example.test")
 	t.Setenv("GITEA_OWNER", "o")

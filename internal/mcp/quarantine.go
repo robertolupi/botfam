@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -14,23 +12,22 @@ import (
 	"github.com/robertolupi/botfam/internal/famctx"
 )
 
-// famTomlPresent reports whether workDir belongs to a migrated fam: a fam.toml
-// exists at the fam directory (the parent of the worktree root), the same
-// location famconfig.ResolveFam reads. This distinguishes a migrated fam — where a
+// famConfigured reports whether workDir belongs to a registered fam: a
+// `[repo.<k>]` stanza in ~/.botfam/config.toml whose path is an ancestor of
+// workDir resolves (#404). This distinguishes a registered fam — where a
 // ResolveFam failure means "wrong/base/user worktree" and must quarantine — from
-// an un-migrated fam with no fam.toml, where the legacy membership check still
-// applies.
-func famTomlPresent(workDir string) bool {
-	root := famconfig.RepoPath(workDir)
-	_, err := os.Stat(filepath.Join(filepath.Dir(root), "fam.toml"))
+// an unregistered dir, where the quarantine gate must not engage.
+func famConfigured(workDir string) bool {
+	_, err := famconfig.ResolveConfig(workDir)
 	return err == nil
 }
 
 // Fail-closed serve gate (#191, proposal-unified-fam-config §4.6).
 //
 // When `botfam serve` runs in a worktree that is NOT a valid agent worktree —
-// famconfig.ResolveFam(workDir) returns an error (not inside a git worktree, no/invalid
-// fam.toml, a [user.<name>] human checkout, or the base/main checkout) — the
+// famconfig.ResolveFam(workDir) returns an error (not inside a git worktree, no
+// matching [repo.<k>] stanza in ~/.botfam/config.toml, a [user.<name>] human
+// checkout, or the base/main checkout) — the
 // server must refuse to do real work. It still starts (so the harness gets a
 // surface), but the only affordance is a quarantine resource set that tells the
 // agent to report to its operator instead of self-fixing.
@@ -75,8 +72,9 @@ func renderProblemMarkdown(workDir string, cause error) []byte {
 	b.WriteString("\n## What this means\n\n")
 	b.WriteString("`famconfig.ResolveFam` (the single source of truth for fam identity) could not accept\n")
 	b.WriteString("this worktree as a declared `[agent.<name>]`. Causes include: not inside a git\n")
-	b.WriteString("worktree, a missing/unreadable/invalid `fam.toml`, a `[user.<name>]` (human)\n")
-	b.WriteString("checkout, or the base/`main` checkout. None of these are agent runtime contexts.\n")
+	b.WriteString("worktree, no matching `[repo.<k>]` stanza in `~/.botfam/config.toml`, a\n")
+	b.WriteString("`[user.<name>]` (human) checkout, or the base/`main` checkout. None of these are\n")
+	b.WriteString("agent runtime contexts.\n")
 
 	b.WriteString("\n## Report this (template)\n\n")
 	b.WriteString("```\n")

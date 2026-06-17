@@ -273,7 +273,8 @@ func resolveWorkDir(ctx context.Context, cwd, pwd string, requestRoots rootsRequ
 	return ".", "default"
 }
 
-// famResolvable reports whether dir sits inside a fam (a fam.toml is reachable).
+// famResolvable reports whether dir sits inside a registered fam (a matching
+// [repo.<k>] stanza in ~/.botfam/config.toml resolves).
 func famResolvable(dir string) bool {
 	c, err := famctx.Resolve(context.Background(), famctx.Inputs{WorkDir: dir, Mode: famctx.ModeLocate})
 	return err == nil && c.Slug != ""
@@ -305,13 +306,14 @@ func discoveryHealth(workDir string, t docs.TemplateData, harness, declaredHarne
 		checks = append(checks, healthCheck{"actor", "ok", ""})
 	}
 
-	// Harness: when the fam.toml-declared harness disagrees with the one actually
-	// detected at runtime (MCP clientInfo / inherited env), the declaration is
-	// wrong. Token + forge access follow the detected harness, so surface the
-	// mismatch instead of letting it silently drive a divergent token path (#371).
+	// Harness: when the config.toml-declared harness disagrees with the one
+	// actually detected at runtime (MCP clientInfo / inherited env), the
+	// declaration is wrong. Token + forge access follow the detected harness, so
+	// surface the mismatch instead of letting it silently drive a divergent token
+	// path (#371).
 	if declaredHarness != "" && harness != "" && famconfig.CanonicalHarness(declaredHarness) != harness {
 		checks = append(checks, healthCheck{"harness", "warn",
-			fmt.Sprintf("fam.toml declares harness %q but this is running under %q; update the [agent.<name>] harness to match (token + forge access use the detected harness)", declaredHarness, harness)})
+			fmt.Sprintf("config.toml declares harness %q but this is running under %q; update the [agent.<name>] harness to match (token + forge access use the detected harness)", declaredHarness, harness)})
 	}
 
 	// Forge token: the canonical per-harness token (~/.botfam/token-<harness>),

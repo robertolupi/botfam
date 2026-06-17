@@ -50,37 +50,41 @@ func newTestServer(t *testing.T) (*server, string) {
 	return &server{}, root
 }
 
+// writeMockRegistry points BOTFAM_CONFIG at baseDir/config.toml and registers a
+// [repo.<name>] stanza (path=baseDir) plus the standard test roster (#404).
 func writeMockRegistry(t *testing.T, baseDir, workDir string, name string) {
 	t.Helper()
-	stores, err := famconfig.GitObjectStores(workDir)
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(baseDir, "config.toml"))
+	registerFam(t, name, baseDir, map[string]famconfig.AgentConfig{
+		"alice":     {Harness: "claude-code"},
+		"bob":       {Harness: "claude-code"},
+		"agy":       {Harness: "antigravity"},
+		"someactor": {Harness: "claude-code"},
+		"myrepo":    {Harness: "claude-code"},
+	})
+}
+
+// registerFam merges a [repo.<name>] stanza (path=baseDir) and the given agents
+// into the active BOTFAM_CONFIG, creating the file if needed. opts lets a test
+// set per-repo overrides (e.g. wiki projections).
+func registerFam(t *testing.T, name, baseDir string, agents map[string]famconfig.AgentConfig, opts ...func(*famconfig.RepoConfig)) {
+	t.Helper()
+	cfg, err := famconfig.LoadOrInitConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var storesStr []string
-	for _, s := range stores {
-		storesStr = append(storesStr, fmt.Sprintf("%q", s))
+	if cfg.Agents == nil {
+		cfg.Agents = map[string]famconfig.AgentConfig{}
 	}
-	tomlContent := fmt.Sprintf(`name = %q
-roster = ["alice", "bob", "agy", "someactor", "myrepo"]
-object_stores = [%s]
-
-[agent.alice]
-harness = "claude-code"
-
-[agent.bob]
-harness = "claude-code"
-
-[agent.agy]
-harness = "antigravity"
-
-[agent.someactor]
-harness = "claude-code"
-
-[agent.myrepo]
-harness = "claude-code"
-`, name, strings.Join(storesStr, ", "))
-
-	if err := os.WriteFile(filepath.Join(baseDir, "fam.toml"), []byte(tomlContent), 0644); err != nil {
+	for k, v := range agents {
+		cfg.Agents[k] = v
+	}
+	rc := famconfig.RepoConfig{Path: baseDir}
+	for _, o := range opts {
+		o(&rc)
+	}
+	cfg.UpsertRepo(name, rc)
+	if err := famconfig.WriteConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -264,39 +268,13 @@ func setupTestWorktree(t *testing.T, baseDir, name, actor string) string {
 	return wtDir
 }
 
-func TestIdentityOptionalToolsWithoutIdentity(t *testing.T) {
-	s, _ := newTestServer(t)
-	// A directory with no wt-/botfam- prefix yields no directory actor.
-	base := t.TempDir()
-	plainDir := setupTestWorktree(t, base, "myrepo", "someactor")
-
-	t.Setenv("HOME", base)
-	info, err := (famconfig.GitResolver{Env: []string{"HOME=" + base}}).ResolveIdentity(plainDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(info.FamDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeMockRegistry(t, info.FamDir, plainDir, "mockfam")
-
-	// worktree_sync does not use the calling actor.
-	if _, err := s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": plainDir}); err != nil {
-		t.Fatalf("worktree_sync without identity failed: %v", err)
-	}
-	if s.actor != "" {
-		t.Errorf("identity-optional call must not bind an actor, got %q", s.actor)
-	}
-
-	// Identity-requiring tools must still fail without an identity.
-	_, err = s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": plainDir})
-	if err == nil {
-		t.Fatal("expected identity error for irc_read without identity")
-	}
-	if !strings.Contains(err.Error(), "identity required") {
-		t.Errorf("expected identity-required error, got %q", err.Error())
-	}
-}
+// (The former TestIdentityOptionalToolsWithoutIdentity tested an identity-optional
+// tool running in a fam *member* worktree that was not itself config-resolvable —
+// the object-store-membership-without-fam.toml state. #404 collapses membership
+// into config resolvability, so that state no longer exists: a non-agent worktree
+// in a configured fam is quarantined (see quarantine_test.go), and an unconfigured
+// dir fails membership. Identity-optional tool behaviour in the valid agent path
+// stays covered below.)
 
 func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
 	s, _ := newTestServer(t)
@@ -1143,11 +1121,10 @@ func TestMcpProjections(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
 
-	// Declare a projection in fam.toml.
-	famToml := "name = \"testfam\"\nwiki_projections = [\"reviews:review-*\"]\n"
-	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte(famToml), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// Declare a projection on the resolved fam's stanza.
+	registerFam(t, "mockfam", root, nil, func(rc *famconfig.RepoConfig) {
+		rc.WikiProjections = []string{"reviews:review-*"}
+	})
 	// Local wiki cache: two reviews + one unrelated page.
 	wikiDir := filepath.Join(wtDir, "wiki")
 	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
@@ -1203,11 +1180,7 @@ func TestMcpDefaultMemoryProjection(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chdir(oldCwd) })
 
-	// Write fam.toml with NO projections.
-	famToml := "name = \"testfam\"\n"
-	if err := os.WriteFile(filepath.Join(root, "fam.toml"), []byte(famToml), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// The mock fam declares no projections, so the default memory projection applies.
 	// Local wiki cache: memory pages and home.
 	wikiDir := filepath.Join(wtDir, "wiki")
 	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
@@ -1281,16 +1254,10 @@ func TestCallToolWithDotWorkDirAtRoot(t *testing.T) {
 		baseDir = eval
 	}
 
-	famTOML := `name = "myfam"
-slug = "myfam"
-roster = ["agy"]
-
-[agent.agy]
-harness = "antigravity"
-`
-	if err := os.WriteFile(filepath.Join(baseDir, "fam.toml"), []byte(famTOML), 0644); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
+	registerFam(t, "myfam", baseDir, map[string]famconfig.AgentConfig{
+		"agy": {Harness: "antigravity"},
+	})
 
 	wtDir := setupTestWorktree(t, baseDir, "agy", "agy")
 

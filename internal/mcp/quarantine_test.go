@@ -9,28 +9,23 @@ import (
 	"testing"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
-const quarantineFamTOML = `name = "myfam"
-slug = "myfam"
-roster = ["alice"]
-
-[agent.alice]
-harness = "claude-code"
-`
-
-// quarantineFam writes a fam.toml declaring [agent.alice] into a fresh fam dir
-// and carves the alice agent worktree (and thus baseDir/main, the base checkout)
-// out of it. It returns (agentWorktreeDir, baseCheckoutDir).
+// quarantineFam registers a [repo.myfam] stanza declaring [agent.alice] into the
+// active BOTFAM_CONFIG, carves the alice agent worktree (and thus baseDir/main,
+// the base checkout) out of a fresh fam dir, and returns
+// (agentWorktreeDir, baseCheckoutDir).
 func quarantineFam(t *testing.T) (agentDir, mainDir string) {
 	t.Helper()
 	baseDir := t.TempDir()
 	if eval, err := filepath.EvalSymlinks(baseDir); err == nil {
 		baseDir = eval
 	}
-	if err := os.WriteFile(filepath.Join(baseDir, "fam.toml"), []byte(quarantineFamTOML), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	registerFam(t, "myfam", baseDir, map[string]famconfig.AgentConfig{
+		"alice": {Harness: "claude-code"},
+	})
 	agentDir = setupTestWorktree(t, baseDir, "alice", "alice")
 	return agentDir, filepath.Join(baseDir, "main")
 }

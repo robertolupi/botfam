@@ -15,16 +15,12 @@ const (
 	legacyLedgerDir    = "botfam-collab"
 )
 
-// LoadFamRegistry resolves the fam root for workDir and reads its fam.toml.
-// It never fails: when no root or registry is resolvable it returns a zero
-// Registry, which makes every derivation below fall back to the legacy
-// botfam defaults.
+// LoadFamRegistry resolves the merged Registry for workDir from the global
+// config. It never fails: when no `[repo.<k>]` stanza matches it returns a zero
+// Registry, which makes every derivation below fall back to the legacy botfam
+// defaults.
 func LoadFamRegistry(workDir string) Registry {
-	info, err := (GitResolver{}).ResolveIdentity(workDir)
-	if err != nil || info.FamDir == "" {
-		return Registry{}
-	}
-	reg, err := ReadRegistry(filepath.Join(info.FamDir, "fam.toml"))
+	reg, err := ResolveConfig(workDir)
 	if err != nil {
 		return Registry{}
 	}
@@ -104,10 +100,7 @@ func DefaultHistoryPath(workDir string) (string, error) {
 	if err != nil || info.FamDir == "" {
 		return "", errors.New("family root could not be resolved")
 	}
-	reg, err := ReadRegistry(filepath.Join(info.FamDir, "fam.toml"))
-	if err != nil {
-		reg = Registry{}
-	}
+	reg := LoadFamRegistry(workDir)
 	return filepath.Join(info.FamDir, FamLedgerDirName(reg), "history.jsonl"), nil
 }
 

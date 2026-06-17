@@ -1,13 +1,15 @@
-// Package famconfig is the dependency-free leaf that owns fam.toml: its schema
-// (Registry/AgentConfig), location (FindFamTOMLPath), parsing (ReadRegistry/
-// WriteRegistry), and the canonical identity resolution (ResolveFam) plus the
-// per-harness token path (HarnessTokenPath).
+// Package famconfig is the dependency-free leaf that owns botfam configuration:
+// the global ~/.botfam/config.toml schema (Config/RepoConfig) and its merged
+// in-memory shape (Registry/AgentConfig), the config-backed resolution
+// (LoadConfig/MatchRepo/BuildRegistry/ResolveConfig and the canonical
+// ResolveFam), and the per-harness token path (HarnessTokenPath). Per-fam
+// fam.toml files were retired in favour of one operator-owned config with
+// path-keyed `[repo.<k>]` override stanzas (#404).
 //
-// It has NO internal/* dependencies, so both internal/fam and internal/forge
-// import it instead of each other — breaking the fam→forge cycle that forced
-// forge.NewClient and fam.Resolver to re-derive fam identity three different
-// ways (#183, #231). internal/fam re-exports these via type aliases / thin
-// wrappers, so existing callers are unaffected.
+// It has NO internal/* dependencies (only gitexec), so both internal/cli and
+// internal/forge import it instead of each other — breaking the cycle that
+// forced forge.NewClient and the resolver to re-derive fam identity three
+// different ways (#183, #231).
 package famconfig
 
 import (
@@ -16,12 +18,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
 	"github.com/robertolupi/botfam/internal/gitexec"
 )
 
-// AgentConfig is a single `[agent.<name>]` or `[user.<name>]` entry in fam.toml.
-// The map key (and Name) is the worktree directory basename (the `wt-` prefix is
+// AgentConfig is a single `[agent.<name>]`/`[user.<name>]` entry — global in
+// ~/.botfam/config.toml or a per-repo `[repo.<k>.agent.<name>]` override. The
+// map key (and Name) is the worktree directory basename (the `wt-` prefix is
 // retired). Email defaults to the host git email plus-addressed with Name.
 // IsUser marks a `[user.<name>]` (human) entry — git identity only, no runtime.
 type AgentConfig struct {
@@ -37,24 +39,27 @@ type AgentConfig struct {
 	Flags map[string]any `toml:"flags,omitempty"`
 }
 
-// Registry is the parsed fam.toml.
+// Registry is the merged, resolved configuration for one fam — the output of
+// BuildRegistry (global defaults ⊕ the matched [repo.<k>] stanza ⊕ git-remote
+// derivation). It is the in-memory shape every consumer reads; it is no longer
+// unmarshalled directly from a file (the toml tags are vestigial).
 type Registry struct {
-	Name         string   `toml:"name"`
-	Slug         string   `toml:"slug,omitempty"`
-	Branch       string   `toml:"branch,omitempty"` // deprecated: use IntegrationBranch
+	Name   string `toml:"name"`
+	Slug   string `toml:"slug,omitempty"`
+	Branch string `toml:"branch,omitempty"` // deprecated: use IntegrationBranch
 
 	// IntegrationBranch is where bots open PRs (default: <slug>-next).
 	// ReleaseBranch is the public release target — bots must never target it
 	// unless explicitly instructed (default: main).
-	IntegrationBranch string `toml:"integration_branch,omitempty"`
-	ReleaseBranch     string `toml:"release_branch,omitempty"`
-	RootSet      []string `toml:"root_set,omitempty"`
-	Origin       string   `toml:"origin,omitempty"`
-	Roster       []string `toml:"roster,omitempty"`
-	Channels     []string `toml:"channels,omitempty"`
-	RepoPaths    []string `toml:"repo_paths,omitempty"`
-	ObjectStores []string `toml:"object_stores,omitempty"`
-	CreatedAt    string   `toml:"created_at,omitempty"`
+	IntegrationBranch string   `toml:"integration_branch,omitempty"`
+	ReleaseBranch     string   `toml:"release_branch,omitempty"`
+	RootSet           []string `toml:"root_set,omitempty"`
+	Origin            string   `toml:"origin,omitempty"`
+	Roster            []string `toml:"roster,omitempty"`
+	Channels          []string `toml:"channels,omitempty"`
+	RepoPaths         []string `toml:"repo_paths,omitempty"`
+	ObjectStores      []string `toml:"object_stores,omitempty"`
+	CreatedAt         string   `toml:"created_at,omitempty"`
 
 	// ForgeURL is the HTTP(S) forge API base (e.g. http://gitea.home.rlupi.com:3000/).
 	// Repository is the org/repo on the forge. Both are explicit in fam.toml so
@@ -106,10 +111,10 @@ type FamIdentity struct {
 	Source      Source
 }
 
-// ResolvedFam is the single canonical identity for a worktree, resolved from
-// `<fam-dir>/fam.toml`. Every consumer (forge client, discovery health,
-// channels, pass-files) goes through ResolveFam so they cannot disagree about
-// which fam/token/url applies — the root cause of #183.
+// ResolvedFam is the single canonical identity for a worktree, resolved from the
+// matched [repo.<k>] stanza in ~/.botfam/config.toml. Every consumer (forge
+// client, discovery health, channels, pass-files) goes through ResolveFam so
+// they cannot disagree about which fam/token/url applies — the root cause of #183.
 type ResolvedFam struct {
 	FamIdentity
 	Slug         string
@@ -134,44 +139,8 @@ func (rf ResolvedFam) FlagEnabled(name string, def bool) (bool, error) {
 	return flagValue(rf.Flags, name, def)
 }
 
-// ReadRegistry parses the fam.toml at path, backfilling the canonical Name (and
-// IsUser) onto each agent/user from its table key.
-func ReadRegistry(path string) (Registry, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Registry{}, err
-	}
-	var reg Registry
-	if err := toml.Unmarshal(data, &reg); err != nil {
-		return Registry{}, fmt.Errorf("parse %s: %w", path, err)
-	}
-	for k, ac := range reg.Agents {
-		ac.Name = k
-		reg.Agents[k] = ac
-	}
-	for k, ac := range reg.Users {
-		ac.Name = k
-		ac.IsUser = true
-		reg.Users[k] = ac
-	}
-	return reg, nil
-}
-
-// WriteRegistry atomically writes reg as TOML to path.
-func WriteRegistry(path string, reg Registry) error {
-	data, err := toml.Marshal(reg)
-	if err != nil {
-		return fmt.Errorf("marshal fam.toml: %w", err)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
 // FamSlug returns the short id used in channels/ledger/pass-files: the explicit
-// fam.toml slug when set, else the fam name.
+// stanza slug when set, else the fam name.
 func FamSlug(reg Registry) string {
 	if reg.Slug != "" {
 		return reg.Slug
@@ -211,36 +180,17 @@ func HarnessTokenPath(harness string) (string, error) {
 	return filepath.Join(home, ".botfam", "token-"+CanonicalHarness(harness)), nil
 }
 
-// FindFamTOMLPath locates the canonical fam.toml for workDir by checking
-// <parent of the git worktree top-level>/fam.toml.
-//
-// Returns "" when none is found. env is an os.Environ()-style "K=V" slice
-// reserved for future use; nil falls back to the process environment. This is
-// the one fam.toml locator; ResolveFam (the strict agent path) and
-// forge.NewClient (which also tolerates non-agent/legacy checkouts) both
-// build on it.
-func FindFamTOMLPath(workDir string, env []string) string {
-	if root, err := gitexec.One(workDir, "rev-parse", "--show-toplevel"); err == nil && root != "" {
-		if eval, err := filepath.EvalSymlinks(root); err == nil {
-			root = eval
-		}
-		if p := filepath.Join(filepath.Dir(root), "fam.toml"); fileExists(p) {
-			return p
-		}
-	}
-	return ""
-}
-
 // ResolveFam resolves the fam identity for workDir, fail-closed. It locates the
-// git worktree root, treats its parent as the fam dir, reads `<fam-dir>/fam.toml`,
-// and requires the worktree's basename to be a declared `[agent.<name>]`. Every
-// failure mode is a loud error carrying a "report to your operator" hint — no
-// silent fallbacks (the #183 disease).
+// git worktree root, treats its parent as the fam dir, resolves the merged
+// Registry from ~/.botfam/config.toml (ResolveConfig), and requires the
+// worktree's basename to be a declared `[agent.<name>]`. Every failure mode is a
+// loud error carrying a "report to your operator" hint — no silent fallbacks
+// (the #183/#362 invariant).
 //
-// Refusals: not inside a git worktree; no/invalid fam.toml; the worktree is a
-// `[user.<name>]` (human) checkout; or it is not a declared agent (e.g. the
-// `main`/base checkout). Callers that legitimately run outside an agent worktree
-// (doctor/setup/whoami/version) must not gate on this.
+// Refusals: not inside a git worktree; no matching `[repo.<k>]` stanza; the
+// worktree is a `[user.<name>]` (human) checkout; or it is not a declared agent
+// (e.g. the `main`/base checkout). Callers that legitimately run outside an
+// agent worktree (doctor/setup/whoami/version) must not gate on this.
 func ResolveFam(workDir string) (ResolvedFam, error) {
 	root, err := gitexec.One(workDir, "rev-parse", "--show-toplevel")
 	if err != nil || root == "" {
@@ -255,18 +205,17 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 	if actor == "" {
 		actor = filepath.Base(root)
 	}
-	tomlPath := filepath.Join(famDir, "fam.toml")
 
-	reg, err := ReadRegistry(tomlPath)
+	reg, err := ResolveConfig(workDir)
 	if err != nil {
-		return ResolvedFam{}, fmt.Errorf("no readable fam.toml at %s: run `botfam setup`; if it persists, report to your operator (%v)", tomlPath, err)
+		return ResolvedFam{}, err
 	}
 	if _, isUser := reg.Users[actor]; isUser {
 		return ResolvedFam{}, fmt.Errorf("worktree %q is a [user.%s] (human) checkout; the botfam runtime only runs in [agent.<name>] worktrees — report to your operator", actor, actor)
 	}
 	agent, ok := reg.Agents[actor]
 	if !ok {
-		return ResolvedFam{}, fmt.Errorf("worktree %q is not a declared [agent.<name>] in %s (base checkout or unknown agent); the runtime refuses to start here — report to your operator", actor, tomlPath)
+		return ResolvedFam{}, fmt.Errorf("worktree %q is not a declared [agent.<name>] for this repo (base checkout or unknown agent); the runtime refuses to start here — report to your operator", actor)
 	}
 
 	tokenPath, err := HarnessTokenPath(agent.Harness)
@@ -274,10 +223,11 @@ func ResolveFam(workDir string) (ResolvedFam, error) {
 		return ResolvedFam{}, err
 	}
 
+	cfgPath, _ := ConfigPath()
 	return ResolvedFam{
 		FamIdentity: FamIdentity{
 			FamDir:      famDir,
-			FamTOMLPath: tomlPath,
+			FamTOMLPath: cfgPath,
 			Name:        reg.Name,
 			Actor:       actor,
 			ActorRole:   RoleAgent,
@@ -341,7 +291,7 @@ func flagValue(flags map[string]any, name string, def bool) (bool, error) {
 	}
 	b, err := parseFlagBool(v)
 	if err != nil {
-		return def, fmt.Errorf("fam.toml flag %q = %#v: %w", name, v, err)
+		return def, fmt.Errorf("config flag %q = %#v: %w", name, v, err)
 	}
 	return b, nil
 }
@@ -370,24 +320,4 @@ func parseFlagBool(v any) (bool, error) {
 	default:
 		return false, fmt.Errorf("unsupported flag type %T", v)
 	}
-}
-
-// --- lightweight, dependency-free helpers (leaf package) ---------------------
-
-func lookupEnv(env []string, key string) string {
-	if env == nil {
-		return os.Getenv(key)
-	}
-	prefix := key + "="
-	for _, kv := range env {
-		if strings.HasPrefix(kv, prefix) {
-			return kv[len(prefix):]
-		}
-	}
-	return ""
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
 }
