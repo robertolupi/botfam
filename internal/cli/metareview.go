@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/gitexec"
-	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/metareview"
 	"github.com/robertolupi/botfam/internal/wiki"
 	"github.com/spf13/cobra"
@@ -87,13 +87,17 @@ func NewMetaReviewCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
 			num, err := strconv.Atoi(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid issue/PR number %q: %w", args[0], err)
 			}
-			return runMetaReview(num, opts, cmd.OutOrStdout())
-		},
+			client, err := forge.NewClientFromCtx(fctx)
+			if err != nil {
+				return fmt.Errorf("meta-review: %w", err)
+			}
+			return runMetaReview(num, opts, client, cmd.OutOrStdout())
+		}),
 	}
 	addMetaReviewModelFlags(c, &opts)
 	c.Flags().BoolVar(&opts.applyLabels, "apply-labels", false, "also apply high-confidence risk/* labels (additive)")
@@ -143,19 +147,10 @@ func (o metaReviewOpts) classifiers() (local, escalate metareview.Classifier, ta
 	return local, escalate, tag, nil
 }
 
-func runMetaReview(num int, opts metaReviewOpts, out io.Writer) error {
+func runMetaReview(num int, opts metaReviewOpts, client *forge.Client, out io.Writer) error {
 	local, escalate, tag, err := opts.classifiers()
 	if err != nil {
 		return err
-	}
-
-	var actor string
-	if info, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
-		actor = info.Actor
-	}
-	client, err := forge.NewClient(".", actor)
-	if err != nil {
-		return fmt.Errorf("meta-review: %w", err)
 	}
 
 	corpus, err := newRepoCorpus(client)

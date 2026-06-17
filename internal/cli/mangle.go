@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mangle"
 	"github.com/spf13/cobra"
@@ -32,14 +32,6 @@ would multiply RPC).`,
 	}
 	cmd.AddCommand(newMangleExportCmd(), newMangleEvalCmd())
 	return cmd
-}
-
-func newForgeClient() (*forge.Client, error) {
-	actor := ""
-	if id, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
-		actor = id.Actor
-	}
-	return forge.NewClient(".", actor)
 }
 
 // exportSelectors adds the scope flags shared by `mangle export/eval`,
@@ -78,12 +70,12 @@ func newMangleExportCmd() *cobra.Command {
 		Short: "Write forge history as Mangle facts",
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
 		sc, err := build()
 		if err != nil {
 			return err
 		}
-		c, err := newForgeClient()
+		c, err := forge.NewClientFromCtx(fctx)
 		if err != nil {
 			return err
 		}
@@ -104,7 +96,7 @@ func newMangleExportCmd() *cobra.Command {
 			"exported %d issues, %d pulls, %d commits in %s\n",
 			st.Issues, st.Pulls, st.Commits, st.Duration.Round(time.Millisecond))
 		return nil
-	}
+	})
 	cmd.Flags().BoolVar(&noCommits, "no-commits", false, "skip per-PR commit/author facts (faster)")
 	cmd.Flags().StringVar(&store, "store", "", "write facts to FILE (default stdout)")
 	return cmd
@@ -117,7 +109,7 @@ func newMangleEvalCmd() *cobra.Command {
 		Short: "Evaluate a Mangle rule file against forge facts",
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
 		if ruleFile == "" {
 			return fmt.Errorf("--file RULES.mg is required")
 		}
@@ -128,7 +120,7 @@ func newMangleEvalCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			c, err := newForgeClient()
+			c, err := forge.NewClientFromCtx(fctx)
 			if err != nil {
 				return err
 			}
@@ -162,7 +154,7 @@ func newMangleEvalCmd() *cobra.Command {
 		fmt.Fprintf(cmd.ErrOrStderr(), "evaluated in %s; %d total rows across %d predicates\n",
 			dur.Round(time.Millisecond), total, len(results))
 		return nil
-	}
+	})
 	cmd.Flags().StringVar(&fromStore, "from-store", "", "evaluate against a previously exported fact file")
 	cmd.Flags().StringVar(&ruleFile, "file", "", "Mangle rule file to evaluate")
 	cmd.Flags().StringVar(&prefix, "prefix", "violation", "query head predicates with this name prefix")

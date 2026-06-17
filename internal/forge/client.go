@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 )
 
 // defaultHTTPClient is the shared fallback used by every Client that does not
@@ -63,6 +64,52 @@ type Review struct {
 	User        struct {
 		Login string `json:"login"`
 	} `json:"user"`
+}
+
+// NewClientFromCtx builds a Client from an already-resolved famctx.Context,
+// avoiding a second famconfig resolution. Env overrides (GITEA_URL, GITEA_OWNER,
+// GITEA_REPO, GITEA_TOKEN) still win over the resolved values. The token is read
+// from ctx.TokenPath, which famctx already keyed on the effective harness (#371).
+func NewClientFromCtx(ctx famctx.Context) (*Client, error) {
+	baseURL := os.Getenv("GITEA_URL")
+	owner := os.Getenv("GITEA_OWNER")
+	repo := os.Getenv("GITEA_REPO")
+	token := os.Getenv("GITEA_TOKEN")
+
+	if token == "" && ctx.TokenPath != "" {
+		if b, err := os.ReadFile(ctx.TokenPath); err == nil {
+			token = strings.TrimSpace(string(b))
+		}
+	}
+	if baseURL == "" {
+		baseURL = ctx.Registry.ForgeURL
+	}
+	if owner == "" || repo == "" {
+		if o, r, ok := famconfig.SplitOwnerRepo(ctx.Registry.Repository); ok {
+			if owner == "" {
+				owner = o
+			}
+			if repo == "" {
+				repo = r
+			}
+		}
+	}
+	if !strings.HasSuffix(baseURL, "/") {
+		baseURL += "/"
+	}
+	if baseURL == "/" || baseURL == "" {
+		return nil, errors.New("forge: no ForgeURL in resolved config; check ~/.botfam/config.toml")
+	}
+	if owner == "" {
+		return nil, errors.New("forge: cannot resolve owner from resolved config")
+	}
+	if repo == "" {
+		return nil, errors.New("forge: cannot resolve repo from resolved config")
+	}
+	if token == "" {
+		return nil, fmt.Errorf("forge: token is empty (TokenPath=%q); run `botfam mint`", ctx.TokenPath)
+	}
+	return &Client{BaseURL: baseURL, Owner: owner, Repo: repo, Token: token}, nil
 }
 
 func NewClient(workDir string, actor string) (*Client, error) {

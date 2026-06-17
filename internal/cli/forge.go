@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famctx"
+	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/issuegraph"
 	"github.com/robertolupi/botfam/internal/mangle"
 	"github.com/spf13/cobra"
@@ -44,7 +46,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
   botfam forge graph --milestone M7 --format dot | dot -Tsvg > m7.svg`,
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
 		switch format {
 		case "mermaid", "dot", "html":
 		default:
@@ -54,7 +56,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		if err != nil {
 			return err
 		}
-		c, err := newForgeClient()
+		c, err := forge.NewClientFromCtx(fctx)
 		if err != nil {
 			return err
 		}
@@ -85,7 +87,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		}
 		fmt.Fprintf(cmd.ErrOrStderr(), "%d issues, %d edges\n", len(g.Nodes), len(g.Edges))
 		return nil
-	}
+	})
 	cmd.Flags().StringVar(&format, "format", "mermaid", "output format: mermaid | dot | html")
 	cmd.Flags().StringVar(&out, "out", "", "write to FILE (default stdout)")
 	cmd.Flags().BoolVar(&withMentions, "with-mentions", false, "also draw dashed prose #N mention edges")
@@ -102,12 +104,12 @@ rule set (misattributed work, double-close, merged-but-open). Exits non-zero
 when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
 		sc, err := build()
 		if err != nil {
 			return err
 		}
-		c, err := newForgeClient()
+		c, err := forge.NewClientFromCtx(fctx)
 		if err != nil {
 			return err
 		}
@@ -133,7 +135,7 @@ when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 			return fmt.Errorf("forge-lint: %d violations exceed --max=%d", total, maxViolations)
 		}
 		return nil
-	}
+	})
 	cmd.Flags().IntVar(&maxViolations, "max", 0, "exit non-zero when violations exceed this count")
 	return cmd
 }
