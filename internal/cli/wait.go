@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mailbox"
 	"github.com/spf13/cobra"
@@ -90,17 +90,17 @@ background ingester (hosted in the botfam MCP server) is what fills the spool.`,
 				if err != nil || num <= 0 {
 					return fmt.Errorf("wait: argument must be an issue/PR number, got %q", args[0])
 				}
-				rf, err := famconfig.ResolveFam(workDir)
+				fctx, err := famctx.ResolveAgentRuntime(workDir)
 				if err != nil {
 					return fmt.Errorf("wait: %w", err)
 				}
-				client, err := forge.NewClient(workDir, rf.Actor)
+				client, err := forge.NewClientFromCtx(fctx)
 				if err != nil {
 					return fmt.Errorf("wait: %w", err)
 				}
 				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 				defer stop()
-				return runWatchItem(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), client, rf.Repository, num,
+				return runWatchItem(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), client, fctx.Registry.Repository, num,
 					time.Duration(timeoutS)*time.Second, time.Duration(pollMs)*time.Millisecond)
 			}
 			if spoolDir == "" {

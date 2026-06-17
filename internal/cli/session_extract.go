@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +47,18 @@ func newSessionExtractCmd() *cobra.Command {
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Redact = opts.Redact && !noRedact
-			return extractSession(opts, cmd.OutOrStdout())
+			// Validate time flags before touching the fam context so flag-parsing
+			// tests don't require an agent worktree.
+			if err := validateExtractTimes(opts); err != nil {
+				return err
+			}
+			return WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
+				client, err := forge.NewClientFromCtx(fctx)
+				if err != nil {
+					return err
+				}
+				return extractSession(opts, client, cmd.OutOrStdout())
+			})(cmd, args)
 		},
 	}
 	c.Flags().StringVar(&opts.Milestone, "milestone", "", "milestone title or numeric ID (required)")
@@ -62,42 +73,41 @@ func newSessionExtractCmd() *cobra.Command {
 	return c
 }
 
-func extractSession(opts ExtractOptions, out io.Writer) error {
+// validateExtractTimes checks that time-flag strings are valid RFC3339 before
+// touching the fam context. Called early in the RunE so flag-format tests run
+// without an agent worktree.
+func validateExtractTimes(opts ExtractOptions) error {
+	for _, p := range []struct{ flag, val string }{
+		{"--since", opts.Since},
+		{"--until", opts.Until},
+		{"--snapshot-timestamp", opts.SnapshotTimestamp},
+	} {
+		if p.val != "" {
+			if _, err := time.Parse(time.RFC3339, p.val); err != nil {
+				return fmt.Errorf("invalid %s format (expected RFC3339, e.g. 2006-01-02T15:04:05Z): %w", p.flag, err)
+			}
+		}
+	}
+	return nil
+}
+
+func extractSession(opts ExtractOptions, client *forge.Client, out io.Writer) error {
 	if opts.Milestone == "" {
 		return errors.New("missing required flag: --milestone <title-or-id>")
 	}
 
 	var sinceTime, untilTime, snapshotTime time.Time
 	if opts.Since != "" {
-		t, err := time.Parse(time.RFC3339, opts.Since)
-		if err != nil {
-			return fmt.Errorf("invalid --since format (expected RFC3339, e.g. 2006-01-02T15:04:05Z): %w", err)
-		}
+		t, _ := time.Parse(time.RFC3339, opts.Since) // already validated
 		sinceTime = t
 	}
 	if opts.Until != "" {
-		t, err := time.Parse(time.RFC3339, opts.Until)
-		if err != nil {
-			return fmt.Errorf("invalid --until format (expected RFC3339, e.g. 2006-01-02T15:04:05Z): %w", err)
-		}
+		t, _ := time.Parse(time.RFC3339, opts.Until)
 		untilTime = t
 	}
 	if opts.SnapshotTimestamp != "" {
-		t, err := time.Parse(time.RFC3339, opts.SnapshotTimestamp)
-		if err != nil {
-			return fmt.Errorf("invalid --snapshot-timestamp format (expected RFC3339, e.g. 2006-01-02T15:04:05Z): %w", err)
-		}
+		t, _ := time.Parse(time.RFC3339, opts.SnapshotTimestamp)
 		snapshotTime = t
-	}
-
-	var actor string
-	if info, err := (famconfig.GitResolver{}).ResolveIdentity("."); err == nil {
-		actor = info.Actor
-	}
-
-	client, err := forge.NewClient(".", actor)
-	if err != nil {
-		return err
 	}
 
 	// 1. Resolve Milestone

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/memory"
 	"github.com/spf13/cobra"
@@ -36,21 +37,15 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 	if err != nil {
 		return nil, "", "", err
 	}
-	// ResolveFam (→ famctx.ResolveAgentRuntime) handles wiki/ and submodule
-	// subdirs by stripping the nested git root and re-resolving at the enclosing
-	// agent worktree. Direct GitResolver use would return actor="wiki" here, which
-	// is not a declared agent and causes a spurious "could not resolve actor" error.
-	rf, err := ResolveFam(wd)
+	// ResolveAgentRuntime handles wiki/ and submodule subdirs by stripping the
+	// nested git root and re-resolving at the enclosing agent worktree. Direct
+	// GitResolver use would return actor="wiki", which is not a declared agent.
+	fctx, err := famctx.ResolveAgentRuntime(wd)
 	if err != nil {
 		return nil, "", "", err
 	}
-	// Give forge.NewClient the worktree root so its own famconfig.ResolveFam call
-	// lands in the declared [agent.X] checkout, not a nested wiki/ or submodule.
-	clientDir := rf.WorktreeRoot
-	if clientDir == "" {
-		clientDir = wd
-	}
-	client, err := forge.NewClient(clientDir, rf.Actor)
+	rf := fctx // alias for readability below; famctx.Context embeds FamIdentity
+	client, err := forge.NewClientFromCtx(fctx)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("resolve forge config: %w", err)
 	}
