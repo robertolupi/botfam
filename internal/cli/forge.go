@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/robertolupi/botfam/internal/mangle"
@@ -28,23 +29,26 @@ func newForgeGraphCmd() *cobra.Command {
 	var withMentions bool
 	cmd := &cobra.Command{
 		Use:   "graph",
-		Short: "Render the issue-dependency DAG (Mermaid or Graphviz DOT)",
+		Short: "Render the issue-dependency DAG (Mermaid, Graphviz DOT, or interactive HTML)",
 		Long: `Extract the issue-dependency graph for the selected scope and render it as
-Mermaid (default; renders natively in the wiki/Obsidian) or Graphviz DOT.
+Mermaid (default; renders in the wiki/Obsidian), Graphviz DOT, or a
+self-contained interactive d3.js HTML page (zoom/drag, click a node to open the
+issue, toggles to hide closed/isolated nodes or show only epics + children).
 
 Nodes are issues; solid edges are task-list subtasks (- [ ] #N), the same
 epic-decomposition edges 'forge lint' and sprint scoping use. --with-mentions
 adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 
-  botfam forge graph --epic 339                  # Mermaid to stdout
+  botfam forge graph --epic 339                        # Mermaid to stdout
+  botfam forge graph --all --format html --out g.html  # interactive d3 page
   botfam forge graph --milestone M7 --format dot | dot -Tsvg > m7.svg`,
 	}
 	build := exportSelectors(cmd, nil)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		switch format {
-		case "mermaid", "dot":
+		case "mermaid", "dot", "html":
 		default:
-			return fmt.Errorf("--format must be 'mermaid' or 'dot', got %q", format)
+			return fmt.Errorf("--format must be 'mermaid', 'dot', or 'html', got %q", format)
 		}
 		opt, err := build()
 		if err != nil {
@@ -67,9 +71,13 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 			defer f.Close()
 			w = f
 		}
-		if format == "dot" {
+		switch format {
+		case "dot":
 			err = mangle.RenderDOT(g, w)
-		} else {
+		case "html":
+			issueBase := strings.TrimSuffix(c.BaseURL, "/") + "/" + c.Owner + "/" + c.Repo + "/issues/"
+			err = mangle.RenderHTML(g, issueBase, w)
+		default:
 			err = mangle.RenderMermaid(g, w)
 		}
 		if err != nil {
@@ -78,7 +86,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		fmt.Fprintf(cmd.ErrOrStderr(), "%d issues, %d edges\n", len(g.Nodes), len(g.Edges))
 		return nil
 	}
-	cmd.Flags().StringVar(&format, "format", "mermaid", "output format: mermaid | dot")
+	cmd.Flags().StringVar(&format, "format", "mermaid", "output format: mermaid | dot | html")
 	cmd.Flags().StringVar(&out, "out", "", "write to FILE (default stdout)")
 	cmd.Flags().BoolVar(&withMentions, "with-mentions", false, "also draw dashed prose #N mention edges")
 	return cmd

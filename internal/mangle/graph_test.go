@@ -116,3 +116,24 @@ func TestRenderMermaidAndDOT(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderHTML(t *testing.T) {
+	g := buildGraph(graphFixture(), GraphOptions{})
+	var h strings.Builder
+	if err := RenderHTML(g, "http://gitea:3000/botfam/botfam/issues/", &h); err != nil {
+		t.Fatal(err)
+	}
+	out := h.String()
+	for _, want := range []string{
+		"d3js.org/d3.v7", "ISSUE_BASE=\"http://gitea:3000/botfam/botfam/issues/\"",
+		"\"id\":\"i1\"", "\"source\":\"i1\",\"target\":\"i2\"", "forceSimulation",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("html missing %q", want)
+		}
+	}
+	// Placeholders must all be substituted.
+	if strings.Contains(out, "__NODES__") || strings.Contains(out, "__LINKS__") || strings.Contains(out, "__ISSUEBASE__") {
+		t.Errorf("unsubstituted placeholder remains in HTML output")
+	}
+}
