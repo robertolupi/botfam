@@ -10,6 +10,7 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/gitexec"
+	"github.com/robertolupi/botfam/internal/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -138,7 +139,7 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 			}
 			fmt.Fprintf(out, "Created worktree %s\n", wt)
 		}
-		if err := RenderGitIdentity(wt, n, ac.Email); err != nil {
+		if err := harness.RenderGitIdentity(wt, n, ac.Email); err != nil {
 			return fmt.Errorf("git identity for %s: %w", n, err)
 		}
 		var activeTokenPath string
@@ -151,7 +152,7 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 		}
 		switch ac.Harness {
 		case "claude-code":
-			if err := RenderClaudeMCP(wt, opts.forgeURL, activeTokenPath); err != nil {
+			if err := harness.RenderClaudeMCP(wt, opts.forgeURL, activeTokenPath); err != nil {
 				return fmt.Errorf("render .mcp.json for %s: %w", n, err)
 			}
 			fmt.Fprintf(out, "Rendered %s/.mcp.json (claude-code)\n", n)
