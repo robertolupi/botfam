@@ -319,9 +319,13 @@ func discoveryHealth(workDir string, t docs.TemplateData, harness, declaredHarne
 	// Forge token: the canonical per-harness token (~/.botfam/token-<harness>),
 	// the same path the forge client + MCP actually use (forge.HarnessTokenPath)
 	// — no legacy fallback, so this can't report ok on a token the MCP won't use
-	// (#183).
-	if t.Actor != "" && harness != "" {
-		if tokenPath, err := forge.HarnessTokenPath(harness); err == nil {
+	// (#183). When the harness is unknown we still emit a warn rather than
+	// silently omitting the check, because the forge client will fail too.
+	if t.Actor != "" {
+		if harness == "" {
+			checks = append(checks, healthCheck{"forge_token", "warn",
+				"harness not detected: add `harness = \"<name>\"` to the [agent.<name>] stanza in ~/.botfam/config.toml — forge token cannot be resolved without it"})
+		} else if tokenPath, err := forge.HarnessTokenPath(harness); err == nil {
 			if fileExists(tokenPath) {
 				checks = append(checks, healthCheck{"forge_token", "ok", ""})
 			} else {

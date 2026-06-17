@@ -175,6 +175,59 @@ func TestBuildDiscoveryDataPrefersRegistryName(t *testing.T) {
 	}
 }
 
+func TestForgeTokenHealthCheck(t *testing.T) {
+	workDir := t.TempDir()
+	actor := "testactor"
+
+	findCheck := func(checks []healthCheck, name string) *healthCheck {
+		for i := range checks {
+			if checks[i].Check == name {
+				return &checks[i]
+			}
+		}
+		return nil
+	}
+
+	// Case 1: actor resolved, harness unknown → forge_token warn (not silently absent)
+	checks := discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "", "")
+	hc := findCheck(checks, "forge_token")
+	if hc == nil {
+		t.Fatal("forge_token check missing when harness is empty")
+	}
+	if hc.Status != "warn" {
+		t.Errorf("expected warn when harness empty, got %q", hc.Status)
+	}
+
+	// Case 2: actor + harness known, token file absent → warn with path
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "claude-code", "")
+	hc = findCheck(checks, "forge_token")
+	if hc == nil {
+		t.Fatal("forge_token check missing when token file absent")
+	}
+	if hc.Status != "warn" {
+		t.Errorf("expected warn when token absent, got %q", hc.Status)
+	}
+
+	// Case 3: token file present → ok
+	tokenDir := filepath.Join(tmpHome, ".botfam")
+	if err := os.MkdirAll(tokenDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tokenDir, "token-claude-code"), []byte("mytoken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	checks = discoveryHealth(workDir, docs.TemplateData{Actor: actor}, "claude-code", "")
+	hc = findCheck(checks, "forge_token")
+	if hc == nil {
+		t.Fatal("forge_token check missing when token present")
+	}
+	if hc.Status != "ok" {
+		t.Errorf("expected ok when token present, got %q", hc.Status)
+	}
+}
+
 func TestIRCClientHealthCheck(t *testing.T) {
 	workDir := t.TempDir()
 	actor := "testactor"
