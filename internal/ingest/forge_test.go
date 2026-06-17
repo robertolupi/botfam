@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -24,7 +25,7 @@ type fakeForge struct {
 	subjects  map[string]*forge.SubjectContent
 }
 
-func (f *fakeForge) ListUnreadRepoNotifications(repo string) ([]forge.Notification, error) {
+func (f *fakeForge) ListUnreadRepoNotifications(_ context.Context, repo string) ([]forge.Notification, error) {
 	if repo != f.repo {
 		// The poller must call the repo it was built with (server-side scoping).
 		return nil, errors.New("unexpected repo " + repo)
@@ -35,11 +36,11 @@ func (f *fakeForge) ListUnreadRepoNotifications(repo string) ([]forge.Notificati
 	return append([]forge.Notification(nil), f.unread...), nil
 }
 
-func (f *fakeForge) GetIssueTimeline(issueNum int) ([]*forge.TimelineEvent, error) {
+func (f *fakeForge) GetIssueTimeline(_ context.Context, issueNum int) ([]*forge.TimelineEvent, error) {
 	return f.timelines[issueNum], nil
 }
 
-func (f *fakeForge) GetSubject(apiURL string) (*forge.SubjectContent, error) {
+func (f *fakeForge) GetSubject(_ context.Context, apiURL string) (*forge.SubjectContent, error) {
 	return f.subjects[apiURL], nil
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,8 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"context"
 
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
@@ -58,7 +57,7 @@ func newSessionExtractCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return extractSession(opts, client, cmd.OutOrStdout())
+				return extractSession(ctx, opts, client, cmd.OutOrStdout())
 			})(cmd, args)
 		},
 	}
@@ -92,7 +91,7 @@ func validateExtractTimes(opts ExtractOptions) error {
 	return nil
 }
 
-func extractSession(opts ExtractOptions, client *forge.Client, out io.Writer) error {
+func extractSession(ctx context.Context, opts ExtractOptions, client *forge.Client, out io.Writer) error {
 	if opts.Milestone == "" {
 		return errors.New("missing required flag: --milestone <title-or-id>")
 	}
@@ -112,7 +111,7 @@ func extractSession(opts ExtractOptions, client *forge.Client, out io.Writer) er
 	}
 
 	// 1. Resolve Milestone
-	milestones, err := client.ListMilestones()
+	milestones, err := client.ListMilestones(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to list milestones: %w", err)
 	}
@@ -166,7 +165,7 @@ func extractSession(opts ExtractOptions, client *forge.Client, out io.Writer) er
 	}
 
 	// 2. Fetch issues/PRs in milestone
-	issues, err := client.ListIssuesByMilestone(matched.ID)
+	issues, err := client.ListIssuesByMilestone(ctx, matched.ID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch issues: %w", err)
 	}
@@ -212,7 +211,7 @@ func extractSession(opts ExtractOptions, client *forge.Client, out io.Writer) er
 		}
 
 		// Gitea timeline events
-		rawTimeline, err := client.GetIssueTimeline(issue.Number)
+		rawTimeline, err := client.GetIssueTimeline(ctx, issue.Number)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to fetch timeline for issue #%d: %v\n", issue.Number, err)
 			continue
@@ -334,7 +333,7 @@ func extractSession(opts ExtractOptions, client *forge.Client, out io.Writer) er
 
 	// Milestone Hygiene completeness warning
 	if len(events) > 0 {
-		warnings := checkMilestoneHygiene(client, earliestEvent, latestEvent, issues)
+		warnings := checkMilestoneHygiene(ctx, client, earliestEvent, latestEvent, issues)
 		for _, w := range warnings {
 			fmt.Fprintf(&buf, "> [!WARNING]\n> %s\n\n", w)
 		}
@@ -363,7 +362,7 @@ func extractSession(opts ExtractOptions, client *forge.Client, out io.Writer) er
 
 		for _, pr := range prs {
 			fmt.Fprintf(&buf, "\n### Files Changed in PR #%d:\n", pr.Number)
-			diffText, diffErr := client.GetPRDiff(pr.Number)
+			diffText, diffErr := client.GetPRDiff(ctx, pr.Number)
 			if diffErr != nil {
 				fmt.Fprintf(&buf, "_(Error fetching PR diff: %v)_\n", diffErr)
 				continue
@@ -468,20 +467,15 @@ func redactSecrets(input string) string {
 	return input
 }
 
-func checkMilestoneHygiene(c *forge.Client, start, end time.Time, milestoneIssues []*forge.Issue) []string {
+func checkMilestoneHygiene(ctx context.Context, c *forge.Client, start, end time.Time, milestoneIssues []*forge.Issue) []string {
 	var warnings []string
 	if start.IsZero() || end.IsZero() {
 		return warnings
 	}
 
-	// Query last 50 issues/PRs from repository
-	path := fmt.Sprintf("repos/%s/%s/issues?state=all&page=1&limit=50", c.Owner, c.Repo)
-	b, err := c.Request("GET", path, nil)
+	// Query last 50 issues from repository.
+	recentLocal, err := c.ListRecentIssues(ctx, 1, 50)
 	if err != nil {
-		return warnings
-	}
-	var recent []*forge.Issue
-	if err := json.Unmarshal(b, &recent); err != nil {
 		return warnings
 	}
 
@@ -490,7 +484,7 @@ func checkMilestoneHygiene(c *forge.Client, start, end time.Time, milestoneIssue
 		linked[issue.Number] = true
 	}
 
-	for _, issue := range recent {
+	for _, issue := range recentLocal {
 		if linked[issue.Number] {
 			continue
 		}

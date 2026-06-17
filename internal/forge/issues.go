@@ -1,8 +1,10 @@
 package forge
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+
+	giteasdk "gitea.dev/sdk"
 )
 
 // Label is a repository label (the risk/*, triage/*, harness/* taxonomy lives
@@ -13,61 +15,46 @@ type Label struct {
 	Color string `json:"color"`
 }
 
-// GetIssue returns one issue's metadata including its labels. PRs share the
-// issue namespace, so this also resolves a PR's labels when given a PR index.
-func (c *Client) GetIssue(num int) (*Issue, error) {
-	b, err := c.request("GET", fmt.Sprintf("repos/%s/%s/issues/%d", c.Owner, c.Repo, num), nil)
+// GetIssue returns one issue's metadata including its labels.
+func (c *Client) GetIssue(ctx context.Context, num int) (*Issue, error) {
+	iss, _, err := c.sdk.Issues.GetIssue(ctx, c.Owner, c.Repo, int64(num))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get issue %d: %w", num, err)
 	}
-	var iss Issue
-	if err := json.Unmarshal(b, &iss); err != nil {
-		return nil, fmt.Errorf("decode issue %d: %w", num, err)
-	}
-	return &iss, nil
+	return sdkIssueToLocal(iss), nil
 }
 
-// PostIssueComment posts a discussion comment on an issue or PR (they share the
-// issue comment namespace).
-func (c *Client) PostIssueComment(num int, body string) error {
-	payload, err := json.Marshal(map[string]any{"body": body})
-	if err != nil {
-		return err
-	}
-	_, err = c.request("POST", fmt.Sprintf("repos/%s/%s/issues/%d/comments", c.Owner, c.Repo, num), payload)
+// PostIssueComment posts a discussion comment on an issue or PR.
+func (c *Client) PostIssueComment(ctx context.Context, num int, body string) error {
+	_, _, err := c.sdk.Issues.CreateIssueComment(ctx, c.Owner, c.Repo, int64(num), giteasdk.CreateIssueCommentOption{Body: body})
 	return err
 }
 
-// ListRepoLabels returns the repository's labels. The forge paginates; this
-// walks pages until a short page is returned (the label set is small).
-func (c *Client) ListRepoLabels() ([]Label, error) {
+// ListRepoLabels returns the repository's labels.
+func (c *Client) ListRepoLabels(ctx context.Context) ([]Label, error) {
 	var all []Label
 	for page := 1; ; page++ {
-		b, err := c.request("GET", fmt.Sprintf("repos/%s/%s/labels?page=%d&limit=50", c.Owner, c.Repo, page), nil)
+		labels, resp, err := c.sdk.Issues.ListRepoLabels(ctx, c.Owner, c.Repo, giteasdk.ListLabelsOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: 50},
+		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list labels: %w", err)
 		}
-		var batch []Label
-		if err := json.Unmarshal(b, &batch); err != nil {
-			return nil, fmt.Errorf("decode labels: %w", err)
+		for _, l := range labels {
+			all = append(all, Label{ID: l.ID, Name: l.Name, Color: l.Color})
 		}
-		all = append(all, batch...)
-		if len(batch) < 50 {
-			return all, nil
+		if resp.NextPage == 0 {
+			break
 		}
 	}
+	return all, nil
 }
 
-// AddLabels adds labels (by ID) to an issue or PR. Gitea/Forgejo's add-labels
-// endpoint is additive, so existing labels are preserved.
-func (c *Client) AddLabels(num int, labelIDs []int64) error {
+// AddLabels adds labels (by ID) to an issue or PR.
+func (c *Client) AddLabels(ctx context.Context, num int, labelIDs []int64) error {
 	if len(labelIDs) == 0 {
 		return nil
 	}
-	payload, err := json.Marshal(map[string]any{"labels": labelIDs})
-	if err != nil {
-		return err
-	}
-	_, err = c.request("POST", fmt.Sprintf("repos/%s/%s/issues/%d/labels", c.Owner, c.Repo, num), payload)
+	_, _, err := c.sdk.Issues.AddIssueLabels(ctx, c.Owner, c.Repo, int64(num), giteasdk.IssueLabelsOption{Labels: labelIDs})
 	return err
 }

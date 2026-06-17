@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,7 @@ func TestExternalReviewFailsClosedOnZeroReviews(t *testing.T) {
 	opts := zeroReviewOpts(t)
 
 	var out bytes.Buffer
-	err := runExternalReview(opts, &out)
+	err := runExternalReview(context.Background(), opts,&out)
 	if err == nil {
 		t.Fatalf("expected an error when zero reviews are produced, got nil\noutput:\n%s", out.String())
 	}
@@ -53,7 +54,7 @@ func TestExternalReviewAllowZeroReviews(t *testing.T) {
 	opts.allowZeroReviews = true
 
 	var out bytes.Buffer
-	if err := runExternalReview(opts, &out); err != nil {
+	if err := runExternalReview(context.Background(), opts,&out); err != nil {
 		t.Fatalf("--allow-zero-reviews should succeed with zero reviews, got: %v", err)
 	}
 	// Supporting artifacts must still be written.
@@ -107,7 +108,7 @@ func TestExternalReviewWritesAllModelReviews(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runExternalReview(opts, &out); err != nil {
+	if err := runExternalReview(context.Background(), opts,&out); err != nil {
 		t.Fatalf("runExternalReview failed: %v\noutput:\n%s", err, out.String())
 	}
 
@@ -195,7 +196,7 @@ func TestExternalReviewWikiAndLMStudio(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runExternalReview(opts, &out); err != nil {
+	if err := runExternalReview(context.Background(), opts,&out); err != nil {
 		t.Fatalf("runExternalReview failed: %v\noutput:\n%s", err, out.String())
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "review-lmstudio-local-m.md")); err != nil {
@@ -218,7 +219,7 @@ func TestExternalReviewWikiPageNotFound(t *testing.T) {
 		wiki:     []string{"Missing"},
 		lmstudio: []string{"m"},
 	}
-	err := runExternalReview(opts, &bytes.Buffer{})
+	err := runExternalReview(context.Background(), opts,&bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "wiki page") {
 		t.Fatalf("expected a 'wiki page ... not found' error, got: %v", err)
 	}

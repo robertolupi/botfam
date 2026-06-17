@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -18,15 +19,15 @@ import (
 type ForgeClient interface {
 	// ListUnreadRepoNotifications returns the newest page of unread threads scoped
 	// to repo (owner/repo), most-recent first.
-	ListUnreadRepoNotifications(repo string) ([]forge.Notification, error)
+	ListUnreadRepoNotifications(ctx context.Context, repo string) ([]forge.Notification, error)
 	// GetIssueTimeline returns the thread's typed event log (comment/close/
 	// reopen/merge/review/…); its newest entry is what triggered the notification,
 	// so the poller can name the actual event + actor without remembering prior
 	// state. GetSubject fetches the issue/PR itself as a fallback. Both enrich the
 	// spool body so `botfam wait` shows what happened — best-effort: the poller
 	// falls back to a URL-only body on error.
-	GetIssueTimeline(issueNum int) ([]*forge.TimelineEvent, error)
-	GetSubject(apiURL string) (*forge.SubjectContent, error)
+	GetIssueTimeline(ctx context.Context, issueNum int) ([]*forge.TimelineEvent, error)
+	GetSubject(ctx context.Context, apiURL string) (*forge.SubjectContent, error)
 }
 
 // forgePoller surfaces Gitea notifications as forge events using a **read-only
@@ -72,7 +73,8 @@ func (p *forgePoller) Name() string { return mailbox.SourceForge }
 const minForgeWatermark int64 = 1_000_000_000
 
 func (p *forgePoller) Poll(s *mailbox.Spool, c *mailbox.Cursors) error {
-	ns, err := p.client.ListUnreadRepoNotifications(p.repo)
+	ctx := context.Background()
+	ns, err := p.client.ListUnreadRepoNotifications(ctx, p.repo)
 	if err != nil {
 		return err
 	}
@@ -156,7 +158,8 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 
 	// Fetch the issue/PR for its assignees (directed detection) and as the body
 	// fallback. Best-effort: a nil subject just leaves directed=assignee unset.
-	subj, _ := p.client.GetSubject(n.Subject.URL)
+	ctx := context.Background()
+	subj, _ := p.client.GetSubject(ctx, n.Subject.URL)
 	if subj != nil && p.login != "" {
 		for _, a := range subj.Assignees {
 			if a.Login == p.login {
@@ -170,7 +173,7 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 	}
 
 	if num := numberFromURL(url); num > 0 {
-		if evs, err := p.client.GetIssueTimeline(int(num)); err == nil && len(evs) > 0 {
+		if evs, err := p.client.GetIssueTimeline(ctx, int(num)); err == nil && len(evs) > 0 {
 			ev := evs[len(evs)-1] // timeline is ascending; newest triggered this
 			suffix, verb := timelineVerb(ev.Type)
 			kind = base + "_" + suffix
@@ -301,7 +304,7 @@ func ForgePollerFor(workDir, actor string) (Poller, error) {
 	if err != nil {
 		return nil, err
 	}
-	login, err := client.AuthLogin()
+	login, err := client.AuthLogin(context.Background())
 	if err != nil {
 		// Can't resolve our forge username: directed detection fails open (every
 		// event is treated as directed) so DND never silently drops real work.

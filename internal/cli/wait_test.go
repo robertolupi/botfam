@@ -294,7 +294,7 @@ type fakeTimeline struct {
 	perCall [][]*forge.TimelineEvent
 }
 
-func (f *fakeTimeline) GetIssueTimeline(int) ([]*forge.TimelineEvent, error) {
+func (f *fakeTimeline) GetIssueTimeline(_ context.Context, _ int) ([]*forge.TimelineEvent, error) {
 	i := f.calls
 	if i >= len(f.perCall) {
 		i = len(f.perCall) - 1

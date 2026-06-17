@@ -1,22 +1,20 @@
 package forge
 
 import (
+	"context"
 	"net/http"
 	"testing"
 )
 
 func TestGetPRDiff(t *testing.T) {
-	c := &Client{
-		BaseURL: "http://forge.test", Owner: "botfam", Repo: "botfam", Token: "t",
-		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/7.diff" {
-				t.Errorf("unexpected path: %s", r.URL.Path)
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n"))
-		}),
-	}
-	d, err := c.GetPRDiff(7)
+	c := fakeForge(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/botfam/botfam/pulls/7.diff" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("diff --git a/x b/x\n@@ -1 +1 @@\n-a\n+b\n"))
+	})
+	d, err := c.GetPRDiff(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("GetPRDiff: %v", err)
 	}
@@ -26,17 +24,14 @@ func TestGetPRDiff(t *testing.T) {
 }
 
 func TestListIssueComments(t *testing.T) {
-	c := &Client{
-		BaseURL: "http://forge.test", Owner: "botfam", Repo: "botfam", Token: "t",
-		HTTPClient: fakeClient(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/api/v1/repos/botfam/botfam/issues/7/comments" {
-				t.Errorf("unexpected path: %s", r.URL.Path)
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`[{"body":"looks good","user":{"login":"agy-bot"}}]`))
-		}),
-	}
-	cs, err := c.ListIssueComments(7)
+	c := fakeForge(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/botfam/botfam/issues/7/comments" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[{"body":"looks good","user":{"login":"agy-bot"}}]`))
+	})
+	cs, err := c.ListIssueComments(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("ListIssueComments: %v", err)
 	}

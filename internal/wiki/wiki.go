@@ -5,10 +5,9 @@
 package wiki
 
 import (
+	"context"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -57,77 +56,50 @@ type ForgeProvider struct{ C *forge.Client }
 
 func (p ForgeProvider) Source() string { return "gitea" }
 
-type apiCommit struct {
-	SHA    string `json:"sha"`
-	Commit struct {
-		Author struct {
-			Date string `json:"date"`
-		} `json:"author"`
-	} `json:"commit"`
-}
-
-type apiPage struct {
-	Title         string    `json:"title"`
-	ContentBase64 string    `json:"content_base64"`
-	SubURL        string    `json:"sub_url"`
-	LastCommit    apiCommit `json:"last_commit"`
-}
-
 func (p ForgeProvider) Page(name string) (Page, error) {
 	if !ValidPageName(name) {
 		return Page{}, fmt.Errorf("invalid wiki page name %q", name)
 	}
-	path := fmt.Sprintf("repos/%s/%s/wiki/page/%s", p.C.Owner, p.C.Repo, url.PathEscape(name))
-	body, err := p.C.Request("GET", path, nil)
+	ctx := context.Background()
+	wp, err := p.C.GetWikiPage(ctx, name)
 	if err != nil && !strings.HasSuffix(name, ".-") {
-		fallbackPath := fmt.Sprintf("repos/%s/%s/wiki/page/%s", p.C.Owner, p.C.Repo, url.PathEscape(name+".-"))
-		if fallbackBody, fallbackErr := p.C.Request("GET", fallbackPath, nil); fallbackErr == nil {
-			body = fallbackBody
-			err = nil
+		if fb, fbErr := p.C.GetWikiPage(ctx, name+".-"); fbErr == nil {
+			wp, err = fb, nil
 		}
 	}
 	if err != nil {
 		return Page{}, err
 	}
-	var ap apiPage
-	if err := json.Unmarshal(body, &ap); err != nil {
-		return Page{}, fmt.Errorf("decode wiki page %q: %w", name, err)
-	}
-	content, err := base64.StdEncoding.DecodeString(ap.ContentBase64)
+	content, err := base64.StdEncoding.DecodeString(wp.ContentBase64)
 	if err != nil {
 		return Page{}, fmt.Errorf("decode wiki content %q: %w", name, err)
 	}
 	return Page{
 		Name:    name,
 		Content: string(content),
-		SHA:     ap.LastCommit.SHA,
-		Updated: ap.LastCommit.Commit.Author.Date,
+		SHA:     wp.CommitSHA,
+		Updated: wp.CommitDate,
 		Source:  "gitea",
 	}, nil
 }
 
 func (p ForgeProvider) Index() ([]PageMeta, error) {
-	path := fmt.Sprintf("repos/%s/%s/wiki/pages", p.C.Owner, p.C.Repo)
-	body, err := p.C.Request("GET", path, nil)
+	pages, err := p.C.ListWikiPages(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	var pages []apiPage
-	if err := json.Unmarshal(body, &pages); err != nil {
-		return nil, fmt.Errorf("decode wiki index: %w", err)
-	}
 	metas := make([]PageMeta, 0, len(pages))
-	for _, ap := range pages {
-		name := ap.SubURL
+	for _, mp := range pages {
+		name := mp.SubURL
 		if name == "" {
-			name = ap.Title
+			name = mp.Title
 		}
 		name = strings.TrimSuffix(name, ".-")
 		metas = append(metas, PageMeta{
 			Name:    name,
 			URI:     "botfam:///wiki/" + name,
-			SHA:     ap.LastCommit.SHA,
-			Updated: ap.LastCommit.Commit.Author.Date,
+			SHA:     mp.CommitSHA,
+			Updated: mp.CommitDate,
 			Source:  "gitea",
 		})
 	}

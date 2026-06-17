@@ -17,7 +17,6 @@ import (
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
 	"github.com/openai/openai-go/v2/shared"
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -151,15 +150,15 @@ func NewExternalReviewCmd() *cobra.Command {
 		Long:          externalReviewHelp,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			opts.redact = opts.redact && !noRedact
 			opts.materials = args
 			// --design selects the design prompt unless --prompt was set explicitly.
 			if opts.design && !cmd.Flags().Changed("prompt") {
 				opts.promptFile = defaultDesignPrompt
 			}
-			return runExternalReview(opts, cmd.OutOrStdout())
-		},
+			return runExternalReview(ctx, opts, cmd.OutOrStdout())
+		}),
 	}
 	f := c.Flags()
 	f.StringVar(&opts.pr, "pr", "", "synthesize material from a Gitea PR index")
@@ -189,7 +188,7 @@ func NewExternalReviewCmd() *cobra.Command {
 	return c
 }
 
-func runExternalReview(opts externalReviewOpts, out io.Writer) error {
+func runExternalReview(ctx context.Context, opts externalReviewOpts, out io.Writer) error {
 	promptFile := opts.promptFile
 	outDir := opts.outDir
 	pr := opts.pr
@@ -332,7 +331,7 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "read session file material: %d bytes\n", len(contentStr))
 	} else if pr != "" {
-		m, err := assemblePRMaterial(pr)
+		m, err := assemblePRMaterial(ctx, pr)
 		if err != nil {
 			return err
 		}
@@ -365,7 +364,6 @@ func runExternalReview(opts externalReviewOpts, out io.Writer) error {
 	}
 
 	fmt.Fprintf(out, "running reviews into %s ...\n", outDir)
-	ctx := context.Background()
 
 	// Each review result; collected concurrently then reported deterministically.
 	type reviewResult struct {
@@ -518,29 +516,25 @@ func runReview(ctx context.Context, baseURL, apiKey, model, prompt string) (stri
 
 // assemblePRMaterial pulls a Gitea PR's metadata, description, discussion,
 // reviews, and unified diff into one review-material doc.
-func assemblePRMaterial(pr string) (string, error) {
+func assemblePRMaterial(ctx context.Context, pr string) (string, error) {
 	prNum, err := strconv.Atoi(pr)
 	if err != nil {
 		return "", fmt.Errorf("invalid --pr %q: %w", pr, err)
-	}
-	ctx, err := famctx.WithFamCtx(context.Background(), ".")
-	if err != nil {
-		return "", fmt.Errorf("external-review --pr: %w", err)
 	}
 	client, err := forge.NewClient(ctx)
 	if err != nil {
 		return "", fmt.Errorf("external-review --pr: %w", err)
 	}
-	info, err := client.GetPR(prNum)
+	info, err := client.GetPR(ctx, prNum)
 	if err != nil {
 		return "", err
 	}
-	diff, err := client.GetPRDiff(prNum)
+	diff, err := client.GetPRDiff(ctx, prNum)
 	if err != nil {
 		return "", err
 	}
-	reviews, _ := client.GetPRReviews(prNum)
-	comments, _ := client.ListIssueComments(prNum)
+	reviews, _ := client.GetPRReviews(ctx, prNum)
+	comments, _ := client.ListIssueComments(ctx, prNum)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# PR #%d: %s\n", info.Number, info.Title)

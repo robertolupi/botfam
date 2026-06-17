@@ -13,11 +13,11 @@ import (
 // ForgeAPI is the subset of forge.Client the driver needs. An interface so the
 // driver is unit-testable with a fake forge (no network).
 type ForgeAPI interface {
-	GetIssue(num int) (*forge.Issue, error)
-	GetPRDiff(num int) (string, error)
-	PostIssueComment(num int, body string) error
-	ListRepoLabels() ([]forge.Label, error)
-	AddLabels(num int, ids []int64) error
+	GetIssue(ctx context.Context, num int) (*forge.Issue, error)
+	GetPRDiff(ctx context.Context, num int) (string, error)
+	PostIssueComment(ctx context.Context, num int, body string) error
+	ListRepoLabels(ctx context.Context) ([]forge.Label, error)
+	AddLabels(ctx context.Context, num int, ids []int64) error
 }
 
 // Options configure one driver run over a single artifact.
@@ -48,7 +48,7 @@ type Result struct {
 // advisory comment (and optionally apply high-confidence labels). Read-only
 // except for that one comment and the optional additive labels.
 func Run(ctx context.Context, opts Options) (*Result, error) {
-	art, err := fetchArtifact(opts.Forge, opts.Number)
+	art, err := fetchArtifact(ctx, opts.Forge, opts.Number)
 	if err != nil {
 		return nil, err
 	}
@@ -65,14 +65,14 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		return res, nil
 	}
 
-	if err := opts.Forge.PostIssueComment(opts.Number, comment); err != nil {
+	if err := opts.Forge.PostIssueComment(ctx, opts.Number, comment); err != nil {
 		return nil, fmt.Errorf("post comment: %w", err)
 	}
 	res.Posted = true
 	fmt.Fprintf(opts.Out, "posted advisory comment on #%d (%d suggestion(s))\n", opts.Number, len(suggestions))
 
 	if opts.ApplyLabels {
-		added, err := applyHighConfidence(opts.Forge, opts.Number, suggestions)
+		added, err := applyHighConfidence(ctx, opts.Forge, opts.Number, suggestions)
 		if err != nil {
 			fmt.Fprintf(opts.Out, "  warning: applying labels failed: %v\n", err)
 		}
@@ -137,15 +137,15 @@ func Assess(ctx context.Context, art Artifact, corpus Corpus, local, escalate Cl
 }
 
 // fetchArtifact loads the issue/PR and (for PRs) its diff.
-func fetchArtifact(api ForgeAPI, num int) (Artifact, error) {
-	iss, err := api.GetIssue(num)
+func fetchArtifact(ctx context.Context, api ForgeAPI, num int) (Artifact, error) {
+	iss, err := api.GetIssue(ctx, num)
 	if err != nil {
 		return Artifact{}, fmt.Errorf("get issue #%d: %w", num, err)
 	}
 	art := Artifact{Number: num, Kind: "issue", Title: iss.Title, Body: iss.Body}
 	if iss.PullRequest != nil {
 		art.Kind = "pr"
-		if diff, err := api.GetPRDiff(num); err == nil {
+		if diff, err := api.GetPRDiff(ctx, num); err == nil {
 			art.Diff = diff
 		}
 	}
@@ -215,7 +215,7 @@ func dedupe(in []Suggestion) []Suggestion {
 // (additive). Low-confidence suggestions are comment-only — the author confirms
 // (Decide-not-Consensus). Never applies a triage/* disposition that folds an
 // item; only the risk/* label.
-func applyHighConfidence(api ForgeAPI, num int, suggestions []Suggestion) ([]string, error) {
+func applyHighConfidence(ctx context.Context, api ForgeAPI, num int, suggestions []Suggestion) ([]string, error) {
 	want := map[string]bool{}
 	for _, s := range suggestions {
 		if s.Confidence == "high" {
@@ -225,7 +225,7 @@ func applyHighConfidence(api ForgeAPI, num int, suggestions []Suggestion) ([]str
 	if len(want) == 0 {
 		return nil, nil
 	}
-	labels, err := api.ListRepoLabels()
+	labels, err := api.ListRepoLabels(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func applyHighConfidence(api ForgeAPI, num int, suggestions []Suggestion) ([]str
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	if err := api.AddLabels(num, ids); err != nil {
+	if err := api.AddLabels(ctx, num, ids); err != nil {
 		return nil, err
 	}
 	sort.Strings(names)
