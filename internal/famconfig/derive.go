@@ -31,10 +31,12 @@ func LoadFamRegistry(workDir string) Registry {
 	return reg
 }
 
-// FamBranch returns the integration branch for this family: the explicit
-// fam.toml branch when set, else the default derived integration branch
-// name (<slug>-next).
+// FamBranch returns the integration branch for this family: bots open PRs here.
+// Priority: explicit integration_branch > legacy branch > <slug>-next > botfam-next.
 func FamBranch(reg Registry) string {
+	if reg.IntegrationBranch != "" {
+		return reg.IntegrationBranch
+	}
 	if reg.Branch != "" {
 		return reg.Branch
 	}
@@ -43,6 +45,15 @@ func FamBranch(reg Registry) string {
 		return slug + "-next"
 	}
 	return "botfam-next"
+}
+
+// FamReleaseBranch returns the public release branch (default: main).
+// Bots must never target this branch with PRs unless explicitly instructed.
+func FamReleaseBranch(reg Registry) string {
+	if reg.ReleaseBranch != "" {
+		return reg.ReleaseBranch
+	}
+	return "main"
 }
 
 // FamChannels returns the fam's main and ccrep IRC channels. Explicit

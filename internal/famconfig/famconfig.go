@@ -41,7 +41,13 @@ type AgentConfig struct {
 type Registry struct {
 	Name         string   `toml:"name"`
 	Slug         string   `toml:"slug,omitempty"`
-	Branch       string   `toml:"branch,omitempty"`
+	Branch       string   `toml:"branch,omitempty"` // deprecated: use IntegrationBranch
+
+	// IntegrationBranch is where bots open PRs (default: <slug>-next).
+	// ReleaseBranch is the public release target — bots must never target it
+	// unless explicitly instructed (default: main).
+	IntegrationBranch string `toml:"integration_branch,omitempty"`
+	ReleaseBranch     string `toml:"release_branch,omitempty"`
 	RootSet      []string `toml:"root_set,omitempty"`
 	Origin       string   `toml:"origin,omitempty"`
 	Roster       []string `toml:"roster,omitempty"`

@@ -19,6 +19,7 @@ type TemplateData struct {
 	OperatorName      string
 	ForgeURL          string
 	IntegrationBranch string
+	ReleaseBranch     string
 }
 
 // fillDefaults populates empty fields in TemplateData with their generic placeholder text.
@@ -46,6 +47,9 @@ func fillDefaults(data TemplateData) TemplateData {
 	}
 	if data.IntegrationBranch == "" {
 		data.IntegrationBranch = "<integration-branch>"
+	}
+	if data.ReleaseBranch == "" {
+		data.ReleaseBranch = "main"
 	}
 	return data
 }

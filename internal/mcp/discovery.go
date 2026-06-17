@@ -181,6 +181,7 @@ func buildDiscoveryData(ctx context.Context, workDir, clientName string) discove
 
 	d.tmpl.MainChannel, d.tmpl.CcrepChannel = famconfig.FamChannels(reg)
 	d.tmpl.IntegrationBranch = famconfig.FamBranch(reg)
+	d.tmpl.ReleaseBranch = famconfig.FamReleaseBranch(reg)
 	d.tmpl.ForgeURL = reg.Origin
 	d.projections = wiki.ParseProjections(reg.WikiProjections)
 	hasMemory := false
@@ -381,6 +382,9 @@ func renderRoot(d discoveryData) []byte {
 	fmt.Fprintf(&b, "- **fam**: %s\n", orPlaceholder(t.Fam, "<unresolved>"))
 	fmt.Fprintf(&b, "- **actor**: %s\n", orPlaceholder(t.Actor, "<unresolved>"))
 	fmt.Fprintf(&b, "- **main channel**: %s\n", orPlaceholder(t.MainChannel, "<unresolved>"))
+	fmt.Fprintf(&b, "- **integration branch**: %s — open PRs here; never target `%s` unless instructed\n",
+		orPlaceholder(t.IntegrationBranch, "<unresolved>"),
+		orPlaceholder(t.ReleaseBranch, "main"))
 	if d.resolvedVia != "" {
 		fmt.Fprintf(&b, "- **resolved via**: %s\n", d.resolvedVia)
 	}
@@ -436,9 +440,11 @@ type discoveryIndex struct {
 		Version string `json:"version"`
 	} `json:"server"`
 	Fam struct {
-		Name        string `json:"name"`
-		Actor       string `json:"actor"`
-		MainChannel string `json:"main_channel"`
+		Name              string `json:"name"`
+		Actor             string `json:"actor"`
+		MainChannel       string `json:"main_channel"`
+		IntegrationBranch string `json:"integration_branch"`
+		ReleaseBranch     string `json:"release_branch"`
 	} `json:"fam"`
 	ResolvedVia string        `json:"resolved_via,omitempty"`
 	Resources   []string      `json:"resources"`
@@ -453,6 +459,8 @@ func renderIndexJSON(d discoveryData) ([]byte, error) {
 	idx.Fam.Name = d.tmpl.Fam
 	idx.Fam.Actor = d.tmpl.Actor
 	idx.Fam.MainChannel = d.tmpl.MainChannel
+	idx.Fam.IntegrationBranch = d.tmpl.IntegrationBranch
+	idx.Fam.ReleaseBranch = d.tmpl.ReleaseBranch
 	idx.ResolvedVia = d.resolvedVia
 	idx.Resources = []string{
 		"botfam:///",
