@@ -197,9 +197,6 @@ func runMetaReviewEval(opts metaReviewOpts, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if IsJSONOutput() {
-		return writeJSONOutput(out, rep)
-	}
 	fmt.Fprint(out, metareview.FormatReport(rep))
 	return nil
 }

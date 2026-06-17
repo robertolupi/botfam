@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -120,23 +119,16 @@ when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 		for _, r := range results {
 			total += len(r.Rows)
 		}
-		if IsJSONOutput() {
-			obj := map[string]any{"total": total, "rules": results,
-				"acquire_ms": ls.Export.Duration.Milliseconds(), "eval_ms": ls.EvalTime.Milliseconds()}
-			b, _ := json.MarshalIndent(obj, "", "  ")
-			fmt.Fprintln(cmd.OutOrStdout(), string(b))
-		} else {
-			out := cmd.OutOrStdout()
-			for _, r := range results {
-				fmt.Fprintf(out, "== %s: %d ==\n", r.Predicate, len(r.Rows))
-				for _, row := range r.Rows {
-					fmt.Fprintf(out, "  %s\n", row)
-				}
+		out := cmd.OutOrStdout()
+		for _, r := range results {
+			fmt.Fprintf(out, "== %s: %d ==\n", r.Predicate, len(r.Rows))
+			for _, row := range r.Rows {
+				fmt.Fprintf(out, "  %s\n", row)
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(),
-				"%d violations (acquire %s, eval %s)\n",
-				total, ls.Export.Duration.Round(time.Millisecond), ls.EvalTime.Round(time.Millisecond))
 		}
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"%d violations (acquire %s, eval %s)\n",
+			total, ls.Export.Duration.Round(time.Millisecond), ls.EvalTime.Round(time.Millisecond))
 		if total > maxViolations {
 			return fmt.Errorf("forge-lint: %d violations exceed --max=%d", total, maxViolations)
 		}

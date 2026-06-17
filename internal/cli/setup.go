@@ -9,6 +9,7 @@ import (
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
+	harnesslib "github.com/robertolupi/botfam/internal/harness"
 	"github.com/spf13/cobra"
 )
 
@@ -155,9 +156,9 @@ func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) erro
 		return fmt.Errorf("failed to get user home directory: %w", err)
 	}
 
-	configurators := []MCPConfigurator{
-		NewAntigravityMCPConfigurator(),
-		NewCodexMCPConfigurator(),
+	configurators := []harnesslib.MCPConfigurator{
+		harnesslib.NewAntigravityMCPConfigurator(),
+		harnesslib.NewCodexMCPConfigurator(),
 	}
 
 	for _, cfg := range configurators {
@@ -180,7 +181,7 @@ func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) erro
 		fmt.Fprintf(out, "Registering botfam MCP server in global config: %s...\n", path)
 
 		// 1. Configure botfam server (merge to preserve existing properties like cwd, tools)
-		botfamSpec, ok, _ := cfg.Get("botfam", Global)
+		botfamSpec, ok, _ := cfg.Get("botfam", harnesslib.Global)
 		env := map[string]string{
 			"PATH": os.Getenv("PATH"),
 		}
@@ -191,19 +192,19 @@ func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) erro
 		}
 		env["PATH"] = os.Getenv("PATH")
 
-		err = cfg.Set(MCPServerSpec{
+		err = cfg.Set(harnesslib.MCPServerSpec{
 			Name:    "botfam",
 			Command: execPath,
 			Args:    []string{"serve"},
 			Env:     env,
-			Scope:   Global,
+			Scope:   harnesslib.Global,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to register botfam for %s: %w", harness, err)
 		}
 
 		// Remove legacy collab server
-		_ = cfg.Remove("collab", Global)
+		_ = cfg.Remove("collab", harnesslib.Global)
 
 		// 2. Configure forge server (merge to preserve existing properties)
 		if forgeURL != "" {
@@ -218,7 +219,7 @@ func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) erro
 				forgeName = "forge-" + slug
 			}
 
-			forgeSpec, ok, _ := cfg.Get(forgeName, Global)
+			forgeSpec, ok, _ := cfg.Get(forgeName, harnesslib.Global)
 			forgeEnv := map[string]string{
 				"GITEA_ACCESS_TOKEN_FILE": tokenPath,
 			}
@@ -229,12 +230,12 @@ func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) erro
 			}
 			forgeEnv["GITEA_ACCESS_TOKEN_FILE"] = tokenPath
 
-			err = cfg.Set(MCPServerSpec{
+			err = cfg.Set(harnesslib.MCPServerSpec{
 				Name:    forgeName,
 				Command: filepath.Join(home, "bin", "gitea-mcp-server"),
 				Args:    []string{"-t", "stdio", "-H", forgeURL},
 				Env:     forgeEnv,
-				Scope:   Global,
+				Scope:   harnesslib.Global,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to register %s for %s: %w", forgeName, harness, err)

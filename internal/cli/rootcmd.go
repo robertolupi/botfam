@@ -15,29 +15,6 @@ const (
 	groupServer = "server"
 )
 
-// Execute builds the Cobra command tree and runs it against args (os.Args[1:]).
-//
-// The global --json/-j flag is honoured in any position (matching the legacy
-// hand-rolled parser): it is stripped here and recorded via SetJSONOutput
-// before Cobra dispatches, so it works even for subcommands that pass their
-// arguments straight through to the underlying handler.
-func Execute(args []string) error {
-	var rest []string
-	jsonOut := false
-	for _, a := range args {
-		if a == "--json" || a == "-j" {
-			jsonOut = true
-			continue
-		}
-		rest = append(rest, a)
-	}
-	SetJSONOutput(jsonOut)
-
-	root := NewRootCmd()
-	root.SetArgs(rest)
-	return root.Execute()
-}
-
 // NewRootCmd builds the full `botfam` command tree: the CLI command builders
 // plus the MCP serve/mcp subcommands. cmd/botfam is a thin wrapper over this.
 func NewRootCmd() *cobra.Command {
@@ -61,10 +38,6 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 			return cmd.Help()
 		},
 	}
-
-	// Documented for `--help`; the actual value is parsed out-of-band in Execute
-	// so it works in any position, including after a passthrough subcommand.
-	root.PersistentFlags().BoolP("json", "j", false, "output results as structured JSON lines")
 
 	// Keep the command surface lean — no generated completion subcommand.
 	root.CompletionOptions.DisableDefaultCmd = true
