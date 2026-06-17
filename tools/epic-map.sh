@@ -12,10 +12,15 @@ set -eu
 out="${1:-docs/epic-map.html}"
 mkdir -p "$(dirname "$out")"
 
-if command -v botfam >/dev/null 2>&1; then
+# Prefer the in-repo source build (the installed botfam may predate
+# `forge graph`); fall back to an installed botfam outside the repo.
+if [ -f cmd/botfam/main.go ]; then
+  bf="go run ./cmd/botfam"
+elif command -v botfam >/dev/null 2>&1; then
   bf="botfam"
 else
-  bf="go run ./cmd/botfam"
+  echo "no botfam: run from the repo root or install botfam" >&2
+  exit 1
 fi
 
 $bf forge graph --all --format html --out "$out"
