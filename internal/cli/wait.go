@@ -98,10 +98,9 @@ background ingester (hosted in the botfam MCP server) is what fills the spool.`,
 				if err != nil {
 					return fmt.Errorf("wait: %w", err)
 				}
-				fctx, _ := famctx.FromContext(enriched)
 				ctx, stop := signal.NotifyContext(enriched, os.Interrupt, syscall.SIGTERM)
 				defer stop()
-				return runWatchItem(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), client, fctx.Registry.Repository, num,
+				return runWatchItem(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), client, client.Owner+"/"+client.Repo, num,
 					time.Duration(timeoutS)*time.Second, time.Duration(pollMs)*time.Millisecond)
 			}
 			if spoolDir == "" {
