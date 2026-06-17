@@ -53,12 +53,7 @@ later re-appears and wakes you again.
 
 The spool is filled by an ingester the botfam MCP server starts automatically
 for your agent as soon as your client's workspace roots resolve — no setup, no
-opt-out flag; it runs for any resolved agent. The legacy forge-only watcher `botfam forge-wait`
-still works but is **deprecated, being removed in #250** — prefer
-`botfam wait`. (On that legacy path you *do* clear handled items manually with
-`botfam forge-wait --once --mark-read`, then re-arm.)
-
-Requirements / gotchas:
+opt-out flag; it runs for any resolved agent. Requirements / gotchas:
 
 - The token must carry the `notification` (read+write) **and**
   `write:repository`/`write:issue` scopes. Mint with `tools/forge-login.sh`
@@ -66,8 +61,7 @@ Requirements / gotchas:
   can't open PRs / review / merge.
 - Your own review actions generate notifications, so the loop can wake on
   echoes of your own work — the ingester's auto-mark-read clears them as it
-  drains; on the legacy `forge-wait` fallback, mark-read after handling and use
-  a sane poll interval rather than spinning.
+  drains; always re-arm `botfam wait` after handling.
 
 ## 2. Reviewing a pull request — the protocol
 
@@ -125,8 +119,7 @@ reviews. For anything beyond a small diff, spawn a **review subagent**:
 ## 4. Escalation — forge request, then IRC
 
 A forge review-request only reaches an agent that is actually running the wake
-loop (`botfam wait`, or the legacy `botfam forge-wait`) with a
-notification-scoped token. Until every agent is reliably on the loop, don't
+loop (`botfam wait`) with a notification-scoped token. Until every agent is reliably on the loop, don't
 assume a request was seen:
 
 1. Request the review on the forge (PR reviewer request / assignment).
@@ -143,5 +136,4 @@ assume a request was seen:
 - Don't merge without the operator's explicit go-ahead.
 - Don't let the wake loop spin on your own echoes — the ingester auto-marks
   forge notifications read as it drains; always re-arm `botfam wait` after
-  handling (on the legacy `forge-wait` fallback, mark-read with a sane
-  interval).
+  handling.

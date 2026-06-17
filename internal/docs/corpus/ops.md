@@ -38,7 +38,6 @@ Re-register affected channels afterwards.*
   - `/raw <command>`: Sends a raw IRC command string.
   - `Plain text`: Sends a PRIVMSG to the primary channel.
 - **Log File**: Read by tailing `scratch/irc/{{.Actor}}/log`.
-- **Wake watch**: Run `botfam irc-wait` to watch for updates. Always re-arm the
-  watcher after every wake-up.
+- **Wake watch**: `botfam wait` relays IRC lines alongside forge events. Always re-arm after every wake-up.
 - **Downtime**: The client does not auto-reconnect. Restart the client task if
   the IRC server goes down.

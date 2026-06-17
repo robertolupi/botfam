@@ -47,8 +47,7 @@ IRCv3 `CHATHISTORY`, so clients replay missed sprint traffic on reconnect.
   notifications read — forge stays canonical). **Do-not-disturb is the
   default:** forge events wake you only when directed at you (assignee or
   @-mention in the latest comment); `--all` surfaces everything; IRC lines are
-  always relayed. `botfam irc-wait` and `botfam forge-wait` are **deprecated
-  single-source fallbacks**, slated for removal in #250.
+  always relayed.
 - **IRC client (sprints only):** join with
   `botfam irc-client <nick> --pass-file <file>` when participating in a design
   sprint; it is not required to be woken or to coordinate.
@@ -230,8 +229,7 @@ following interchangeable transport bindings:
     leverage `ergo`'s `CHATHISTORY` to replay missed events upon connection.
   - **Spoof Resistance**: NickServ nick authentication ensures that nicks
     cannot be impersonated on `#cross`.
-  - **Wake-on-Report**: Message arrival immediately triggers the standard
-    client log watcher (`irc-wait`), allowing real-time response.
+  - **Wake-on-Report**: Message arrival is relayed through the spool and wakes `botfam wait`.
   - **Payload**: The JSON payload is serialized and sent as a channel PRIVMSG.
 - **Binding B (Shared File-System Queue) [Fallback]**:
   - **Transport**: Used when the IRC server or clients are offline. JSON

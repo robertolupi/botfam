@@ -1,22 +1,15 @@
 package cli
 
 import (
-	"time"
-
 	"github.com/robertolupi/botfam/internal/irc"
 )
 
 // The reusable IRC log domain now lives in the dependency-free internal/irc leaf
-// (#311). cli keeps these thin adapters over the leaf for the irc-client/irc-wait/
-// scribe command builders (internal/mcp calls the leaf directly).
+// (#311). cli keeps these thin adapters over the leaf for the irc-client/scribe
+// command builders (internal/mcp calls the leaf directly).
 
 // HistoryEntry re-exports irc.HistoryEntry.
 type HistoryEntry = irc.HistoryEntry
-
-// WaitIrcLines re-exports irc.WaitIrcLines.
-func WaitIrcLines(logPath, nick string, fromOffset int64, timeout time.Duration) (lines []string, newOffset int64, timedOut bool, err error) {
-	return irc.WaitIrcLines(logPath, nick, fromOffset, timeout)
-}
 
 // ReadIrcLog re-exports irc.ReadIrcLog.
 func ReadIrcLog(logPath string, fromOffset int64, maxLines int) (lines []string, nextOffset int64, err error) {
