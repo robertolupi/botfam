@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mangle"
 	"github.com/spf13/cobra"
@@ -76,8 +75,7 @@ func newMangleExportCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		fctx, _ := famctx.FromContext(ctx)
-		c, err := forge.NewClientFromCtx(fctx)
+		c, err := forge.NewClient(ctx)
 		if err != nil {
 			return err
 		}
@@ -122,8 +120,7 @@ func newMangleEvalCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fctx, _ := famctx.FromContext(ctx)
-			c, err := forge.NewClientFromCtx(fctx)
+			c, err := forge.NewClient(ctx)
 			if err != nil {
 				return err
 			}

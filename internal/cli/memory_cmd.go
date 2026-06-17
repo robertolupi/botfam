@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -37,15 +38,15 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 	if err != nil {
 		return nil, "", "", err
 	}
-	// ResolveAgentRuntime handles wiki/ and submodule subdirs by stripping the
-	// nested git root and re-resolving at the enclosing agent worktree. Direct
-	// GitResolver use would return actor="wiki", which is not a declared agent.
-	fctx, err := famctx.ResolveAgentRuntime(wd)
+	// WithFamCtx handles wiki/ and submodule subdirs by stripping the nested git
+	// root and re-resolving at the enclosing agent worktree. Direct GitResolver
+	// use would return actor="wiki", which is not a declared agent.
+	ctx, err := famctx.WithFamCtx(context.Background(), wd)
 	if err != nil {
 		return nil, "", "", err
 	}
-	rf := fctx // alias for readability below; famctx.Context embeds FamIdentity
-	client, err := forge.NewClientFromCtx(fctx)
+	rf, _ := famctx.FromContext(ctx)
+	client, err := forge.NewClient(ctx)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("resolve forge config: %w", err)
 	}

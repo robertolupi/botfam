@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/famctx"
 )
@@ -66,26 +68,31 @@ type Review struct {
 	} `json:"user"`
 }
 
-// NewClientFromCtx builds a Client from an already-resolved famctx.Context,
-// avoiding a second famconfig resolution. Env overrides (GITEA_URL, GITEA_OWNER,
-// GITEA_REPO, GITEA_TOKEN) still win over the resolved values. The token is read
-// from ctx.TokenPath, which famctx already keyed on the effective harness (#371).
-func NewClientFromCtx(ctx famctx.Context) (*Client, error) {
+// NewClient builds a Client from a context.Context enriched by famctx.WithFamCtx.
+// It returns an error if ctx does not carry a famctx.Context (i.e. was not
+// enriched at the dispatch boundary). Env overrides (GITEA_URL, GITEA_OWNER,
+// GITEA_REPO, GITEA_TOKEN) win over the resolved values; the token is read from
+// fctx.TokenPath, already keyed on the effective harness (#371).
+func NewClient(ctx context.Context) (*Client, error) {
+	fctx, ok := famctx.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("forge: context does not carry a famctx (call famctx.WithFamCtx before reaching this point)")
+	}
 	baseURL := os.Getenv("GITEA_URL")
 	owner := os.Getenv("GITEA_OWNER")
 	repo := os.Getenv("GITEA_REPO")
 	token := os.Getenv("GITEA_TOKEN")
 
-	if token == "" && ctx.TokenPath != "" {
-		if b, err := os.ReadFile(ctx.TokenPath); err == nil {
+	if token == "" && fctx.TokenPath != "" {
+		if b, err := os.ReadFile(fctx.TokenPath); err == nil {
 			token = strings.TrimSpace(string(b))
 		}
 	}
 	if baseURL == "" {
-		baseURL = ctx.Registry.ForgeURL
+		baseURL = fctx.Registry.ForgeURL
 	}
 	if owner == "" || repo == "" {
-		if o, r, ok := famconfig.SplitOwnerRepo(ctx.Registry.Repository); ok {
+		if o, r, ok := famconfig.SplitOwnerRepo(fctx.Registry.Repository); ok {
 			if owner == "" {
 				owner = o
 			}
@@ -107,12 +114,16 @@ func NewClientFromCtx(ctx famctx.Context) (*Client, error) {
 		return nil, errors.New("forge: cannot resolve repo from resolved config")
 	}
 	if token == "" {
-		return nil, fmt.Errorf("forge: token is empty (TokenPath=%q); run `botfam mint`", ctx.TokenPath)
+		return nil, fmt.Errorf("forge: token is empty (TokenPath=%q); run `botfam mint`", fctx.TokenPath)
 	}
 	return &Client{BaseURL: baseURL, Owner: owner, Repo: repo, Token: token}, nil
 }
 
-func NewClient(workDir string, actor string) (*Client, error) {
+// NewClientForWorkDir builds a Client by re-resolving fam identity from workDir
+// and actor. Use this only in contexts that do not have an enriched
+// context.Context (e.g. MCP discovery, ingest goroutines). Prefer NewClient
+// everywhere a context.Context is available.
+func NewClientForWorkDir(workDir string, actor string) (*Client, error) {
 	baseURL := os.Getenv("GITEA_URL")
 	owner := os.Getenv("GITEA_OWNER")
 	repo := os.Getenv("GITEA_REPO")

@@ -27,7 +27,7 @@ import (
 // wiki/ cache, else a clear diagnostic.
 func wikiProvider(workDir, actor string) (wiki.Provider, error) {
 	var client *forge.Client
-	if c, err := forge.NewClient(workDir, actor); err == nil {
+	if c, err := forge.NewClientForWorkDir(workDir, actor); err == nil {
 		client = c
 	}
 	return wiki.Resolve(client, filepath.Join(workDir, "wiki"))

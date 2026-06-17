@@ -90,15 +90,16 @@ background ingester (hosted in the botfam MCP server) is what fills the spool.`,
 				if err != nil || num <= 0 {
 					return fmt.Errorf("wait: argument must be an issue/PR number, got %q", args[0])
 				}
-				fctx, err := famctx.ResolveAgentRuntime(workDir)
+				enriched, err := famctx.WithFamCtx(cmd.Context(), workDir)
 				if err != nil {
 					return fmt.Errorf("wait: %w", err)
 				}
-				client, err := forge.NewClientFromCtx(fctx)
+				client, err := forge.NewClient(enriched)
 				if err != nil {
 					return fmt.Errorf("wait: %w", err)
 				}
-				ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+				fctx, _ := famctx.FromContext(enriched)
+				ctx, stop := signal.NotifyContext(enriched, os.Interrupt, syscall.SIGTERM)
 				defer stop()
 				return runWatchItem(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), client, fctx.Registry.Repository, num,
 					time.Duration(timeoutS)*time.Second, time.Duration(pollMs)*time.Millisecond)

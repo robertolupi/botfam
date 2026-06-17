@@ -274,7 +274,7 @@ func TestNewClient_Resolution(t *testing.T) {
 	runCmd(tempDir, "git", "init")
 
 	// Call NewClient
-	client, err := NewClient(tempDir, "agy")
+	client, err := NewClientForWorkDir(tempDir, "agy")
 	if err != nil {
 		t.Fatalf("NewClient failed: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestNewClient_Resolution(t *testing.T) {
 	// Configure a mock remote
 	runCmd(tempDir, "git", "remote", "add", "origin", "git@github.com:git-owner/git-repo.git")
 
-	clientFallback, err := NewClient(tempDir, "agy")
+	clientFallback, err := NewClientForWorkDir(tempDir, "agy")
 	if err != nil {
 		t.Fatalf("NewClient with fallback failed: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestNewClient_AgentWorktreeViaResolveFam(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client, err := NewClient(wt, "claude")
+	client, err := NewClientForWorkDir(wt, "claude")
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

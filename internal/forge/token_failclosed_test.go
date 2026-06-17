@@ -31,7 +31,7 @@ func TestNewClientNoLegacyFallback(t *testing.T) {
 	t.Setenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK", "")
 
 	workDir := t.TempDir() // no fam.toml → no harness
-	if _, err := NewClient(workDir, actor); err == nil {
+	if _, err := NewClientForWorkDir(workDir, actor); err == nil {
 		t.Fatal("expected fail-closed: legacy/per-fam tokens must not be a silent fallback for a missing per-harness token (#183)")
 	}
 }

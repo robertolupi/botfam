@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/issuegraph"
 	"github.com/robertolupi/botfam/internal/mangle"
@@ -57,8 +56,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		if err != nil {
 			return err
 		}
-		fctx, _ := famctx.FromContext(ctx)
-		c, err := forge.NewClientFromCtx(fctx)
+		c, err := forge.NewClient(ctx)
 		if err != nil {
 			return err
 		}
@@ -111,8 +109,7 @@ when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 		if err != nil {
 			return err
 		}
-		fctx, _ := famctx.FromContext(ctx)
-		c, err := forge.NewClientFromCtx(fctx)
+		c, err := forge.NewClient(ctx)
 		if err != nil {
 			return err
 		}

@@ -523,11 +523,11 @@ func assemblePRMaterial(pr string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid --pr %q: %w", pr, err)
 	}
-	fctx, err := famctx.ResolveAgentRuntime(".")
+	ctx, err := famctx.WithFamCtx(context.Background(), ".")
 	if err != nil {
 		return "", fmt.Errorf("external-review --pr: %w", err)
 	}
-	client, err := forge.NewClientFromCtx(fctx)
+	client, err := forge.NewClient(ctx)
 	if err != nil {
 		return "", fmt.Errorf("external-review --pr: %w", err)
 	}

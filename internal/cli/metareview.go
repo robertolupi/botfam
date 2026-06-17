@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/robertolupi/botfam/internal/metareview"
@@ -92,8 +91,7 @@ func NewMetaReviewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("invalid issue/PR number %q: %w", args[0], err)
 			}
-			fctx, _ := famctx.FromContext(ctx)
-			client, err := forge.NewClientFromCtx(fctx)
+			client, err := forge.NewClient(ctx)
 			if err != nil {
 				return fmt.Errorf("meta-review: %w", err)
 			}

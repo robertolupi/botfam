@@ -14,7 +14,6 @@ import (
 
 	"context"
 
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -55,8 +54,7 @@ func newSessionExtractCmd() *cobra.Command {
 				return err
 			}
 			return RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
-				fctx, _ := famctx.FromContext(ctx)
-				client, err := forge.NewClientFromCtx(fctx)
+				client, err := forge.NewClient(ctx)
 				if err != nil {
 					return err
 				}
