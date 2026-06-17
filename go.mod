@@ -11,6 +11,16 @@ require (
 )
 
 require (
+	bitbucket.org/creachadair/stringset v0.0.11 // indirect
+	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
+	github.com/chzyer/readline v1.5.1 // indirect
+	github.com/klauspost/compress v1.18.5 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/exp v0.0.0-20240707233637-46b078467d37 // indirect
+)
+
+require (
+	codeberg.org/TauCeti/mangle-go v0.0.0-00010101000000-000000000000
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -25,3 +35,5 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
 )
+
+replace codeberg.org/TauCeti/mangle-go => ./third_party/mangle-go

@@ -458,6 +458,13 @@ type Issue struct {
 	Labels    []Label `json:"labels"`
 	CreatedAt string  `json:"created_at"`
 	ClosedAt  string  `json:"closed_at"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+	Milestone *struct {
+		ID    int64  `json:"id"`
+		Title string `json:"title"`
+	} `json:"milestone"`
 }
 
 type TimelineEvent struct {
