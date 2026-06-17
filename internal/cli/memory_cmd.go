@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/memory"
 	"github.com/spf13/cobra"
@@ -37,14 +36,21 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 	if err != nil {
 		return nil, "", "", err
 	}
-	info, err := (famconfig.GitResolver{}).ResolveIdentity(wd)
+	// ResolveFam (→ famctx.ResolveAgentRuntime) handles wiki/ and submodule
+	// subdirs by stripping the nested git root and re-resolving at the enclosing
+	// agent worktree. Direct GitResolver use would return actor="wiki" here, which
+	// is not a declared agent and causes a spurious "could not resolve actor" error.
+	rf, err := ResolveFam(wd)
 	if err != nil {
 		return nil, "", "", err
 	}
-	if info.Actor == "" {
-		return nil, "", "", fmt.Errorf("could not resolve actor for worktree: %s", wd)
+	// Give forge.NewClient the worktree root so its own famconfig.ResolveFam call
+	// lands in the declared [agent.X] checkout, not a nested wiki/ or submodule.
+	clientDir := rf.WorktreeRoot
+	if clientDir == "" {
+		clientDir = wd
 	}
-	client, err := forge.NewClient(wd, info.Actor)
+	client, err := forge.NewClient(clientDir, rf.Actor)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("resolve forge config: %w", err)
 	}
@@ -52,19 +58,19 @@ func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) 
 	if err != nil {
 		return nil, "", "", err
 	}
-	famSlug := famconfig.FamSlug(famconfig.LoadFamRegistry(wd))
+	famSlug := rf.Slug
 	if famSlug == "" {
 		famSlug = "botfam"
 	}
 	// Per-actor clone so concurrent agents never race on a shared working tree;
 	// cross-agent concurrency is mediated by the push/rebase CAS at the remote.
-	cloneDir = filepath.Join(home, ".botfam", famSlug, "memory-clone-"+info.Actor)
+	cloneDir = filepath.Join(home, ".botfam", famSlug, "memory-clone-"+rf.Actor)
 	authURL := memory.WikiAuthURL(client.BaseURL, client.Owner, client.Repo, client.Token)
 	w, err := memory.CloneWiki(authURL, cloneDir, "")
 	if err != nil {
 		return nil, "", "", fmt.Errorf("open wiki clone: %w", err)
 	}
-	return memory.NewStore(w), info.Actor, cloneDir, nil
+	return memory.NewStore(w), rf.Actor, cloneDir, nil
 }
 
 func today() string { return time.Now().Format("2006-01-02") }
