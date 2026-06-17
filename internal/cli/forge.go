@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/issuegraph"
 	"github.com/robertolupi/botfam/internal/mangle"
@@ -46,7 +46,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
   botfam forge graph --milestone M7 --format dot | dot -Tsvg > m7.svg`,
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
+	cmd.RunE = RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		switch format {
 		case "mermaid", "dot", "html":
 		default:
@@ -56,7 +56,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		if err != nil {
 			return err
 		}
-		c, err := forge.NewClientFromCtx(fctx)
+		c, err := forge.NewClient(ctx)
 		if err != nil {
 			return err
 		}
@@ -104,12 +104,12 @@ rule set (misattributed work, double-close, merged-but-open). Exits non-zero
 when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
+	cmd.RunE = RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		sc, err := build()
 		if err != nil {
 			return err
 		}
-		c, err := forge.NewClientFromCtx(fctx)
+		c, err := forge.NewClient(ctx)
 		if err != nil {
 			return err
 		}

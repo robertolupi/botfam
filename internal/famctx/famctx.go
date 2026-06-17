@@ -320,6 +320,32 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 	return Context{}, resolveErr
 }
 
+// contextKey is the unexported key used to store a Context inside a context.Context.
+type contextKey struct{}
+
+// NewContext returns a copy of ctx carrying fctx. Retrieve it with FromContext.
+func NewContext(ctx context.Context, fctx Context) context.Context {
+	return context.WithValue(ctx, contextKey{}, fctx)
+}
+
+// FromContext returns the Context stored by NewContext, and whether one was present.
+func FromContext(ctx context.Context) (Context, bool) {
+	v, ok := ctx.Value(contextKey{}).(Context)
+	return v, ok
+}
+
+// WithFamCtx resolves the agent runtime context for workDir and stores it in
+// ctx, returning the enriched context. It is NewContext composed with
+// ResolveAgentRuntime — the single call site for commands and handlers that
+// need to thread identity into downstream actor calls.
+func WithFamCtx(ctx context.Context, workDir string) (context.Context, error) {
+	fctx, err := ResolveAgentRuntime(workDir)
+	if err != nil {
+		return ctx, err
+	}
+	return NewContext(ctx, fctx), nil
+}
+
 // ResolveAgentRuntime resolves the family context under strict agent-runtime expectations.
 func ResolveAgentRuntime(workDir string) (Context, error) {
 	return Resolve(context.Background(), Inputs{

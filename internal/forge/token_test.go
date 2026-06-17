@@ -35,14 +35,14 @@ func TestNewClientTestTokenFallbackIsOptIn(t *testing.T) {
 
 	t.Run("default: test token is ignored, fails closed", func(t *testing.T) {
 		t.Setenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK", "")
-		if _, err := NewClient(workDir, actor); err == nil {
+		if _, err := NewClientForWorkDir(workDir, actor); err == nil {
 			t.Fatal("expected NewClient to fail (no production token), but it succeeded — the *-test fallback must not apply by default")
 		}
 	})
 
 	t.Run("opt-in: test token used when explicitly allowed", func(t *testing.T) {
 		t.Setenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK", "1")
-		c, err := NewClient(workDir, actor)
+		c, err := NewClientForWorkDir(workDir, actor)
 		if err != nil {
 			t.Fatalf("expected NewClient to succeed with BOTFAM_ALLOW_TEST_TOKEN_FALLBACK=1, got: %v", err)
 		}

@@ -297,7 +297,7 @@ func ForgePollerFor(workDir, actor string) (Poller, error) {
 	if rf.Repository == "" {
 		return nil, fmt.Errorf("fam %q declares no repository; forge ingest disabled", rf.Slug)
 	}
-	client, err := forge.NewClient(workDir, actor)
+	client, err := forge.NewClientForWorkDir(workDir, actor)
 	if err != nil {
 		return nil, err
 	}

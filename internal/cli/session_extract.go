@@ -12,7 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famctx"
+	"context"
+
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -52,8 +53,8 @@ func newSessionExtractCmd() *cobra.Command {
 			if err := validateExtractTimes(opts); err != nil {
 				return err
 			}
-			return WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
-				client, err := forge.NewClientFromCtx(fctx)
+			return RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+				client, err := forge.NewClient(ctx)
 				if err != nil {
 					return err
 				}

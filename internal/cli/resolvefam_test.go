@@ -231,9 +231,9 @@ func TestForgeIdentityParity(t *testing.T) {
 		t.Fatalf("ResolveFam: %v", err)
 	}
 	// 2. forge MCP client.
-	cl, err := forge.NewClient(wt, rf.Actor)
+	cl, err := forge.NewClientForWorkDir(wt, rf.Actor)
 	if err != nil {
-		t.Fatalf("forge.NewClient: %v", err)
+		t.Fatalf("forge.NewClientForWorkDir: %v", err)
 	}
 	// 3. whoami / orient.
 	info, err := (famconfig.GitResolver{}).ResolveIdentity(wt)

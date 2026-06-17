@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/robertolupi/botfam/internal/metareview"
@@ -87,12 +86,12 @@ func NewMetaReviewCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.ExactArgs(1),
-		RunE: WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
+		RunE: RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			num, err := strconv.Atoi(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid issue/PR number %q: %w", args[0], err)
 			}
-			client, err := forge.NewClientFromCtx(fctx)
+			client, err := forge.NewClient(ctx)
 			if err != nil {
 				return fmt.Errorf("meta-review: %w", err)
 			}

@@ -1,11 +1,11 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mangle"
 	"github.com/spf13/cobra"
@@ -70,12 +70,12 @@ func newMangleExportCmd() *cobra.Command {
 		Short: "Write forge history as Mangle facts",
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
+	cmd.RunE = RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		sc, err := build()
 		if err != nil {
 			return err
 		}
-		c, err := forge.NewClientFromCtx(fctx)
+		c, err := forge.NewClient(ctx)
 		if err != nil {
 			return err
 		}
@@ -109,7 +109,7 @@ func newMangleEvalCmd() *cobra.Command {
 		Short: "Evaluate a Mangle rule file against forge facts",
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = WithFamCtx(func(cmd *cobra.Command, args []string, fctx famctx.Context) error {
+	cmd.RunE = RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		if ruleFile == "" {
 			return fmt.Errorf("--file RULES.mg is required")
 		}
@@ -120,7 +120,7 @@ func newMangleEvalCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			c, err := forge.NewClientFromCtx(fctx)
+			c, err := forge.NewClient(ctx)
 			if err != nil {
 				return err
 			}

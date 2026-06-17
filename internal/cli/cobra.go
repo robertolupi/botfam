@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"io"
 	"os"
 
@@ -21,27 +22,27 @@ func runCobra(c *cobra.Command, args []string, out io.Writer) error {
 	return c.Execute()
 }
 
-// WithFamCtx wraps a RunE that requires the resolved agent runtime context.
-// It resolves once from os.Getwd() and injects the result; commands with an
-// explicit --work-dir flag should use WithFamCtxDir instead.
-func WithFamCtx(fn func(*cobra.Command, []string, famctx.Context) error) func(*cobra.Command, []string) error {
+// RunWithFamCtx wraps a cobra RunE: it calls famctx.WithFamCtx to resolve and
+// embed the agent runtime context into the command's context.Context, then
+// passes the enriched context to fn. Commands with an explicit --work-dir flag
+// should use RunWithFamCtxDir instead.
+func RunWithFamCtx(fn func(context.Context, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		wd, err := os.Getwd()
 		if err != nil {
 			return err
 		}
-		ctx, err := famctx.ResolveAgentRuntime(wd)
+		ctx, err := famctx.WithFamCtx(cmd.Context(), wd)
 		if err != nil {
 			return err
 		}
-		return fn(cmd, args, ctx)
+		return fn(ctx, cmd, args)
 	}
 }
 
-// WithFamCtxDir is like WithFamCtx but reads the work directory from workDir
-// at call time (useful for commands that expose a --work-dir flag; the pointer
-// is evaluated lazily so flag parsing has already run).
-func WithFamCtxDir(workDir *string, fn func(*cobra.Command, []string, famctx.Context) error) func(*cobra.Command, []string) error {
+// RunWithFamCtxDir is like RunWithFamCtx but reads the work directory from
+// workDir at call time (pointer evaluated lazily after flag parsing).
+func RunWithFamCtxDir(workDir *string, fn func(context.Context, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		wd := *workDir
 		if wd == "" {
@@ -51,10 +52,10 @@ func WithFamCtxDir(workDir *string, fn func(*cobra.Command, []string, famctx.Con
 				return err
 			}
 		}
-		ctx, err := famctx.ResolveAgentRuntime(wd)
+		ctx, err := famctx.WithFamCtx(cmd.Context(), wd)
 		if err != nil {
 			return err
 		}
-		return fn(cmd, args, ctx)
+		return fn(ctx, cmd, args)
 	}
 }
