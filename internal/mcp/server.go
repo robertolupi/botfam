@@ -20,6 +20,8 @@ import (
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
+	giteaannot "gitea.com/gitea/gitea-mcp/pkg/annotation"
+
 	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/famctx"
@@ -40,23 +42,6 @@ const (
 // errIdentityRequired signals that no actor identity could be resolved from
 // any source (call arg, bound session, env, worktree directory).
 var errIdentityRequired = errors.New("identity required: pass actor, initialize with workspace roots, or run from a named worktree")
-
-// identityOptionalTools are tools whose handlers never use the calling actor.
-// For these, a missing identity is tolerated; identity conflicts are still
-// rejected and a resolved identity still binds the session as usual.
-var identityOptionalTools = map[string]bool{
-	"worktree_init": true,
-	"worktree_sync": true,
-}
-
-// readOnlyTools defines the MCP tools allowed in cross-actor mode.
-// Any tool not listed here is considered mutating and blocked.
-var readOnlyTools = map[string]bool{
-	"orient":     true,
-	"irc_read":   true,
-	"irc_wait":   true,
-	"irc_replay": true,
-}
 
 type server struct {
 	mcpSrv  *mcpserver.MCPServer
@@ -253,6 +238,13 @@ type toolHandler func(ctx context.Context, rc *resolvedCtx, args map[string]any)
 type dispatchEntry struct {
 	tool    mcplib.Tool
 	handler toolHandler
+	// readOnly marks a tool safe to run in another agent's worktree (cross-actor):
+	// it never mutates state the target agent owns. Set at registration so it
+	// cannot drift from the handler. Replaces the old readOnlyTools map (#427).
+	readOnly bool
+	// identityOptional tolerates a missing executing identity — the handler never
+	// uses the calling actor. Replaces the old identityOptionalTools map (#427).
+	identityOptional bool
 	// bypassPreamble skips the shared identity/serve-gate/cross-actor preamble.
 	// Only orient sets it: it is a read-only orientation probe that resolves the
 	// discovery root itself (the authoritative path on system-wide mounts, #132).
@@ -291,6 +283,7 @@ func (s *server) buildEntries() map[string]dispatchEntry {
 	add(dispatchEntry{
 		tool: mcplib.NewTool("irc_write",
 			mcplib.WithDescription("Write a raw line to the IRC client's input pipe."),
+			mcplib.WithToolAnnotation(giteaannot.Write("Write to IRC")),
 			mcplib.WithString("message", mcplib.Required()),
 			mcplib.WithString("target"),
 			mcplib.WithString("actor"),
@@ -301,54 +294,66 @@ func (s *server) buildEntries() map[string]dispatchEntry {
 	add(dispatchEntry{
 		tool: mcplib.NewTool("irc_read",
 			mcplib.WithDescription("Read lines from the IRC client's log (raw tail, no filtering)."),
+			mcplib.WithToolAnnotation(giteaannot.ReadOnly("Read IRC log")),
 			mcplib.WithNumber("lines"),
 			mcplib.WithNumber("from_offset"),
 			mcplib.WithString("actor"),
 			mcplib.WithString("work_dir"),
 		),
-		handler: s.handleIrcRead,
+		handler:  s.handleIrcRead,
+		readOnly: true,
 	})
 	add(dispatchEntry{
 		tool: mcplib.NewTool("irc_wait",
 			mcplib.WithDescription("Block until new IRC log lines relevant to the actor appear, or timeout."),
+			mcplib.WithToolAnnotation(giteaannot.ReadOnly("Wait for IRC log lines")),
 			mcplib.WithNumber("timeout_s"),
 			mcplib.WithNumber("from_offset"),
 			mcplib.WithString("actor"),
 			mcplib.WithString("work_dir"),
 		),
-		handler: s.handleIrcWait,
+		handler:  s.handleIrcWait,
+		readOnly: true,
 	})
 	add(dispatchEntry{
 		tool: mcplib.NewTool("irc_replay",
 			mcplib.WithDescription("Replay durable shared channel history logs."),
+			mcplib.WithToolAnnotation(giteaannot.ReadOnly("Replay channel history")),
 			mcplib.WithString("since"),
 			mcplib.WithString("channels"),
 			mcplib.WithString("actor"),
 			mcplib.WithString("work_dir"),
 		),
-		handler: s.handleIrcReplay,
+		handler:  s.handleIrcReplay,
+		readOnly: true,
 	})
 	add(dispatchEntry{
 		tool: mcplib.NewTool("worktree_init",
 			mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
+			mcplib.WithToolAnnotation(giteaannot.Write("Initialize a worktree")),
 			mcplib.WithString("target_actor", mcplib.Required()),
 			mcplib.WithString("work_dir"),
 		),
-		handler: s.handleWorktreeInit,
+		handler:          s.handleWorktreeInit,
+		identityOptional: true,
 	})
 	add(dispatchEntry{
 		tool: mcplib.NewTool("worktree_sync",
 			mcplib.WithDescription("Safely bring the worktree up to date with main (auto-stash, merge main, pop stash)."),
+			mcplib.WithToolAnnotation(giteaannot.Write("Sync a worktree with main")),
 			mcplib.WithString("work_dir"),
 		),
-		handler: s.handleWorktreeSync,
+		handler:          s.handleWorktreeSync,
+		identityOptional: true,
 	})
 	add(dispatchEntry{
 		tool: mcplib.NewTool("orient",
 			mcplib.WithDescription("Return this fam's discovery root (fam, actor, health, channels) as botfam.discovery.v1 JSON, resolved from work_dir. Use this when botfam:/// shows <unresolved> (e.g. a system-wide MCP mount). Defaults work_dir to $PWD."),
+			mcplib.WithToolAnnotation(giteaannot.ReadOnly("Orient: discovery root")),
 			mcplib.WithString("work_dir"),
 		),
 		handler:        s.handleOrient,
+		readOnly:       true,
 		bypassPreamble: true,
 	})
 
@@ -374,7 +379,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	if entry.bypassPreamble {
 		return entry.handler(ctx, nil, args)
 	}
-	rc, err := s.runPreamble(ctx, name, args)
+	rc, err := s.runPreamble(ctx, name, entry, args)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +390,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 // enforces the fail-closed serve gate and cross-actor read-only rule shared by
 // every non-bypass tool. It also lazily starts the spool ingester. The result
 // is handed to the tool handler.
-func (s *server) runPreamble(ctx context.Context, name string, args map[string]any) (*resolvedCtx, error) {
+func (s *server) runPreamble(ctx context.Context, name string, entry dispatchEntry, args map[string]any) (*resolvedCtx, error) {
 	workDir := argString(args, "work_dir")
 	cwd, err := os.Getwd()
 	if workDir == "" || (workDir == "." && err == nil && cwd == "/") {
@@ -425,16 +430,16 @@ func (s *server) runPreamble(ctx context.Context, name string, args map[string]a
 	}
 
 	clientActor := s.resolveClientActor(ctx, clientRoots)
-	actor, isCrossActor, err := s.resolveActor(argString(args, "actor"), clientActor, c.Actor, name)
+	actor, isCrossActor, err := s.resolveActor(argString(args, "actor"), clientActor, c.Actor, entry.readOnly)
 	if err != nil {
-		if !identityOptionalTools[name] || !errors.Is(err, errIdentityRequired) {
+		if !entry.identityOptional || !errors.Is(err, errIdentityRequired) {
 			return nil, err
 		}
 		actor = ""
 		isCrossActor = false
 	}
 
-	if isCrossActor && !readOnlyTools[name] {
+	if isCrossActor && !entry.readOnly {
 		return nil, fmt.Errorf("acting in another agent's worktree (executing: %s, target: %s) is read-only; mutating tool '%s' is blocked", actor, c.Actor, name)
 	}
 
@@ -645,7 +650,7 @@ func (s *server) resolveClientActor(ctx context.Context, clientRoots []string) s
 	return ""
 }
 
-func (s *server) resolveActor(callActor string, clientActor string, dirActor string, toolName string) (string, bool, error) {
+func (s *server) resolveActor(callActor string, clientActor string, dirActor string, readOnly bool) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -675,7 +680,7 @@ func (s *server) resolveActor(callActor string, clientActor string, dirActor str
 
 	// Bind session actor if not already bound, and not a blocked mutating call.
 	isCrossActor := dirActor != "" && executing != dirActor
-	isMutating := !readOnlyTools[toolName]
+	isMutating := !readOnly
 	if s.actor == "" && !(isCrossActor && isMutating) {
 		s.actor = executing
 	}

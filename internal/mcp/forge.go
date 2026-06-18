@@ -47,37 +47,25 @@ func forgeDomains() []*giteatool.Tool {
 	}
 }
 
-// init marks the read-only forge tools as cross-actor-safe, keyed by their
-// prefixed name. It runs after the imported operation packages' own init()
-// (which register their tools), so the registries are populated here. Doing it
-// in init (single goroutine, before serving) keeps buildEntries free of global
-// mutation. Write tools are omitted, so a forge write from another agent's
-// worktree is blocked by the same cross-actor rule as any mutating tool.
-func init() {
-	for _, dom := range forgeDomains() {
-		for _, st := range dom.Tools() {
-			if h := st.Tool.Annotations.ReadOnlyHint; h != nil && *h {
-				readOnlyTools[forgeToolPrefix+st.Tool.Name] = true
-			}
-		}
-	}
-}
-
 // addForgeEntries mounts every gitea-mcp tool into the dispatch table under a
 // forge_ name, wrapping its handler so it runs through botfam's shared preamble
 // (identity, fail-closed serve gate, cross-actor rule) with the resolved actor's
 // forge token injected. This is the in-process replacement for the separate
 // gitea-mcp-server process (#429), and the path a CattleSeam interceptor (#425)
-// wraps along with every other tool.
+// wraps along with every other tool. A tool's read-only annotation is carried
+// onto the entry, so read tools are cross-actor-safe and writes are blocked
+// cross-actor like any mutating tool (#427).
 func addForgeEntries(entries map[string]dispatchEntry) {
 	for _, dom := range forgeDomains() {
 		for _, st := range dom.Tools() {
 			tool := st.Tool
 			origName := tool.Name
 			tool.Name = forgeToolPrefix + origName
+			ro := tool.Annotations.ReadOnlyHint
 			entries[tool.Name] = dispatchEntry{
-				tool:    tool,
-				handler: forgeHandler(origName, st.Handler),
+				tool:     tool,
+				handler:  forgeHandler(origName, st.Handler),
+				readOnly: ro != nil && *ro,
 			}
 		}
 	}

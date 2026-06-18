@@ -40,13 +40,15 @@ func TestForgeToolsMounted(t *testing.T) {
 // cross-actor-safe while writes are not, so a forge write from another agent's
 // worktree is blocked by the shared cross-actor rule (#429).
 func TestForgeReadToolsCrossActorSafe(t *testing.T) {
-	if !readOnlyTools["forge_issue_read"] {
+	s := &server{}
+	entries := s.buildEntries()
+	if !entries["forge_issue_read"].readOnly {
 		t.Error("forge_issue_read should be cross-actor read-only")
 	}
-	if !readOnlyTools["forge_list_issues"] {
+	if !entries["forge_list_issues"].readOnly {
 		t.Error("forge_list_issues should be cross-actor read-only")
 	}
-	if readOnlyTools["forge_issue_write"] {
+	if entries["forge_issue_write"].readOnly {
 		t.Error("forge_issue_write must NOT be cross-actor read-only (it mutates)")
 	}
 }

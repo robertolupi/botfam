@@ -480,6 +480,29 @@ func TestCallToolUnknownTool(t *testing.T) {
 	}
 }
 
+// TestNativeToolCapability verifies the #427 tiering: capability lives on the
+// registry entry and each tool carries a matching MCP read-only/write annotation.
+func TestNativeToolCapability(t *testing.T) {
+	s := &server{}
+	entries := s.buildEntries()
+
+	if ro := entries["irc_read"].tool.Annotations.ReadOnlyHint; ro == nil || !*ro {
+		t.Error("irc_read should carry ReadOnlyHint=true")
+	}
+	if ro := entries["irc_write"].tool.Annotations.ReadOnlyHint; ro == nil || *ro {
+		t.Error("irc_write should carry ReadOnlyHint=false")
+	}
+	if !entries["irc_read"].readOnly {
+		t.Error("irc_read entry.readOnly should be true")
+	}
+	if entries["irc_write"].readOnly {
+		t.Error("irc_write entry.readOnly should be false (it mutates)")
+	}
+	if !entries["worktree_init"].identityOptional || !entries["worktree_sync"].identityOptional {
+		t.Error("worktree_init/worktree_sync should be identityOptional")
+	}
+}
+
 // TestWithRecoveryPanicDoesNotKillSession verifies the #426 WithRecovery setting:
 // a panicking tool handler is converted to an error by the MCP server's dispatch
 // instead of tearing down the stdio session. We register a panicking tool on a
