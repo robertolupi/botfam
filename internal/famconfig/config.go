@@ -44,6 +44,11 @@ type Config struct {
 	Agents        map[string]AgentConfig `toml:"agent,omitempty"`
 	Users         map[string]AgentConfig `toml:"user,omitempty"`
 	Repos         map[string]RepoConfig  `toml:"repo,omitempty"`
+
+	// Secrets is the operator-owned `[secrets]` stanza: provider API keys (e.g.
+	// GEMINI_API_KEY, OPENAI_API_KEY) used by `botfam external-review`, kept out
+	// of the environment and shell history. Values are never logged. (#438)
+	Secrets map[string]string `toml:"secrets,omitempty"`
 }
 
 // ConfigPath returns the global config file path: $BOTFAM_CONFIG when set (tests

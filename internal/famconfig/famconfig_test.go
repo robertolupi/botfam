@@ -85,6 +85,20 @@ func TestLoadConfigBackfillsKeys(t *testing.T) {
 	}
 }
 
+func TestLoadConfigSecrets(t *testing.T) {
+	setConfig(t, Config{
+		Repos:   map[string]RepoConfig{"dc": {Path: "/tmp/dc", Slug: "dc"}},
+		Secrets: map[string]string{"GEMINI_API_KEY": "sk-g", "OPENAI_API_KEY": "sk-o"},
+	})
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Secrets["GEMINI_API_KEY"] != "sk-g" || cfg.Secrets["OPENAI_API_KEY"] != "sk-o" {
+		t.Errorf("[secrets] not parsed: %+v", cfg.Secrets)
+	}
+}
+
 func TestHarnessTokenPath(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	got, err := HarnessTokenPath("claude-code")

@@ -168,6 +168,49 @@ func TestLoadSecrets(t *testing.T) {
 	}
 }
 
+// TestMergeSecrets verifies the #438 precedence: a --secrets file overrides the
+// config [secrets] stanza, empty config values are dropped, and config-only keys
+// survive. (Environment fallback is applied later by lookupKey, not here.)
+func TestMergeSecrets(t *testing.T) {
+	cfg := map[string]string{
+		"GEMINI_API_KEY":    "from-config",
+		"OPENAI_API_KEY":    "config-openai",
+		"ANTHROPIC_API_KEY": "", // empty → dropped
+	}
+
+	// No file: config keys come through; empty ones are dropped.
+	m, err := mergeSecrets(cfg, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["GEMINI_API_KEY"] != "from-config" || m["OPENAI_API_KEY"] != "config-openai" {
+		t.Errorf("config keys not carried: %v", m)
+	}
+	if _, ok := m["ANTHROPIC_API_KEY"]; ok {
+		t.Errorf("empty config value should be dropped, got %q", m["ANTHROPIC_API_KEY"])
+	}
+
+	// A --secrets file overrides the matching config key, adds new ones.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.env")
+	if err := os.WriteFile(path, []byte("GEMINI_API_KEY=from-file\nNEW_KEY=n\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err = mergeSecrets(cfg, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m["GEMINI_API_KEY"] != "from-file" {
+		t.Errorf("file should override config: got %q, want from-file", m["GEMINI_API_KEY"])
+	}
+	if m["OPENAI_API_KEY"] != "config-openai" {
+		t.Errorf("config-only key should survive: %v", m)
+	}
+	if m["NEW_KEY"] != "n" {
+		t.Errorf("file-only key missing: %v", m)
+	}
+}
+
 // TestExternalReviewWikiAndLMStudio drives the LM Studio provider and the
 // --wiki material source end to end against the chat-completions stub.
 func TestExternalReviewWikiAndLMStudio(t *testing.T) {
