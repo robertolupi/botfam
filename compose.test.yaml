@@ -25,6 +25,15 @@ services:
         condition: service_healthy
     volumes:
       - scribe-data:/data
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.119.0
+    command: ["--config", "/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./docker/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    tmpfs:
+      - /tmp
+
   forgejo:
     image: codeberg.org/forgejo/forgejo:9
     ports:
