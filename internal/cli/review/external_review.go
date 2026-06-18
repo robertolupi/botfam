@@ -19,6 +19,7 @@ import (
 	"github.com/openai/openai-go/v2/shared"
 	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/cli/ops"
+	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
 )
@@ -55,9 +56,9 @@ all). Pick models via repeatable flags (no baked-in defaults):
                        of the environment (e.g. OPENAI_API_KEY=...). Keys are never printed.
   --out DIR            output dir.
 
-API keys come from --secrets FILE (if given) then the environment; they are never
-printed. An unreachable local host or an unset API key is skipped with a warning,
-not a hard failure.
+API keys are resolved in order: --secrets FILE > the [secrets] stanza in
+~/.botfam/config.toml > the environment. They are never printed. An unreachable
+local host or an unset API key is skipped with a warning, not a hard failure.
 `
 
 type erProvider struct {
@@ -84,6 +85,7 @@ type externalReviewOpts struct {
 	allowZeroReviews  bool
 	design            bool
 	secretsFile       string
+	configSecrets     map[string]string // [secrets] from ~/.botfam/config.toml, seeded by the command (#438)
 	lmstudioHost      string
 	wikiDir           string
 	ollama            []string
@@ -127,6 +129,29 @@ func loadSecrets(path string) (map[string]string, error) {
 	return m, nil
 }
 
+// mergeSecrets assembles the provider-key map from the `[secrets]` config stanza
+// overlaid by an optional --secrets dotenv file (the file wins). Callers fall
+// back to the environment for any key not present here, giving the precedence:
+// --secrets file > config [secrets] > environment. Values are never logged.
+func mergeSecrets(configSecrets map[string]string, secretsFile string) (map[string]string, error) {
+	m := map[string]string{}
+	for k, v := range configSecrets {
+		if v != "" {
+			m[k] = v
+		}
+	}
+	if secretsFile != "" {
+		s, err := loadSecrets(secretsFile)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range s {
+			m[k] = v
+		}
+	}
+	return m, nil
+}
+
 // NewExternalReviewCmd builds the `botfam external-review` Cobra command
 // (issue #39). It supersedes the old tools/external-review.sh.
 func NewExternalReviewCmd() *cobra.Command {
@@ -152,6 +177,13 @@ func NewExternalReviewCmd() *cobra.Command {
 			// --design selects the design prompt unless --prompt was set explicitly.
 			if opts.design && !cmd.Flags().Changed("prompt") {
 				opts.promptFile = defaultDesignPrompt
+			}
+			// Provider API keys from the operator's `[secrets]` config stanza (#438).
+			// Read at the command layer so runExternalReview stays free of global
+			// config I/O (keeps its unit tests hermetic). A missing/unreadable
+			// config is non-fatal — keys then come from --secrets or the env.
+			if cfg, err := famconfig.LoadConfig(); err == nil {
+				opts.configSecrets = cfg.Secrets
 			}
 			return runExternalReview(ctx, opts, cmd.OutOrStdout())
 		}),
@@ -220,15 +252,11 @@ func runExternalReview(ctx context.Context, opts externalReviewOpts, out io.Writ
 		}
 	}
 
-	// API keys: --secrets file (if any) takes precedence over the environment;
-	// values are never printed.
-	var secrets map[string]string
-	if opts.secretsFile != "" {
-		s, err := loadSecrets(opts.secretsFile)
-		if err != nil {
-			return err
-		}
-		secrets = s
+	// API keys, in precedence order: --secrets file > config [secrets] > env.
+	// Values are never printed.
+	secrets, err := mergeSecrets(opts.configSecrets, opts.secretsFile)
+	if err != nil {
+		return err
 	}
 	lookupKey := func(env string) string {
 		if v, ok := secrets[env]; ok && v != "" {
