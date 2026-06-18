@@ -104,13 +104,13 @@ func credentialHelperCheck(workDir string) doctorCheck {
 				url, strings.Join(offending, ", "), strings.ReplaceAll(raw, "\n", "\n   ")),
 			`clear inherited helpers in the worktree — ` +
 				"`git config --local credential.helper \"\"` before configuring " +
-				"`botfam credential` (run `botfam setup` / `tools/forge-setup.sh`)",
+				"`botfam credential` (run `botfam setup`); if the problem persists, report to the operator",
 		}
 	}
 	if len(values) == 0 {
 		return doctorCheck{name, doctorWarn,
 			fmt.Sprintf("no credential helper configured for %s", url),
-			"run `botfam setup` / `tools/forge-setup.sh` to configure `botfam credential`"}
+			"run `botfam setup` to configure `botfam credential`; if the problem persists, report to the operator"}
 	}
 	return doctorCheck{name, doctorOK, fmt.Sprintf("effective helper(s) for %s: %s", url, strings.Join(values, ", ")), ""}
 }
