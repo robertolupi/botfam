@@ -53,22 +53,33 @@ func TestEvaluateGitIdentity(t *testing.T) {
 }
 
 func TestOffendingHelpers(t *testing.T) {
+	// famDir is the fam root used for path-based helper tests.
+	famDir := t.TempDir()
+	otherFamDir := t.TempDir()
+	ownHelper := famDir + "/tools/git-credential-botfam"
+	foreignHelper := otherFamDir + "/wt-agy/tools/git-credential-botfam"
+
 	cases := []struct {
-		name string
-		in   []string
-		want string
+		name    string
+		in      []string
+		famDir  string
+		want    string
 	}{
-		{"keychain leaks", []string{"osxkeychain", "!botfam credential"}, "osxkeychain"},
-		{"botfam only is clean", []string{"!botfam credential"}, ""},
-		{"plain botfam name is clean", []string{"botfam"}, ""},
-		{"empty reset ignored", []string{"", "botfam"}, ""},
-		{"multiple inherited", []string{"osxkeychain", "store"}, "osxkeychain,store"},
-		{"no helpers is clean", nil, ""},
+		{"keychain leaks", []string{"osxkeychain", "!botfam credential"}, "", "osxkeychain"},
+		{"botfam only is clean", []string{"!botfam credential"}, "", ""},
+		{"plain botfam name is clean", []string{"botfam"}, "", ""},
+		{"empty reset ignored", []string{"", "botfam"}, "", ""},
+		{"multiple inherited", []string{"osxkeychain", "store"}, "", "osxkeychain,store"},
+		{"no helpers is clean", nil, "", ""},
+		// Path-based helpers: only clean when under the current fam dir (#177).
+		{"own fam path is clean", []string{ownHelper}, famDir, ""},
+		{"foreign worktree path is offending", []string{foreignHelper}, famDir, foreignHelper},
+		{"foreign path with no famDir falls back to offending", []string{foreignHelper}, "", foreignHelper},
 	}
 	for _, tc := range cases {
-		got := strings.Join(offendingHelpers(tc.in), ",")
+		got := strings.Join(offendingHelpers(tc.in, tc.famDir), ",")
 		if got != tc.want {
-			t.Errorf("%s: offendingHelpers(%v) = %q, want %q", tc.name, tc.in, got, tc.want)
+			t.Errorf("%s: offendingHelpers(%v, %q) = %q, want %q", tc.name, tc.in, tc.famDir, got, tc.want)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
@@ -99,7 +100,11 @@ func credentialHelperCheck(workDir string) doctorCheck {
 	if err != nil {
 		return doctorCheck{name, doctorWarn, fmt.Sprintf("could not read credential.helper for %s: %v", url, err), ""}
 	}
-	offending := offendingHelpers(values)
+	famDir := ""
+	if info, err := (famconfig.GitResolver{}).ResolveIdentity(workDir); err == nil {
+		famDir = info.FamDir
+	}
+	offending := offendingHelpers(values, famDir)
 	if len(offending) > 0 {
 		return doctorCheck{
 			name, doctorFail,
@@ -169,19 +174,50 @@ func gitIdentityFix(actor string) string {
 	return fmt.Sprintf("set the worktree identity — `git config --worktree user.name %s` (and user.email)", who)
 }
 
-// offendingHelpers returns the configured helpers that are NOT botfam's — any
-// inherited helper that could answer the forge credential challenge. An empty
-// value is a reset directive, not a helper, so it is ignored.
-func offendingHelpers(values []string) []string {
+// offendingHelpers returns helpers that are NOT an acceptable botfam credential
+// helper. An empty value is a git reset directive and is ignored. famDir is the
+// resolved fam root used to validate path-based botfam helpers; a helper whose
+// path lives outside famDir is a cross-worktree leak (#177).
+func offendingHelpers(values []string, famDir string) []string {
 	var bad []string
 	for _, h := range values {
 		h = strings.TrimSpace(h)
-		if h == "" || strings.Contains(h, "botfam") {
+		if h == "" {
 			continue
 		}
-		bad = append(bad, h)
+		if !isBotfamHelper(h, famDir) {
+			bad = append(bad, h)
+		}
 	}
 	return bad
+}
+
+// isBotfamHelper reports whether h is an acceptable botfam credential helper.
+// Bare program names (no path separator) containing "botfam" are always
+// acceptable. Path-based helpers (absolute paths or shell-command "!path …"
+// form) are only acceptable when they live under famDir — a helper pointing at
+// another actor's worktree is a cross-worktree leak (#177).
+func isBotfamHelper(h, famDir string) bool {
+	if !strings.Contains(h, "botfam") {
+		return false
+	}
+	// Extract the binary from shell-command form ("!cmd args…").
+	binary := h
+	if strings.HasPrefix(binary, "!") {
+		if fields := strings.Fields(binary[1:]); len(fields) > 0 {
+			binary = fields[0]
+		}
+	}
+	// Bare program name — no directory component, acceptable anywhere.
+	if !filepath.IsAbs(binary) && !strings.ContainsRune(binary, filepath.Separator) {
+		return true
+	}
+	// Path-based: acceptable only when under this fam's directory.
+	abs := binary
+	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
+		abs = resolved
+	}
+	return famDir != "" && (abs == famDir || strings.HasPrefix(abs, famDir+string(filepath.Separator)))
 }
 
 // parseCredentialHelpers extracts the helper values from `git config` output.
