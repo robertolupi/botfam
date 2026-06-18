@@ -3,22 +3,14 @@ package setup
 import (
 	"io"
 
-	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // The worktree lifecycle operations now live in the dependency-free
 // internal/provision leaf (#311). This file keeps the `botfam worktree` command
 // builder (moves to internal/cli in phase 3) wired to the leaf, and re-exports
 // EnsureMembership for internal/mcp.
-
-// WorktreeCmd is the thin args/io entry point retained for tests and the MCP
-// layer; it builds the Cobra command and runs it against args.
-func WorktreeCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewWorktreeCmd(), args, out)
-}
 
 // NewWorktreeCmd builds the `botfam worktree` Cobra command and its
 // init/sync/register subcommands.
@@ -45,11 +37,4 @@ func NewWorktreeCmd() *cobra.Command {
 		sub("sync [path]", "Sync a worktree with the fam object stores", provision.SyncWorktree),
 	)
 	return c
-}
-
-// EnsureMembership re-exports provision.EnsureMembership. Membership is now
-// determined by workDir matching a [repo.<k>] stanza (#404); root is retained
-// for call-site compatibility.
-func EnsureMembership(root string, workDir string) error {
-	return provision.EnsureMembership(famconfig.FamIdentity{FamDir: root}, workDir)
 }

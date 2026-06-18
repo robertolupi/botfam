@@ -14,16 +14,9 @@ import (
 	"time"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
-	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/version"
+	"github.com/spf13/cobra"
 )
-
-// IrcClientCmd is the thin args/io entry point retained for tests; it builds
-// the Cobra command and runs it against args.
-func IrcClientCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewIrcClientCmd(), args, out)
-}
 
 // NewIrcClientCmd builds the `botfam irc-client` Cobra command (FIFO-driven
 // IRC client).

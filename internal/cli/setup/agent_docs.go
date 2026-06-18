@@ -3,7 +3,6 @@ package setup
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/skills"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 var agentDocFiles = []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
@@ -46,12 +44,6 @@ type RepoSkill = skills.RepoSkill
 
 // ReadRepoSkills re-exports skills.ReadRepoSkills.
 func ReadRepoSkills(repoRoot string) ([]RepoSkill, error) { return skills.ReadRepoSkills(repoRoot) }
-
-// AgentDocsCmd is the thin args/io entry point retained for tests; it builds
-// the Cobra command and runs it against args.
-func AgentDocsCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewAgentDocsCmd(), args, out)
-}
 
 // NewAgentDocsCmd builds the `botfam agent-docs` Cobra command and its
 // generate/check subcommands.

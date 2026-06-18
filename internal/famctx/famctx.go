@@ -366,19 +366,6 @@ func ResolveAgentRuntime(workDir string) (Context, error) {
 	})
 }
 
-// ResolveRegistry resolves the merged Registry (from ~/.botfam/config.toml) for workDir.
-func ResolveRegistry(workDir string) (Context, error) {
-	return Resolve(context.Background(), Inputs{
-		WorkDir: workDir,
-		Mode:    ModeRegistry,
-	})
-}
-
-// ResolveForMCP resolves the family context for an MCP server session.
-func ResolveForMCP(ctx context.Context, inputs Inputs) (Context, error) {
-	return Resolve(ctx, inputs)
-}
-
 // FlagEnabled reads the already-resolved flag set and returns the boolean value.
 func (c *Context) FlagEnabled(name string, def bool) (bool, error) {
 	return famconfig.FlagFromMap(c.Flags, name, def)
@@ -470,28 +457,6 @@ func gitRoot(dir string) string {
 		return eval
 	}
 	return root
-}
-
-func lookupEnv(env []string, key string) string {
-	if env == nil {
-		return os.Getenv(key)
-	}
-	prefix := key + "="
-	for _, kv := range env {
-		if strings.HasPrefix(kv, prefix) {
-			return kv[len(prefix):]
-		}
-	}
-	return ""
-}
-
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
-}
-
-func gitLines(workDir string, args ...string) ([]string, error) {
-	return gitexec.Lines(workDir, args...)
 }
 
 func gitOne(workDir string, args ...string) (string, error) {

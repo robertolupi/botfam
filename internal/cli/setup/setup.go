@@ -11,7 +11,6 @@ import (
 	"github.com/robertolupi/botfam/internal/forge"
 	harnesslib "github.com/robertolupi/botfam/internal/harness"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // AgentConfig and Registry now live in the dependency-free leaf
@@ -20,12 +19,6 @@ import (
 type AgentConfig = famconfig.AgentConfig
 
 type Registry = famconfig.Registry
-
-// Setup is the thin args/io entry point retained for tests; it builds the
-// Cobra command and runs it against args.
-func Setup(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewSetupCmd(), args, out)
-}
 
 // NewSetupCmd builds the `botfam setup` Cobra command.
 func NewSetupCmd() *cobra.Command {

@@ -17,10 +17,10 @@ import (
 	"github.com/openai/openai-go/v2"
 	"github.com/openai/openai-go/v2/option"
 	"github.com/openai/openai-go/v2/shared"
-	"github.com/robertolupi/botfam/internal/forge"
-	"github.com/spf13/cobra"
 	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/cli/ops"
+	"github.com/robertolupi/botfam/internal/forge"
+	"github.com/spf13/cobra"
 )
 
 const externalReviewHelp = `Usage:
@@ -125,12 +125,6 @@ func loadSecrets(path string) (map[string]string, error) {
 		}
 	}
 	return m, nil
-}
-
-// ExternalReviewCmd is the thin args/io entry point retained for tests; it
-// builds the Cobra command and runs it against args.
-func ExternalReviewCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewExternalReviewCmd(), args, out)
 }
 
 // NewExternalReviewCmd builds the `botfam external-review` Cobra command

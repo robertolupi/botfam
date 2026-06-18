@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // zeroReviewOpts builds options that pass the early model/material gates but
@@ -40,7 +42,7 @@ func TestExternalReviewFailsClosedOnZeroReviews(t *testing.T) {
 	opts := zeroReviewOpts(t)
 
 	var out bytes.Buffer
-	err := runExternalReview(context.Background(), opts,&out)
+	err := runExternalReview(context.Background(), opts, &out)
 	if err == nil {
 		t.Fatalf("expected an error when zero reviews are produced, got nil\noutput:\n%s", out.String())
 	}
@@ -54,7 +56,7 @@ func TestExternalReviewAllowZeroReviews(t *testing.T) {
 	opts.allowZeroReviews = true
 
 	var out bytes.Buffer
-	if err := runExternalReview(context.Background(), opts,&out); err != nil {
+	if err := runExternalReview(context.Background(), opts, &out); err != nil {
 		t.Fatalf("--allow-zero-reviews should succeed with zero reviews, got: %v", err)
 	}
 	// Supporting artifacts must still be written.
@@ -108,7 +110,7 @@ func TestExternalReviewWritesAllModelReviews(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runExternalReview(context.Background(), opts,&out); err != nil {
+	if err := runExternalReview(context.Background(), opts, &out); err != nil {
 		t.Fatalf("runExternalReview failed: %v\noutput:\n%s", err, out.String())
 	}
 
@@ -196,7 +198,7 @@ func TestExternalReviewWikiAndLMStudio(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runExternalReview(context.Background(), opts,&out); err != nil {
+	if err := runExternalReview(context.Background(), opts, &out); err != nil {
 		t.Fatalf("runExternalReview failed: %v\noutput:\n%s", err, out.String())
 	}
 	if _, err := os.Stat(filepath.Join(outDir, "review-lmstudio-local-m.md")); err != nil {
@@ -219,7 +221,7 @@ func TestExternalReviewWikiPageNotFound(t *testing.T) {
 		wiki:     []string{"Missing"},
 		lmstudio: []string{"m"},
 	}
-	err := runExternalReview(context.Background(), opts,&bytes.Buffer{})
+	err := runExternalReview(context.Background(), opts, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "wiki page") {
 		t.Fatalf("expected a 'wiki page ... not found' error, got: %v", err)
 	}
@@ -234,7 +236,7 @@ func TestExternalReviewDesignFlag(t *testing.T) {
 	if err := os.WriteFile(mat, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := ExternalReviewCmd([]string{"--design", "--lmstudio", "m", "--out", filepath.Join(dir, "o"), mat}, &bytes.Buffer{})
+	err := cmdutil.RunCobra(NewExternalReviewCmd(), []string{"--design", "--lmstudio", "m", "--out", filepath.Join(dir, "o"), mat}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), defaultDesignPrompt) {
 		t.Fatalf("expected --design to select %s, got err: %v", defaultDesignPrompt, err)
 	}

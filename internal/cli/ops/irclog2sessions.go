@@ -19,7 +19,6 @@ import (
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 const chatLogSep = " : "
@@ -285,12 +284,6 @@ func isSessionEmpty(session []ircEvent) bool {
 // topic text titles the new session. Names are deterministic from the log, so
 // reruns are idempotent. The trailing, possibly still-running session of each
 // channel is skipped unless --include-open is given.
-// IrcLog2SessionsCmd is the thin args/io entry point retained for tests; it
-// builds the Cobra command and runs it against args.
-func IrcLog2SessionsCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewIrclog2SessionsCmd(), args, out)
-}
-
 // NewIrclog2SessionsCmd builds the `botfam irclog2sessions` Cobra command.
 func NewIrclog2SessionsCmd() *cobra.Command {
 	outDir := "wiki"

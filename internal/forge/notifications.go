@@ -18,7 +18,7 @@ type Notification struct {
 		Title   string `json:"title"`
 		URL     string `json:"url"`
 		HTMLURL string `json:"html_url"`
-		Type    string `json:"type"`  // Issue | Pull | Commit | Repository
+		Type    string `json:"type"` // Issue | Pull | Commit | Repository
 		State   string `json:"state"`
 	} `json:"subject"`
 	Repository struct {
@@ -58,9 +58,6 @@ func (c *Client) ListUnreadRepoNotifications(ctx context.Context, repo string) (
 	}
 	return sdkThreadsToLocal(threads), nil
 }
-
-// NotificationsPageLimit is the page size the repo-scoped notification fetch uses.
-func NotificationsPageLimit() int { return notificationsPageLimit }
 
 // MarkNotificationRead marks a single notification thread read.
 func (c *Client) MarkNotificationRead(ctx context.Context, id int64) error {

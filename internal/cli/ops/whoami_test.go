@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 func TestWhoamiCmd(t *testing.T) {
@@ -44,7 +46,7 @@ func TestWhoamiCmd(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err = WhoamiCmd([]string{}, &out)
+	err = cmdutil.RunCobra(NewWhoamiCmd(), []string{}, &out)
 	if err != nil {
 		t.Fatalf("WhoamiCmd failed: %v", err)
 	}

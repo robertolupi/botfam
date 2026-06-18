@@ -3,20 +3,12 @@ package ops
 import (
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/irc"
 	"github.com/spf13/cobra"
 )
-
-// IrcWaitCmd is the thin args/io entry point retained for tests and the MCP
-// layer; it builds the Cobra command and runs it against args.
-func IrcWaitCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewIrcWaitCmd(), args, out)
-}
 
 // NewIrcWaitCmd builds the `botfam irc-wait` Cobra command (native wake watcher).
 func NewIrcWaitCmd() *cobra.Command {

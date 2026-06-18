@@ -10,7 +10,7 @@ import (
 func TestReadEmbeddedDocs(t *testing.T) {
 	slugs := []string{"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown"}
 	for _, slug := range slugs {
-		content, err := Read(slug)
+		content, err := Render(slug, TemplateData{})
 		if err != nil {
 			t.Errorf("failed to read embedded doc %q: %v", slug, err)
 			continue

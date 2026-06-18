@@ -7,14 +7,7 @@ import (
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
-
-// WhoamiCmd is the thin args/io entry point retained for tests; it builds the
-// Cobra command and runs it against args.
-func WhoamiCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewWhoamiCmd(), args, out)
-}
 
 // NewWhoamiCmd builds the `botfam whoami` Cobra command.
 func NewWhoamiCmd() *cobra.Command {
