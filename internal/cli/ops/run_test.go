@@ -385,6 +385,69 @@ printf '%s\n' '{"type":"result","subtype":"success","duration_ms":1,"duration_ap
 	}
 }
 
+func TestRunIssueCodexHarnessParsesStreamJSONTranscript(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   22,
+		Title:   "Codex stream transcript",
+		Body:    "Emit two JSON lines.",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/22",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "codex")
+	fakeScript := []byte(`#!/bin/sh
+printf '%s\n' '{"type":"session_start","session_id":"s1","timestamp":"2026-06-18T00:00:00Z"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":1}'
+`)
+	if err := os.WriteFile(fakeCmd, fakeScript, 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      22,
+		agent:      "codex",
+		agentSet:   true,
+		prompt:     "Summarize this issue",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if !strings.Contains(env.HarnessCmd, "codex") {
+		t.Fatalf("HarnessCmd = %q, want to contain codex", env.HarnessCmd)
+	}
+	if !strings.Contains(env.HarnessCmd, "--json") {
+		t.Fatalf("HarnessCmd = %q, want codex --json", env.HarnessCmd)
+	}
+	transcriptPath := filepath.Join(runDir, "transcript.jsonl")
+	b, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("missing transcript.jsonl: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("transcript lines = %d, want 3", len(lines))
+	}
+	var last map[string]any
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &last); err != nil {
+		t.Fatalf("parse last transcript line: %v", err)
+	}
+	if got := last["type"]; got != "result" {
+		t.Fatalf("last event type = %v, want result", got)
+	}
+}
+
 func TestRunIssueHarnessCommandFromEnv(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)

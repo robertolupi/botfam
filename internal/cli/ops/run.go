@@ -409,7 +409,7 @@ func resolveHarnessCommand(inline, fallback string) (string, bool) {
 func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string, issue int64) harnessResult {
 	switch famconfig.CanonicalHarness(harness) {
 	case famconfig.HarnessCodex:
-		return runDirectHarnessCommand(ctx, "codex", []string{"exec", prompt}, issue)
+		return runCodexHarnessCommand(ctx, prompt, issue)
 	case famconfig.HarnessClaudeCode:
 		return runClaudeHarnessCommand(ctx, prompt, issue)
 	case famconfig.HarnessAntigravity:
@@ -434,6 +434,14 @@ func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64) ha
 		"--include-partial-messages",
 	}
 	result := runDirectHarnessCommand(ctx, "claude", args, issue)
+	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
+		result.Transcript = parsed
+	}
+	return result
+}
+
+func runCodexHarnessCommand(ctx context.Context, prompt string, issue int64) harnessResult {
+	result := runDirectHarnessCommand(ctx, "codex", []string{"exec", "--json", prompt}, issue)
 	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
 		result.Transcript = parsed
 	}
