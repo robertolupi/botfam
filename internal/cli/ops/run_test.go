@@ -177,6 +177,32 @@ func TestRunIssueShellCommand(t *testing.T) {
 	}
 }
 
+func TestRunBashOllamaCommand(t *testing.T) {
+	t.Run("uses_default_prompt", func(t *testing.T) {
+		got := runBashOllamaCommand("ollama")
+		want := `ollama run --think=false gpt-oss:20b "Hello. Tell me a joke about bananas."`
+		if got != want {
+			t.Fatalf("runBashOllamaCommand(ollama) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("uses_explicit_prompt", func(t *testing.T) {
+		got := runBashOllamaCommand("ollama:Tell me a short pun about pears")
+		want := `ollama run --think=false gpt-oss:20b "Tell me a short pun about pears"`
+		if got != want {
+			t.Fatalf("runBashOllamaCommand(explicit) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("trims_empty_prompt_back_to_default", func(t *testing.T) {
+		got := runBashOllamaCommand("ollama:   ")
+		want := `ollama run --think=false gpt-oss:20b "Hello. Tell me a joke about bananas."`
+		if got != want {
+			t.Fatalf("runBashOllamaCommand(empty) = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestRunIssueCancelledFromContext(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ The run.json schema lives in doc/run-issue-session-capture.schema.json.
 
 Default target is 'success', which executes 'bash -lc env' as a baseline command.
 Use --target "shell:<command>" to run a custom shell command.
+Use --target "ollama:<prompt>" to run an Ollama command with gpt-oss:20b.
+Use --target "ollama" for a canned demonstration prompt.
   run.json
   prompt.md
   stdout.log
@@ -54,6 +57,7 @@ const (
 	runStatusUnknown       = "unknown"
 	runDefaultHarness      = "codex"
 	runTargetSuccessPrefix = "success"
+	runTargetOllamaPrefix  = "ollama"
 )
 
 type issueClient interface {
@@ -332,9 +336,22 @@ func runFakeHarness(ctx context.Context, harness, target string, issue *forge.Is
 			script = "env"
 		}
 		return runBashHarness(ctx, script, cmd, issue.Index)
+	case target == runTargetOllamaPrefix || strings.HasPrefix(target, runTargetOllamaPrefix+":"):
+		return runBashHarness(ctx, runBashOllamaCommand(target), cmd, issue.Index)
 	default:
 		return runBashHarness(ctx, "env", cmd, issue.Index)
 	}
+}
+
+func runBashOllamaCommand(target string) string {
+	prompt := "Hello. Tell me a joke about bananas."
+	if strings.HasPrefix(target, runTargetOllamaPrefix+":") {
+		prompt = strings.TrimSpace(strings.TrimPrefix(target, runTargetOllamaPrefix+":"))
+		if prompt == "" {
+			prompt = "Hello. Tell me a joke about bananas."
+		}
+	}
+	return fmt.Sprintf("ollama run --think=false gpt-oss:20b %s", strconv.Quote(prompt))
 }
 
 func runBashHarness(ctx context.Context, shellCommand, commandLine string, issue int64) harnessResult {
