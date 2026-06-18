@@ -87,7 +87,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 		if fctx.TokenPath == "" {
 			// Human ([user.<name>]) or base checkout: no per-harness token path,
 			// so the forge token comes from the environment.
-			return nil, errors.New("forge: no token — set GITEA_TOKEN (human checkout), or run from an agent worktree after `botfam mint`")
+			return nil, errors.New("forge: no token — put your token in ~/.botfam/token-<user> or set GITEA_TOKEN (human checkout); agents run `botfam mint`. (A token here means the value, not a file path.)")
 		}
 		return nil, fmt.Errorf("forge: token is empty (TokenPath=%q); run `botfam mint`", fctx.TokenPath)
 	}
