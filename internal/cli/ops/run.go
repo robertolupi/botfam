@@ -21,14 +21,16 @@ import (
 
 type runOptions struct {
 	issue      int
+	agent      string
 	harness    string
 	target     string
+	prompt     string
 	harnessCmd string
 	timeoutS   int
 	captureDir string
 }
 
-const runCommandHelp = `botfam run --issue <number> executes one issue through a harness.
+const runCommandHelp = `botfam run --issue <number> executes one issue through an agent.
 
 This spike implements a durable session envelope + process lifecycle tracing. It
 writes the required artifacts:
@@ -39,7 +41,7 @@ Default target is 'success', which executes 'bash -lc env' as a baseline command
 Use --target "shell:<command>" to run a custom shell command.
 Use --target "ollama:<prompt>" to run an Ollama command with gpt-oss:20b.
 Use --target "ollama" for a canned demonstration prompt.
-Use --target "harness[:<command>]" to run a harness command (from --harness-command or BOTFAM_RUN_HARNESS_CMD).
+Use --target "harness[:<command>]" to run an agent command (from --harness-command or BOTFAM_RUN_HARNESS_CMD).
   run.json
   prompt.md
   stdout.log
@@ -118,14 +120,20 @@ func NewRunCmd() *cobra.Command {
 			if ro.timeoutS < 0 {
 				return fmt.Errorf("--timeout must be >= 0")
 			}
-			if ro.harness == "" {
+			if ro.harness != "" && ro.agent != "" && ro.harness != ro.agent {
+				return fmt.Errorf("--agent and --harness disagree; pass only one")
+			}
+			if ro.agent == "" {
+				ro.agent = ro.harness
+			}
+			if ro.agent == "" {
 				fctx, ok := famctx.FromContext(ctx)
 				if ok && fctx.Harness != "" {
-					ro.harness = fctx.Harness
+					ro.agent = fctx.Harness
 				}
 			}
-			if ro.harness == "" {
-				ro.harness = runDefaultHarness
+			if ro.agent == "" {
+				ro.agent = runDefaultHarness
 			}
 			if ro.target == "" {
 				ro.target = runTargetSuccessPrefix
@@ -144,11 +152,14 @@ func NewRunCmd() *cobra.Command {
 	}
 	flags := c.Flags()
 	flags.IntVar(&opts.issue, "issue", 0, "forge issue/PR number to run")
-	flags.StringVar(&opts.harness, "harness", "", "harness override (default: detected harness, then codex)")
+	flags.StringVar(&opts.agent, "agent", "", "agent override (default: detected agent, then codex)")
+	flags.StringVar(&opts.harness, "harness", "", "deprecated alias for --agent")
 	flags.StringVar(&opts.target, "target", "", "harness target for fake mode (e.g. success, fail, sleep:2s)")
 	flags.StringVar(&opts.harnessCmd, "harness-command", "", "command for --target harness (or set BOTFAM_RUN_HARNESS_CMD)")
+	flags.StringVar(&opts.prompt, "prompt", "", "custom prompt sent to the agent alongside issue context")
 	flags.IntVar(&opts.timeoutS, "timeout", 0, "wall-clock timeout in seconds (0 = no timeout)")
 	flags.StringVar(&opts.captureDir, "capture-dir", "", "capture directory (default: $FAMDIR/runs)")
+	_ = c.Flags().MarkDeprecated("harness", "use --agent")
 	return c
 }
 
@@ -157,12 +168,21 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	if err != nil {
 		return fmt.Errorf("run: fetch issue %d: %w", opts.issue, err)
 	}
+	if opts.agent == "" {
+		opts.agent = opts.harness
+	}
+	if opts.agent == "" {
+		opts.agent = fctx.Harness
+	}
+	if opts.agent == "" {
+		opts.agent = runDefaultHarness
+	}
 
 	captureRoot := opts.captureDir
 	if captureRoot == "" {
 		captureRoot = filepath.Join(fctx.FamDir, "runs")
 	}
-	runID := makeRunID(opts.issue, opts.harness)
+	runID := makeRunID(opts.issue, opts.agent)
 	runDir := filepath.Join(captureRoot, runID)
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return fmt.Errorf("run: create run directory %s: %w", runDir, err)
@@ -187,8 +207,8 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 		runRepo = issue.Repository.FullName
 	}
 	issueURL := issueURL(issue, runEnv, runRepo, opts.issue)
-	harnessPrompt := makePrompt(issue, issueURL)
-	hResult := runFakeHarness(runCtx, opts.harness, opts.target, opts.harnessCmd, issue, harnessPrompt)
+	harnessPrompt := buildHarnessPrompt(issue, issueURL, opts.prompt)
+	hResult := runFakeHarness(runCtx, opts.agent, opts.target, opts.harnessCmd, issue, harnessPrompt)
 	end := time.Now().UTC()
 	status := hResult.Status
 	if status == runStatusSuccess && runCtx.Err() != nil {
@@ -206,7 +226,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 		IssueNumber:  int(issue.Index),
 		IssueURL:     issueURL,
 		IssueTitle:   issue.Title,
-		Harness:      opts.harness,
+		Harness:      opts.agent,
 		HarnessCmd:   hResult.CommandLine,
 		Target:       opts.target,
 		WorktreePath: fctx.WorktreeRoot,
@@ -240,7 +260,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	if err := writeJSON(filepath.Join(runDir, "run.json"), artifact); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(runDir, "prompt.md"), []byte(makePrompt(issue, issueURL)), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(runDir, "prompt.md"), []byte(harnessPrompt), 0o644); err != nil {
 		return fmt.Errorf("run: write prompt.md: %w", err)
 	}
 	if hResult.Transcript != nil {
@@ -260,7 +280,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	redactedEnv := map[string]any{
 		"run_id":       runID,
 		"issue_number": int(issue.Index),
-		"harness":      opts.harness,
+		"harness":      opts.agent,
 		"target":       opts.target,
 		"working_tree": fctx.WorktreeRoot,
 		"repository":   runRepo,
@@ -551,7 +571,29 @@ func resolveIssueInfo(reg famconfig.Registry) (base, repo string) {
 }
 
 func makePrompt(issue *forge.Issue, issueURL string) string {
-	return fmt.Sprintf("# Issue %d\n\nURL: %s\n\nTitle: %s\n\n%s\n", issue.Index, issueURL, issue.Title, issue.Body)
+	return buildHarnessPrompt(issue, issueURL, "")
+}
+
+func buildHarnessPrompt(issue *forge.Issue, issueURL, prompt string) string {
+	var b strings.Builder
+	b.WriteString("# Issue ")
+	b.WriteString(strconv.FormatInt(int64(issue.Index), 10))
+	b.WriteString("\n\n")
+	if prompt != "" {
+		b.WriteString("## User Prompt\n\n")
+		b.WriteString(prompt)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("## Issue Metadata\n\n")
+	b.WriteString("URL: ")
+	b.WriteString(issueURL)
+	b.WriteString("\n\nTitle: ")
+	b.WriteString(issue.Title)
+	b.WriteString("\n\n")
+	b.WriteString("Body:\n\n")
+	b.WriteString(issue.Body)
+	b.WriteString("\n")
+	return b.String()
 }
 
 func writeJSON(path string, v any) error {

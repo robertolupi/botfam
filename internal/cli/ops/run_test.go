@@ -256,6 +256,68 @@ func TestRunIssueDefaultHarnessCommandForCodex(t *testing.T) {
 	}
 }
 
+func TestRunIssueAgentFlagAndPrompt(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   18,
+		Title:   "Agent flag prompt",
+		Body:    "Do a quick summary.",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/18",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "claude")
+	if err := os.WriteFile(fakeCmd, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\"\\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      18,
+		agent:      "claude",
+		target:     "harness",
+		prompt:     "Summarize this issue",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.FailureClass != runStatusSuccess {
+		t.Fatalf("FailureClass = %q, want %q", env.FailureClass, runStatusSuccess)
+	}
+	if !strings.Contains(env.HarnessCmd, "claude") {
+		t.Fatalf("HarnessCmd = %q, want to contain claude", env.HarnessCmd)
+	}
+	if env.Harness != "claude" {
+		t.Fatalf("Harness = %q, want claude", env.Harness)
+	}
+
+	stdout, err := os.ReadFile(filepath.Join(runDir, "prompt.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stdout), "Summarize this issue") {
+		t.Fatalf("prompt.md missing user prompt: %q", string(stdout))
+	}
+	if !strings.Contains(string(stdout), "Issue 18") {
+		t.Fatalf("prompt.md missing issue header: %q", string(stdout))
+	}
+	if !strings.Contains(string(stdout), "Agent flag prompt") {
+		t.Fatalf("prompt.md missing issue title: %q", string(stdout))
+	}
+	if !strings.Contains(string(stdout), "Do a quick summary.") {
+		t.Fatalf("prompt.md missing issue body: %q", string(stdout))
+	}
+}
+
 func TestRunIssueHarnessCommandFromEnv(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)
