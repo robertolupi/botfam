@@ -71,7 +71,7 @@ func newMangleExportCmd() *cobra.Command {
 		Short: "Write forge history as Mangle facts",
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+	cmd.RunE = cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		sc, err := build()
 		if err != nil {
 			return err
@@ -110,7 +110,7 @@ func newMangleEvalCmd() *cobra.Command {
 		Short: "Evaluate a Mangle rule file against forge facts",
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+	cmd.RunE = cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		if ruleFile == "" {
 			return fmt.Errorf("--file RULES.mg is required")
 		}

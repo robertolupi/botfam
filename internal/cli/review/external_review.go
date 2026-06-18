@@ -171,7 +171,7 @@ func NewExternalReviewCmd() *cobra.Command {
 		Long:          externalReviewHelp,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+		RunE: cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			opts.redact = opts.redact && !noRedact
 			opts.materials = args
 			// --design selects the design prompt unless --prompt was set explicitly.

@@ -24,10 +24,31 @@ func RunCobra(c *cobra.Command, args []string, out io.Writer) error {
 	return c.Execute()
 }
 
-// RunWithFamCtx wraps a cobra RunE: it calls famctx.WithFamCtx to resolve and
-// embed the agent runtime context into the command's context.Context, then
-// passes the enriched context to fn. Commands with an explicit --work-dir flag
-// should use RunWithFamCtxDir instead.
+// Command access categories
+//
+// Every botfam CLI command has an audience. The DEFAULT is agents+human
+// (fail-open): a command should be runnable by a human operator unless there is
+// a concrete reason to restrict it. We restrict deliberately and later — not by
+// accident of which context helper a command happened to use.
+//
+//   - agents+human (default): RunWithRegistryCtx. Resolves the forge registry via
+//     the non-strict ModeRegistry, so the command runs in agent ([agent.<name>]),
+//     human ([user.<name>]), and base checkouts alike, still failing loudly when
+//     no [repo.<k>] stanza matches. Use for read / analysis / authoring tools
+//     (forge lint/graph, external-review, mangle lint, session-extract,
+//     metareview, memory, ...).
+//   - agents-only: RunWithFamCtx. The strict agent-runtime gate
+//     (famctx.ResolveAgentRuntime) that refuses human/base checkouts. Reserve for
+//     the agent runtime itself and commands that act AS the agent identity.
+//   - human-only: no wrapper yet — add one if a command ever warrants it.
+//
+// Commands that need no fam context at all (doctor/setup/whoami/version) use
+// neither helper.
+
+// RunWithFamCtx wraps a cobra RunE with the strict agent-runtime context
+// (famctx.WithFamCtx): the **agents-only** category. It refuses human/base
+// checkouts, so use it only for commands that act as the agent identity — most
+// commands want the agents+human default (RunWithRegistryCtx) instead.
 func RunWithFamCtx(fn func(context.Context, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		wd, err := os.Getwd()
