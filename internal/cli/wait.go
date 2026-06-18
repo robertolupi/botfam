@@ -212,8 +212,8 @@ func timelineIDs(ctx context.Context, tc timelineClient, num int) (map[int64]boo
 
 func emitItemEvent(out io.Writer, n, total int, repo string, num int, e *forge.TimelineEvent) {
 	who := "forge"
-	if e.User != nil && e.User.Login != "" {
-		who = e.User.Login
+	if e.Poster != nil && e.Poster.UserName != "" {
+		who = e.Poster.UserName
 	}
 	fmt.Fprintf(out, "===== event %d/%d · %s#%d =====\n", n, total, repo, num)
 	fmt.Fprintf(out, "%s by %s\n", e.Type, who)

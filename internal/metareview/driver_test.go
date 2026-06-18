@@ -53,7 +53,7 @@ func (c *fakeClassifier) Classify(ctx context.Context, prompt string) ([]Suggest
 }
 
 func phaseInversionIssue() *forge.Issue {
-	return &forge.Issue{Number: 42, Title: "x", Body: "Depends on `internal/trace/schema.go`."}
+	return &forge.Issue{Index: 42, Title: "x", Body: "Depends on `internal/trace/schema.go`."}
 }
 
 func TestRun_PostsAdvisoryComment(t *testing.T) {
@@ -81,7 +81,7 @@ func TestRun_PostsAdvisoryComment(t *testing.T) {
 }
 
 func TestRun_CleanArtifactSkipsModel(t *testing.T) {
-	f := &fakeForge{issue: &forge.Issue{Number: 7, Title: "clean", Body: "Uses `internal/cli/root.go`."}}
+	f := &fakeForge{issue: &forge.Issue{Index: 7, Title: "clean", Body: "Uses `internal/cli/root.go`."}}
 	local := &fakeClassifier{ret: []Suggestion{{Label: LabelPhaseInversion, Evidence: "should not be asked", Confidence: "high"}}}
 	var out bytes.Buffer
 	_, err := Run(context.Background(), Options{
@@ -100,9 +100,7 @@ func TestRun_CleanArtifactSkipsModel(t *testing.T) {
 }
 
 func hollowPR() *forge.Issue {
-	return &forge.Issue{Number: 9, Title: "pr", Body: "test change", PullRequest: &struct {
-		URL string `json:"url"`
-	}{URL: "u"}}
+	return &forge.Issue{Index: 9, Title: "pr", Body: "test change", PullRequest: &forge.PullRequestMeta{}}
 }
 
 func TestRun_HollowValidationSkippedWithoutEscalation(t *testing.T) {

@@ -9,12 +9,7 @@ import (
 )
 
 // IssueComment is one discussion comment on an issue or PR.
-type IssueComment struct {
-	Body string `json:"body"`
-	User struct {
-		Login string `json:"login"`
-	} `json:"user"`
-}
+type IssueComment = giteasdk.Comment
 
 // GetPRDiff returns the unified diff of a pull request.
 func (c *Client) GetPRDiff(ctx context.Context, prNum int) (string, error) {
@@ -36,11 +31,7 @@ func (c *Client) ListIssueComments(ctx context.Context, num int) ([]IssueComment
 			return nil, fmt.Errorf("list comments: %w", err)
 		}
 		for _, cmt := range cs {
-			ic := IssueComment{Body: cmt.Body}
-			if cmt.Poster != nil {
-				ic.User.Login = cmt.Poster.UserName
-			}
-			all = append(all, ic)
+			all = append(all, *cmt)
 		}
 		if resp.NextPage == 0 {
 			break

@@ -537,8 +537,19 @@ func assemblePRMaterial(ctx context.Context, pr string) (string, error) {
 	comments, _ := client.ListIssueComments(ctx, prNum)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# PR #%d: %s\n", info.Number, info.Title)
-	fmt.Fprintf(&b, "- Author: %s\n- %s → %s\n- State: %s\n", info.User.Login, info.Head.Ref, info.Base.Ref, info.State)
+	author := ""
+	if info.Poster != nil {
+		author = info.Poster.UserName
+	}
+	headRef, baseRef := "", ""
+	if info.Head != nil {
+		headRef = info.Head.Ref
+	}
+	if info.Base != nil {
+		baseRef = info.Base.Ref
+	}
+	fmt.Fprintf(&b, "# PR #%d: %s\n", info.Index, info.Title)
+	fmt.Fprintf(&b, "- Author: %s\n- %s → %s\n- State: %s\n", author, headRef, baseRef, info.State)
 	body := strings.TrimSpace(info.Body)
 	if body == "" {
 		body = "_(no description)_"
@@ -547,12 +558,20 @@ func assemblePRMaterial(ctx context.Context, pr string) (string, error) {
 	fmt.Fprintf(&b, "\n## Discussion (%d comment(s))\n", len(comments))
 	for _, c := range comments {
 		if t := strings.TrimSpace(c.Body); t != "" {
-			fmt.Fprintf(&b, "\n**%s**: %s\n", c.User.Login, t)
+			poster := ""
+			if c.Poster != nil {
+				poster = c.Poster.UserName
+			}
+			fmt.Fprintf(&b, "\n**%s**: %s\n", poster, t)
 		}
 	}
 	fmt.Fprintf(&b, "\n## Reviews (%d)\n", len(reviews))
 	for _, r := range reviews {
-		fmt.Fprintf(&b, "\n**%s** [%s]: %s\n", r.User.Login, r.State, strings.TrimSpace(r.Body))
+		reviewer := ""
+		if r.Reviewer != nil {
+			reviewer = r.Reviewer.UserName
+		}
+		fmt.Fprintf(&b, "\n**%s** [%s]: %s\n", reviewer, r.State, strings.TrimSpace(r.Body))
 	}
 	fmt.Fprintf(&b, "\n## Unified diff\n\n```diff\n%s\n```\n", diff)
 	return b.String(), nil

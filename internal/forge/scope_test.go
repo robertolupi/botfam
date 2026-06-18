@@ -29,7 +29,7 @@ func TestIssueRefs(t *testing.T) {
 }
 
 func TestSelectEpicClosure(t *testing.T) {
-	iss := func(n int, body string) *Issue { return &Issue{Number: n, Body: body} }
+	iss := func(n int, body string) *Issue { return &Issue{Index: int64(n), Body: body} }
 	issues := []*Issue{
 		iss(1, "epic\n- [ ] #2\n- [ ] #3\nsee #99 in prose"), // prose #99 must NOT be followed
 		iss(2, "- [x] #4"),
@@ -45,15 +45,12 @@ func TestSelectEpicClosure(t *testing.T) {
 
 func TestSelectMilestoneAndLabel(t *testing.T) {
 	mk := func(n int, ms string, label string) *Issue {
-		i := &Issue{Number: n}
+		i := &Issue{Index: int64(n)}
 		if ms != "" {
-			i.Milestone = &struct {
-				ID    int64  `json:"id"`
-				Title string `json:"title"`
-			}{Title: ms}
+			i.Milestone = &Milestone{Title: ms}
 		}
 		if label != "" {
-			i.Labels = []Label{{Name: label}}
+			i.Labels = []*Label{{Name: label}}
 		}
 		return i
 	}

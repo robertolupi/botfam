@@ -177,11 +177,11 @@ func (p *forgePoller) buildMessage(n forge.Notification) *mailbox.Message {
 			ev := evs[len(evs)-1] // timeline is ascending; newest triggered this
 			suffix, verb := timelineVerb(ev.Type)
 			kind = base + "_" + suffix
-			if ev.User != nil && ev.User.Login != "" {
-				from = ev.User.Login
+			if ev.Poster != nil && ev.Poster.UserName != "" {
+				from = ev.Poster.UserName
 			}
-			if t := parseForgeTime(ev.CreatedAt); !t.IsZero() {
-				date = t
+			if !ev.Created.IsZero() {
+				date = ev.Created
 			}
 			body = fmt.Sprintf("%s %s %s [%s]", from, verb, url, n.Subject.State)
 			if txt := strings.TrimSpace(ev.Body); txt != "" {

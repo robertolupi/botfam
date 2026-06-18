@@ -225,13 +225,7 @@ func TestForgePollerNamesTimelineEvents(t *testing.T) {
 		n.Subject.HTMLURL = fmt.Sprintf("http://gitea:3000/botfam/botfam/issues/%d", num)
 		return n
 	}
-	user := func(login string) *struct {
-		Login string `json:"login"`
-	} {
-		return &struct {
-			Login string `json:"login"`
-		}{Login: login}
-	}
+	mkUser := func(login string) *forge.User { return &forge.User{UserName: login} }
 
 	commented := mkNotif(1, 350, "Test issue 2", "open")
 	closed := mkNotif(2, 350, "Test issue 2", "closed")
@@ -243,8 +237,8 @@ func TestForgePollerNamesTimelineEvents(t *testing.T) {
 			// Both notifications share issue 350; the newest timeline event is the
 			// close, so both must name "closed" — not a stale "commented".
 			350: {
-				{Type: "comment", User: user("rlupi"), Body: "please run date", CreatedAt: "2026-06-15T20:57:27Z"},
-				{Type: "close", User: user("rlupi"), CreatedAt: "2026-06-15T21:11:19Z"},
+				{Type: "comment", Poster: mkUser("rlupi"), Body: "please run date", Created: time.Date(2026, 6, 15, 20, 57, 27, 0, time.UTC)},
+				{Type: "close", Poster: mkUser("rlupi"), Created: time.Date(2026, 6, 15, 21, 11, 19, 0, time.UTC)},
 			},
 		},
 	}
@@ -311,13 +305,7 @@ func TestForgePollerMarksDirected(t *testing.T) {
 		n.Subject.HTMLURL = fmt.Sprintf("http://gitea:3000/botfam/botfam/issues/%d", num)
 		return n
 	}
-	user := func(login string) *struct {
-		Login string `json:"login"`
-	} {
-		return &struct {
-			Login string `json:"login"`
-		}{Login: login}
-	}
+	mkUser2 := func(login string) *forge.User { return &forge.User{UserName: login} }
 	assigned := mk(1, 10)  // claude-bot is an assignee → directed
 	mentioned := mk(2, 11) // latest comment @-mentions claude-bot → directed
 	neither := mk(3, 12)   // someone else's thread, no mention → not directed
@@ -337,8 +325,8 @@ func TestForgePollerMarksDirected(t *testing.T) {
 			neither.Subject.URL:   plainSubj,
 		},
 		timelines: map[int][]*forge.TimelineEvent{
-			11: {{Type: "comment", User: user("rlupi"), Body: "ping @claude-bot please", CreatedAt: "2026-06-16T09:00:00Z"}},
-			12: {{Type: "comment", User: user("agy-bot"), Body: "agy and rlupi discussing", CreatedAt: "2026-06-16T09:00:00Z"}},
+			11: {{Type: "comment", Poster: mkUser2("rlupi"), Body: "ping @claude-bot please", Created: time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC)}},
+			12: {{Type: "comment", Poster: mkUser2("agy-bot"), Body: "agy and rlupi discussing", Created: time.Date(2026, 6, 16, 9, 0, 0, 0, time.UTC)}},
 		},
 	}
 

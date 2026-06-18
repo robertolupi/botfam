@@ -179,47 +179,50 @@ func extractSession(ctx context.Context, opts ExtractOptions, client *forge.Clie
 
 	for _, issue := range issues {
 		isPR := issue.PullRequest != nil
-		tag := fmt.Sprintf("[Issue #%d]", issue.Number)
+		issNum := int(issue.Index)
+		tag := fmt.Sprintf("[Issue #%d]", issNum)
 		if isPR {
-			tag = fmt.Sprintf("[PR #%d]", issue.Number)
+			tag = fmt.Sprintf("[PR #%d]", issNum)
 			prs = append(prs, issue)
 		}
 
 		// Initial opened event
-		openedTime, parseErr := time.Parse(time.RFC3339, issue.CreatedAt)
-		if parseErr == nil {
-			if (opts.Since == "" || !openedTime.Before(sinceTime)) &&
-				(opts.Until == "" || !openedTime.After(untilTime)) &&
-				(opts.SnapshotTimestamp == "" || !openedTime.After(snapshotTime)) {
+		openedTime := issue.Created
+		if (opts.Since == "" || !openedTime.Before(sinceTime)) &&
+			(opts.Until == "" || !openedTime.After(untilTime)) &&
+			(opts.SnapshotTimestamp == "" || !openedTime.After(snapshotTime)) {
 
-				events = append(events, &timelineEntry{
-					Timestamp: openedTime,
-					Tag:       tag,
-					Actor:     issue.User.Login,
-					Action:    fmt.Sprintf("opened: %s", issue.Title),
-					Body:      issue.Body,
-					EventID:   0, // sort synthetic opened event first
-				})
+			actor := ""
+			if issue.Poster != nil {
+				actor = issue.Poster.UserName
+			}
+			events = append(events, &timelineEntry{
+				Timestamp: openedTime,
+				Tag:       tag,
+				Actor:     actor,
+				Action:    fmt.Sprintf("opened: %s", issue.Title),
+				Body:      issue.Body,
+				EventID:   0, // sort synthetic opened event first
+			})
 
-				if openedTime.Before(earliestEvent) {
-					earliestEvent = openedTime
-				}
-				if openedTime.After(latestEvent) {
-					latestEvent = openedTime
-				}
+			if openedTime.Before(earliestEvent) {
+				earliestEvent = openedTime
+			}
+			if openedTime.After(latestEvent) {
+				latestEvent = openedTime
 			}
 		}
 
 		// Gitea timeline events
-		rawTimeline, err := client.GetIssueTimeline(ctx, issue.Number)
+		rawTimeline, err := client.GetIssueTimeline(ctx, issNum)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to fetch timeline for issue #%d: %v\n", issue.Number, err)
+			fmt.Fprintf(os.Stderr, "Warning: failed to fetch timeline for issue #%d: %v\n", issNum, err)
 			continue
 		}
 
 		for _, e := range rawTimeline {
-			eventTime, parseErr := time.Parse(time.RFC3339, e.CreatedAt)
-			if parseErr != nil {
+			eventTime := e.Created
+			if eventTime.IsZero() {
 				continue
 			}
 
@@ -243,8 +246,8 @@ func extractSession(ctx context.Context, opts ExtractOptions, client *forge.Clie
 
 			// Format events
 			actor := "system"
-			if e.User != nil {
-				actor = e.User.Login
+			if e.Poster != nil {
+				actor = e.Poster.UserName
 			}
 
 			action := ""
@@ -282,13 +285,6 @@ func extractSession(ctx context.Context, opts ExtractOptions, client *forge.Clie
 				}
 			case "merge_pull":
 				action = "merged pull request"
-				if e.RefCommitSHA != "" {
-					sha := e.RefCommitSHA
-					if len(sha) > 8 {
-						sha = sha[:8]
-					}
-					action += fmt.Sprintf(" (commit %s)", sha)
-				}
 			case "closed":
 				action = "closed issue/PR"
 			case "reopened":
@@ -361,8 +357,9 @@ func extractSession(ctx context.Context, opts ExtractOptions, client *forge.Clie
 		fmt.Fprintln(&buf, "\n## Technical Diff Summary")
 
 		for _, pr := range prs {
-			fmt.Fprintf(&buf, "\n### Files Changed in PR #%d:\n", pr.Number)
-			diffText, diffErr := client.GetPRDiff(ctx, pr.Number)
+			prNum := int(pr.Index)
+			fmt.Fprintf(&buf, "\n### Files Changed in PR #%d:\n", prNum)
+			diffText, diffErr := client.GetPRDiff(ctx, prNum)
 			if diffErr != nil {
 				fmt.Fprintf(&buf, "_(Error fetching PR diff: %v)_\n", diffErr)
 				continue
@@ -481,16 +478,16 @@ func checkMilestoneHygiene(ctx context.Context, c *forge.Client, start, end time
 
 	linked := make(map[int]bool)
 	for _, issue := range milestoneIssues {
-		linked[issue.Number] = true
+		linked[int(issue.Index)] = true
 	}
 
 	for _, issue := range recentLocal {
-		if linked[issue.Number] {
+		issNum := int(issue.Index)
+		if linked[issNum] {
 			continue
 		}
-		// Parse updated_at / closed_at to see if they fall into the milestone active range
-		itemTime, err := time.Parse(time.RFC3339, issue.CreatedAt)
-		if err != nil {
+		itemTime := issue.Created
+		if itemTime.IsZero() {
 			continue
 		}
 		if itemTime.After(start) && itemTime.Before(end) {
@@ -499,7 +496,7 @@ func checkMilestoneHygiene(ctx context.Context, c *forge.Client, start, end time
 			if isPR {
 				itemType = "PR"
 			}
-			warnings = append(warnings, fmt.Sprintf("%s #%d (%s) was created during the milestone timeframe (%s) but is not linked to this milestone.", itemType, issue.Number, issue.Title, itemTime.Format(time.RFC3339)))
+			warnings = append(warnings, fmt.Sprintf("%s #%d (%s) was created during the milestone timeframe (%s) but is not linked to this milestone.", itemType, issNum, issue.Title, itemTime.Format(time.RFC3339)))
 		}
 	}
 

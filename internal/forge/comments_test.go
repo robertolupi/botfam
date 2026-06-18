@@ -35,7 +35,7 @@ func TestListIssueComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIssueComments: %v", err)
 	}
-	if len(cs) != 1 || cs[0].Body != "looks good" || cs[0].User.Login != "agy-bot" {
+	if len(cs) != 1 || cs[0].Body != "looks good" || cs[0].Poster == nil || cs[0].Poster.UserName != "agy-bot" {
 		t.Errorf("unexpected comments: %+v", cs)
 	}
 }

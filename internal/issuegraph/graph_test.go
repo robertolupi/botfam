@@ -9,7 +9,7 @@ import (
 )
 
 func iss(n int, state, body string) *forge.Issue {
-	return &forge.Issue{Number: n, State: state, Title: "issue " + body, Body: body}
+	return &forge.Issue{Index: int64(n), State: forge.StateType(state), Title: "issue " + body, Body: body}
 }
 
 // fixture: #1 epic decomposes into #2, #3 (task list); #2 mentions #4 in prose;
@@ -20,9 +20,7 @@ func graphFixture() []*forge.Issue {
 	child3 := iss(3, "closed", "done")
 	other4 := iss(4, "open", "standalone")
 	pr5 := iss(5, "open", "a PR that mentions #1")
-	pr5.PullRequest = &struct {
-		URL string `json:"url"`
-	}{URL: "http://x/5"}
+	pr5.PullRequest = &forge.PullRequestMeta{}
 	return []*forge.Issue{epic, child2, child3, other4, pr5}
 }
 
