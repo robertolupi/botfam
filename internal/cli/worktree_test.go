@@ -9,29 +9,33 @@ import (
 	"testing"
 )
 
-func TestWorktreeCmd(t *testing.T) {
-	tempDir := t.TempDir()
-	mainDir := filepath.Join(tempDir, "main")
+// makeLinkedWorktree creates a main git repo under tempDir/main, creates
+// "feature-branch", and adds a linked worktree at tempDir/wt-bob. It returns
+// mainDir and wtDir.
+func makeLinkedWorktree(t *testing.T, tempDir string) (mainDir, wtDir string) {
+	t.Helper()
+	mainDir = filepath.Join(tempDir, "main")
 	if err := os.Mkdir(mainDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-
 	initGitRepo(t, mainDir)
-
-	// Create a branch to check out in the worktree
-	cmd := exec.Command("git", "branch", "feature-branch")
-	cmd.Dir = mainDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to create branch: %v", err)
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
 	}
+	runGit(mainDir, "branch", "feature-branch")
+	wtDir = filepath.Join(tempDir, "wt-bob")
+	runGit(mainDir, "worktree", "add", wtDir, "feature-branch")
+	return mainDir, wtDir
+}
 
-	// Create linked worktree
-	wtDir := filepath.Join(tempDir, "wt-bob")
-	cmd = exec.Command("git", "worktree", "add", wtDir, "feature-branch")
-	cmd.Dir = mainDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to add worktree: %v", err)
-	}
+func TestWorktreeCmd(t *testing.T) {
+	tempDir := t.TempDir()
+	mainDir, wtDir := makeLinkedWorktree(t, tempDir)
 
 	// 1. Test "worktree init" in the main repo (should fail)
 	var out bytes.Buffer
@@ -105,28 +109,8 @@ func TestWorktreeCmd(t *testing.T) {
 
 func TestWorktreeSyncWiki(t *testing.T) {
 	tempDir := t.TempDir()
-	mainDir := filepath.Join(tempDir, "main")
-	if err := os.Mkdir(mainDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	initGitRepo(t, mainDir)
+	_, wtDir := makeLinkedWorktree(t, tempDir)
 
-	// Create a branch to check out in the worktree
-	cmd := exec.Command("git", "branch", "feature-branch")
-	cmd.Dir = mainDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to create branch: %v", err)
-	}
-
-	// Create linked worktree
-	wtDir := filepath.Join(tempDir, "wt-bob")
-	cmd = exec.Command("git", "worktree", "add", wtDir, "feature-branch")
-	cmd.Dir = mainDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to add worktree: %v", err)
-	}
-
-	// Init worktree config identity
 	var out bytes.Buffer
 	if err := WorktreeCmd([]string{"init", "bob", wtDir}, &out); err != nil {
 		t.Fatalf("worktree init failed: %v", err)
@@ -134,15 +118,13 @@ func TestWorktreeSyncWiki(t *testing.T) {
 
 	// Set up mock wiki remote
 	wikiRemote := filepath.Join(tempDir, "wiki.git")
-	cmd = exec.Command("git", "init", "--bare", wikiRemote)
-	if err := cmd.Run(); err != nil {
+	if err := exec.Command("git", "init", "--bare", wikiRemote).Run(); err != nil {
 		t.Fatalf("failed to init bare wiki remote: %v", err)
 	}
 
 	// Clone the mock wiki into wtDir/wiki
 	wikiLocal := filepath.Join(wtDir, "wiki")
-	cmd = exec.Command("git", "clone", wikiRemote, wikiLocal)
-	if err := cmd.Run(); err != nil {
+	if err := exec.Command("git", "clone", wikiRemote, wikiLocal).Run(); err != nil {
 		t.Fatalf("failed to clone mock wiki: %v", err)
 	}
 
@@ -159,10 +141,9 @@ func TestWorktreeSyncWiki(t *testing.T) {
 	exec.Command("git", "-C", wikiLocal, "commit", "-m", "first wiki commit").Run()
 	exec.Command("git", "-C", wikiLocal, "push", "origin", "main").Run()
 
-	// Now make a second clone of the wiki remote somewhere else, push a change to simulate upstream updates
+	// Now make a second clone of the wiki remote, push a change to simulate upstream updates.
 	wikiUpstream := filepath.Join(tempDir, "wiki-upstream")
-	cmd = exec.Command("git", "clone", wikiRemote, wikiUpstream)
-	if err := cmd.Run(); err != nil {
+	if err := exec.Command("git", "clone", wikiRemote, wikiUpstream).Run(); err != nil {
 		t.Fatalf("failed to clone upstream: %v", err)
 	}
 	exec.Command("git", "-C", wikiUpstream, "config", "user.name", "alice").Run()
