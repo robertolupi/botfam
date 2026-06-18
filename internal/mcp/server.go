@@ -352,6 +352,10 @@ func (s *server) buildEntries() map[string]dispatchEntry {
 		bypassPreamble: true,
 	})
 
+	// Mount the in-process gitea-mcp tools as forge_* subtools (#429), so the
+	// agent needs no separate forge MCP server or token config.
+	addForgeEntries(entries)
+
 	return entries
 }
 

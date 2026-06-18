@@ -93,10 +93,10 @@ func TestRegisterMCPServerGlobally(t *testing.T) {
 	}
 
 	// Verify mcp_config.json (antigravity, JSON, camelCase)
-	verifyJSONConfig(t, mcpConfigPath, tempDir, "antigravity", forgeURL)
+	verifyJSONConfig(t, mcpConfigPath)
 
 	// Verify config.toml (codex, TOML, snake_case)
-	verifyTOMLConfig(t, codexConfigPath, tempDir, "codex", forgeURL)
+	verifyTOMLConfig(t, codexConfigPath)
 }
 
 func TestRegisterMCPServerGloballyEmptyForgeURL(t *testing.T) {
@@ -145,11 +145,13 @@ func TestRegisterMCPServerGloballyEmptyForgeURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := config.McpServers["forge"]; !ok {
-		t.Error("forge server should NOT have been deleted when forgeURL is empty (Issue #227)")
+	// Forge is now served in-process by botfam (#429), so the standalone entry
+	// is retired regardless of forgeURL; botfam stays registered.
+	if _, ok := config.McpServers["forge"]; ok {
+		t.Error("legacy standalone forge server should have been removed (#429)")
 	}
 	if _, ok := config.McpServers["botfam"]; !ok {
-		t.Error("botfam server should still be registered when forgeURL is empty")
+		t.Error("botfam server should still be registered")
 	}
 }
 
@@ -179,15 +181,20 @@ func TestRegisterMCPServerGloballyWithCustomSlug(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := config.McpServers["forge-deep-cuts"]; !ok {
-		t.Error("forge server should have been registered as forge-deep-cuts for slug deep-cuts")
+	// Forge is retired (#429): neither the slug-scoped nor the generic forge
+	// server is registered; only botfam is.
+	if _, ok := config.McpServers["forge-deep-cuts"]; ok {
+		t.Error("standalone forge-deep-cuts server should not be registered (#429)")
 	}
 	if _, ok := config.McpServers["forge"]; ok {
-		t.Error("generic forge server should not have been registered when a custom slug is present")
+		t.Error("generic forge server should not be registered")
+	}
+	if _, ok := config.McpServers["botfam"]; !ok {
+		t.Error("botfam server should be registered")
 	}
 }
 
-func verifyJSONConfig(t *testing.T, path, home, harness, forgeURL string) {
+func verifyJSONConfig(t *testing.T, path string) {
 	t.Helper()
 
 	data, err := os.ReadFile(path)
@@ -228,29 +235,13 @@ func verifyJSONConfig(t *testing.T, path, home, harness, forgeURL string) {
 		t.Errorf("other server was deleted in %s", path)
 	}
 
-	// Check forge server
-	forge, ok := mcpServers["forge"]
-	if !ok {
-		t.Fatalf("forge server missing in %s", path)
-	}
-
-	wantCommand := filepath.Join(home, "bin", "gitea-mcp-server")
-	if forge["command"] != wantCommand {
-		t.Errorf("forge command = %q, want %q", forge["command"], wantCommand)
-	}
-
-	if val, ok := forge["startup_timeout_sec"].(float64); !ok || val != 120.0 {
-		t.Errorf("expected forge's custom startup_timeout_sec field to be preserved as 120.0, but got %v", forge["startup_timeout_sec"])
-	}
-
-	wantTokenFile := filepath.Join(home, ".botfam", "token-"+harness)
-	envMap, _ := forge["env"].(map[string]interface{})
-	if envMap == nil || envMap["GITEA_ACCESS_TOKEN_FILE"] != wantTokenFile {
-		t.Errorf("forge token file = %q, want %q", envMap["GITEA_ACCESS_TOKEN_FILE"], wantTokenFile)
+	// Forge is retired — the standalone entry must be migrated away (#429).
+	if _, ok := mcpServers["forge"]; ok {
+		t.Errorf("legacy forge server should have been removed in %s", path)
 	}
 }
 
-func verifyTOMLConfig(t *testing.T, path, home, harness, forgeURL string) {
+func verifyTOMLConfig(t *testing.T, path string) {
 	t.Helper()
 
 	data, err := os.ReadFile(path)
@@ -291,32 +282,8 @@ func verifyTOMLConfig(t *testing.T, path, home, harness, forgeURL string) {
 		t.Errorf("other server was deleted in %s", path)
 	}
 
-	// Check forge server
-	forge, ok := mcpServers["forge"]
-	if !ok {
-		t.Fatalf("forge server missing in %s", path)
-	}
-
-	wantCommand := filepath.Join(home, "bin", "gitea-mcp-server")
-	if forge["command"] != wantCommand {
-		t.Errorf("forge command = %q, want %q", forge["command"], wantCommand)
-	}
-
-	// In TOML, integers or floats can be parsed as int64 or float64. Let's handle both.
-	var gotTimeout float64
-	switch v := forge["startup_timeout_sec"].(type) {
-	case float64:
-		gotTimeout = v
-	case int64:
-		gotTimeout = float64(v)
-	}
-	if gotTimeout != 120.0 {
-		t.Errorf("expected forge's custom startup_timeout_sec field to be preserved as 120.0, but got %v", forge["startup_timeout_sec"])
-	}
-
-	wantTokenFile := filepath.Join(home, ".botfam", "token-"+harness)
-	envMap, _ := forge["env"].(map[string]interface{})
-	if envMap == nil || envMap["GITEA_ACCESS_TOKEN_FILE"] != wantTokenFile {
-		t.Errorf("forge token file = %q, want %q", envMap["GITEA_ACCESS_TOKEN_FILE"], wantTokenFile)
+	// Forge is retired — the standalone entry must be migrated away (#429).
+	if _, ok := mcpServers["forge"]; ok {
+		t.Errorf("legacy forge server should have been removed in %s", path)
 	}
 }

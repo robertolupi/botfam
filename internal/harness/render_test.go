@@ -10,7 +10,7 @@ import (
 
 func TestRenderClaudeMCP(t *testing.T) {
 	wt := t.TempDir()
-	if err := RenderClaudeMCP(wt, "http://gitea.home.rlupi.com:3000/", "/fams/dc/.botfam/token-claude"); err != nil {
+	if err := RenderClaudeMCP(wt); err != nil {
 		t.Fatalf("RenderClaudeMCP: %v", err)
 	}
 	data, err := os.ReadFile(filepath.Join(wt, ".mcp.json"))
@@ -21,21 +21,12 @@ func TestRenderClaudeMCP(t *testing.T) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("rendered .mcp.json is not valid JSON: %v", err)
 	}
-	forge, ok := cfg.MCPServers["forge"]
-	if !ok {
-		t.Fatalf("no forge server; got %+v", cfg.MCPServers)
-	}
-	if forge.Env["GITEA_ACCESS_TOKEN_FILE"] != "/fams/dc/.botfam/token-claude" {
-		t.Errorf("token file = %q", forge.Env["GITEA_ACCESS_TOKEN_FILE"])
-	}
-	if len(forge.Args) < 4 || forge.Args[3] != "http://gitea.home.rlupi.com:3000/" {
-		t.Errorf("forge args = %v", forge.Args)
+	// The separate forge server is retired — its tools are now in-process
+	// botfam subtools (#429).
+	if _, ok := cfg.MCPServers["forge"]; ok {
+		t.Errorf("forge server should no longer be rendered; got %+v", cfg.MCPServers)
 	}
 	home, _ := os.UserHomeDir()
-	wantForge := filepath.Join(home, "bin", "gitea-mcp-server")
-	if forge.Command != wantForge {
-		t.Errorf("forge command = %q, want vendored %q", forge.Command, wantForge)
-	}
 	wantBotfam := filepath.Join(home, "bin", "botfam")
 	if bf, ok := cfg.MCPServers["botfam"]; !ok || bf.Command != wantBotfam {
 		t.Errorf("botfam server = %+v ok=%v, want command %q", bf, ok, wantBotfam)
@@ -54,9 +45,34 @@ func TestRenderClaudeMCP(t *testing.T) {
 	}
 }
 
-func TestRenderClaudeMCPRequiresForgeURL(t *testing.T) {
-	if err := RenderClaudeMCP(t.TempDir(), "", "/x/token"); err == nil {
-		t.Fatal("expected error for empty forge_url")
+// TestRenderClaudeMCPMigratesLegacyForge verifies a pre-existing standalone
+// forge entry (from before #429) is removed on re-render, while unrelated
+// servers are preserved.
+func TestRenderClaudeMCPMigratesLegacyForge(t *testing.T) {
+	wt := t.TempDir()
+	seed := `{"mcpServers":{"forge":{"command":"/old/gitea-mcp-server","args":["-t","stdio"]},"custom":{"command":"/x/custom"}}}`
+	if err := os.WriteFile(filepath.Join(wt, ".mcp.json"), []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RenderClaudeMCP(wt); err != nil {
+		t.Fatalf("RenderClaudeMCP: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(wt, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg mcpConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("not valid JSON: %v", err)
+	}
+	if _, ok := cfg.MCPServers["forge"]; ok {
+		t.Errorf("legacy forge entry should have been removed; got %+v", cfg.MCPServers)
+	}
+	if _, ok := cfg.MCPServers["custom"]; !ok {
+		t.Errorf("unrelated server 'custom' should be preserved; got %+v", cfg.MCPServers)
+	}
+	if _, ok := cfg.MCPServers["botfam"]; !ok {
+		t.Errorf("botfam server missing after render; got %+v", cfg.MCPServers)
 	}
 }
 
