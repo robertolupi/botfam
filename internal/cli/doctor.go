@@ -92,6 +92,9 @@ func credentialHelperCheck(workDir string) doctorCheck {
 	if err != nil || url == "" {
 		return doctorCheck{name, doctorWarn, "could not resolve a forge remote URL", "configure a `gitea` or `origin` remote"}
 	}
+	if isSSHRemote(url) {
+		return doctorCheck{name, doctorOK, fmt.Sprintf("SSH remote %s — key-based auth, no credential helper needed", url), ""}
+	}
 	raw, values, err := gitCredentialHelpers(workDir, url)
 	if err != nil {
 		return doctorCheck{name, doctorWarn, fmt.Sprintf("could not read credential.helper for %s: %v", url, err), ""}
@@ -198,6 +201,14 @@ func parseCredentialHelpers(showOriginOutput string) []string {
 		values = append(values, strings.TrimSpace(val))
 	}
 	return values
+}
+
+// isSSHRemote reports whether url uses SSH transport (ssh://, git@, or
+// SCP-style host:path). Credential helpers apply only to HTTP(S) remotes.
+func isSSHRemote(url string) bool {
+	return strings.HasPrefix(url, "ssh://") ||
+		strings.HasPrefix(url, "git@") ||
+		(!strings.Contains(url, "://") && strings.Contains(url, ":"))
 }
 
 // forgeRemoteURL resolves the forge remote URL, preferring the botfam `gitea`
