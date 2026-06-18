@@ -4,6 +4,9 @@ import (
 	"io"
 	"os"
 
+	"github.com/robertolupi/botfam/internal/cli/ops"
+	"github.com/robertolupi/botfam/internal/cli/review"
+	"github.com/robertolupi/botfam/internal/cli/setup"
 	"github.com/robertolupi/botfam/internal/mcp"
 	"github.com/spf13/cobra"
 )
@@ -57,31 +60,31 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 	}
 
 	addTo(groupSetup,
-		NewNewfamCmd(),
-		NewCloneCmd(),
-		NewInitCmd(),
-		NewSetupCmd(),
-		NewWorktreeCmd(),
-		NewMintCmd(),
-		NewCredentialCmd(),
-		NewDoctorCmd(),
-		NewAgentDocsCmd(),
+		setup.NewNewfamCmd(),
+		setup.NewCloneCmd(),
+		setup.NewInitCmd(),
+		setup.NewSetupCmd(),
+		setup.NewWorktreeCmd(),
+		setup.NewMintCmd(),
+		setup.NewCredentialCmd(),
+		setup.NewDoctorCmd(),
+		setup.NewAgentDocsCmd(),
 	)
 	addTo(groupOps,
-		NewWaitCmd(),
-		NewIrcClientCmd(),
-		NewScribeCmd(),
-		NewIrclog2SessionsCmd(),
-		NewSessionCmd(),
-		NewWhoamiCmd(),
-		NewMemoryCmd(),
+		ops.NewWaitCmd(),
+		ops.NewForgeWaitCmd(),
+		ops.NewIrcClientCmd(),
+		ops.NewIrcWaitCmd(),
+		ops.NewScribeCmd(),
+		ops.NewIrclog2SessionsCmd(),
+		ops.NewSessionCmd(),
+		ops.NewWhoamiCmd(),
+		ops.NewMemoryCmd(),
 	)
 	addTo(groupReview,
-		NewExternalReviewCmd(),
-		NewMetaReviewCmd(),
-		NewVerifyCmd(),
-		NewMangleCmd(),
-		NewForgeCmd(),
+		review.NewExternalReviewCmd(),
+		review.NewMetaReviewCmd(),
+		review.NewVerifyCmd(),
 	)
 	addTo(groupServer,
 		newServeCmd(),
