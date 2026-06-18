@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "botfam run session envelope",
+  "type": "object",
+  "required": [
+    "run_id",
+    "start_at",
+    "end_at",
+    "duration_ms",
+    "issue_number",
+    "issue_url",
+    "issue_title",
+    "harness",
+    "harness_command",
+    "target",
+    "worktree_path",
+    "branch",
+    "failure_class",
+    "exit_code",
+    "forge_artifacts",
+    "token_usage"
+  ],
+  "properties": {
+    "run_id": {"type": "string"},
+    "start_at": {"type": "string", "format": "date-time"},
+    "end_at": {"type": "string", "format": "date-time"},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "issue_number": {"type": "integer", "minimum": 1},
+    "issue_url": {"type": "string", "format": "uri"},
+    "issue_title": {"type": "string"},
+    "harness": {"type": "string", "minLength": 1},
+    "harness_command": {"type": "string"},
+    "target": {"type": "string", "minLength": 1},
+    "worktree_path": {"type": "string", "minLength": 1},
+    "branch": {"type": "string", "minLength": 1},
+    "failure_class": {
+      "type": "string",
+      "enum": ["success", "timeout", "cancelled", "rate_limited", "auth_failed", "permission_denied", "tool_error", "model_error", "runner_error", "unknown"]
+    },
+    "exit_code": {"type": "integer", "minimum": 0, "maximum": 255},
+    "signal": {"type": "string"},
+    "forge_artifacts": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "token_usage": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {"type": "string", "enum": ["reported", "stream_event", "log_parse", "unavailable", "inferred"]}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

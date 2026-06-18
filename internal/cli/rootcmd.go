@@ -78,6 +78,7 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		ops.NewScribeCmd(),
 		ops.NewIrclog2SessionsCmd(),
 		ops.NewSessionCmd(),
+		ops.NewRunCmd(),
 		ops.NewWhoamiCmd(),
 		ops.NewMemoryCmd(),
 	)
