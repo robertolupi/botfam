@@ -21,6 +21,7 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	giteaannot "gitea.com/gitea/gitea-mcp/pkg/annotation"
+	"gitea.com/gitea/gitea-mcp/pkg/params"
 
 	"github.com/robertolupi/botfam/internal/docs"
 	"github.com/robertolupi/botfam/internal/famconfig"
@@ -391,7 +392,7 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 // every non-bypass tool. It also lazily starts the spool ingester. The result
 // is handed to the tool handler.
 func (s *server) runPreamble(ctx context.Context, name string, entry dispatchEntry, args map[string]any) (*resolvedCtx, error) {
-	workDir := argString(args, "work_dir")
+	workDir := params.GetOptionalString(args, "work_dir", "")
 	cwd, err := os.Getwd()
 	if workDir == "" || (workDir == "." && err == nil && cwd == "/") {
 		workDir = s.resolveDiscoveryWorkDir(ctx)
@@ -413,7 +414,7 @@ func (s *server) runPreamble(ctx context.Context, name string, entry dispatchEnt
 		PWD:         os.Getenv("PWD"),
 		ClientRoots: clientRoots,
 		Mode:        famctx.ModeRegistry,
-		CallActor:   argString(args, "actor"),
+		CallActor:   params.GetOptionalString(args, "actor", ""),
 	})
 	if err != nil {
 		return nil, err
@@ -430,7 +431,7 @@ func (s *server) runPreamble(ctx context.Context, name string, entry dispatchEnt
 	}
 
 	clientActor := s.resolveClientActor(ctx, clientRoots)
-	actor, isCrossActor, err := s.resolveActor(argString(args, "actor"), clientActor, c.Actor, entry.readOnly)
+	actor, isCrossActor, err := s.resolveActor(params.GetOptionalString(args, "actor", ""), clientActor, c.Actor, entry.readOnly)
 	if err != nil {
 		if !entry.identityOptional || !errors.Is(err, errIdentityRequired) {
 			return nil, err
@@ -455,7 +456,7 @@ func (s *server) runPreamble(ctx context.Context, name string, entry dispatchEnt
 // authoritative path on system-wide mounts where the param-less botfam:///
 // resource can't see the caller's worktree (#132).
 func (s *server) handleOrient(ctx context.Context, _ *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
-	wd := argString(args, "work_dir")
+	wd := params.GetOptionalString(args, "work_dir", "")
 	via := "work_dir"
 	cwd, err := os.Getwd()
 	if wd == "" || (wd == "." && err == nil && cwd == "/") {
@@ -480,7 +481,7 @@ func (s *server) handleOrient(ctx context.Context, _ *resolvedCtx, args map[stri
 }
 
 func (s *server) handleWorktreeInit(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
-	targetActor := argString(args, "target_actor")
+	targetActor := params.GetOptionalString(args, "target_actor", "")
 	if targetActor == "" {
 		return nil, errors.New("target_actor is required")
 	}
@@ -500,11 +501,11 @@ func (s *server) handleWorktreeSync(_ context.Context, rc *resolvedCtx, _ map[st
 }
 
 func (s *server) handleIrcWrite(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
-	message := argString(args, "message")
+	message := params.GetOptionalString(args, "message", "")
 	if message == "" {
 		return nil, errors.New("message is required")
 	}
-	target := argString(args, "target")
+	target := params.GetOptionalString(args, "target", "")
 
 	absWorkDir, err := filepath.Abs(rc.workDir)
 	if err != nil {
@@ -552,8 +553,8 @@ func (s *server) handleIrcRead(_ context.Context, rc *resolvedCtx, args map[stri
 		return nil, fmt.Errorf("IRC log not found at %s (is the client running?): %w", logPath, err)
 	}
 
-	maxLines := int(argFloatDefault(args, "lines", 0))
-	fromOffset := int64(argFloatDefault(args, "from_offset", -1))
+	maxLines := int(params.GetOptionalInt(args, "lines", 0))
+	fromOffset := params.GetOptionalInt(args, "from_offset", -1)
 	lines, nextOffset, err := irc.ReadIrcLog(logPath, fromOffset, maxLines)
 	if err != nil {
 		return nil, err
@@ -571,14 +572,14 @@ func (s *server) handleIrcWait(_ context.Context, rc *resolvedCtx, args map[stri
 	}
 
 	logPath := filepath.Join(absWorkDir, "scratch", "irc", rc.c.Actor, "log")
-	timeoutS := argFloatDefault(args, "timeout_s", 60)
+	timeoutS := optionalFloat(args, "timeout_s", 60)
 	if timeoutS <= 0 {
 		timeoutS = 60
 	}
 	if timeoutS > 300 {
 		timeoutS = 300
 	}
-	fromOffset := int64(argFloatDefault(args, "from_offset", -1))
+	fromOffset := params.GetOptionalInt(args, "from_offset", -1)
 	// The FIFO dir is keyed by the bare actor, but the agent's own messages
 	// appear under the fam-scoped nick (claude-botfam) in the log — match on
 	// the scoped nick or the wait wakes on its own traffic (#137; matches the
@@ -599,8 +600,8 @@ func (s *server) handleIrcWait(_ context.Context, rc *resolvedCtx, args map[stri
 
 func (s *server) handleIrcReplay(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
 	historyPath := filepath.Join(rc.c.FamDir, famconfig.FamLedgerDirName(rc.c.Registry), "history.jsonl")
-	since := argString(args, "since")
-	channelsStr := argString(args, "channels")
+	since := params.GetOptionalString(args, "since", "")
+	channelsStr := params.GetOptionalString(args, "channels", "")
 
 	// Parse filter channels
 	var filterChans []string
@@ -796,22 +797,22 @@ func readFrame(r *bufio.Reader) ([]byte, error) {
 	}
 }
 
-func argString(args map[string]any, key string) string {
-	if v, ok := args[key].(string); ok {
-		return v
-	}
-	return ""
-}
-
-func argFloatDefault(args map[string]any, key string, def float64) float64 {
+// optionalFloat reads a number arg as float64. gitea-mcp's params only exposes
+// an integer getter, but timeout_s needs sub-second precision, so this small
+// helper fills that gap — accepting JSON numbers and numeric strings, mirroring
+// params.ToInt64's string coercion.
+func optionalFloat(args map[string]any, key string, def float64) float64 {
 	switch v := args[key].(type) {
 	case float64:
 		return v
 	case int:
 		return float64(v)
-	default:
-		return def
+	case string:
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			return f
+		}
 	}
+	return def
 }
 
 func (s *server) registerResources(mcpSrv *mcpserver.MCPServer) {

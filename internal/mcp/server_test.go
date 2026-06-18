@@ -710,6 +710,43 @@ func TestIrcWaitToolTimeout(t *testing.T) {
 	}
 }
 
+// TestIrcWaitAcceptsStringNumbers verifies the #428 win: numeric args passed as
+// JSON strings (LLMs routinely do this) are coerced — here from_offset "0" and
+// timeout_s "0.05" — instead of falling back to defaults.
+func TestIrcWaitAcceptsStringNumbers(t *testing.T) {
+	s, _ := newTestServer(t)
+	base := t.TempDir()
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "mockfam")
+	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
+	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte("12:00 <bob> static\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
+		"work_dir":    aliceDir,
+		"from_offset": "0",    // string, not number
+		"timeout_s":   "0.05", // string fractional seconds
+	})
+	if err != nil {
+		t.Fatalf("irc_wait failed: %v", err)
+	}
+	// If "0.05" were ignored, the default 60s timeout would apply.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("string timeout_s was not honored; waited %v", elapsed)
+	}
+	var out struct {
+		NextOffset int64 `json:"next_offset"`
+		TimedOut   bool  `json:"timed_out"`
+	}
+	decodeToolResult(t, res, &out)
+	// from_offset "0" means start-from-zero, so the snapshot advances to EOF.
+	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
+		t.Errorf("from_offset string not honored; next_offset = %d", out.NextOffset)
+	}
+}
+
 // TestIrcWaitToolFiltersScopedSelf verifies the MCP irc_wait tool filters the
 // agent's OWN messages by the fam-scoped nick (claude-botfam), not the bare
 // actor — otherwise it wakes on its own traffic once nicks are scoped (#137,
