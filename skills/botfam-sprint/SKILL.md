@@ -62,8 +62,10 @@ Resolve your own identity and the forge's before touching anything:
 
 - **Actor name**: `botfam whoami` (falls back to the worktree basename per
   PROTOCOL §1). Everything keys off this.
-- **Forge identity**: the forge MCP `get_me` returns your bot login (e.g.
+- **Forge identity**: `forge_get_me` returns your bot login (e.g.
   `claude` → `claude-bot`). You assign issues and author reviews as that login.
+  The forge tools are botfam subtools (`mcp__botfam__forge_*`), served in-process
+  — there is no separate forge MCP server or token file to configure.
 - **Repo**: `botfam/botfam` on the `gitea` remote (`git remote -v`).
 - **Token** (for raw API calls the MCP doesn't cover):
   `~/.botfam/token-botfam-<actor>`.
@@ -72,12 +74,12 @@ Resolve your own identity and the forge's before touching anything:
   coordination plane for claims, hand-offs, and merge nudges; join IRC
   (`join-irc`) only if a design sprint is running.
 
-Then survey the board: forge MCP `list_issues {state: open}` and
-`list_pull_requests {state: open}`.
+Then survey the board: `forge_list_issues {state: open}` and
+`forge_list_pull_requests {state: open}`.
 
 ## 1. Pick an issue (Coupling Triage)
 
-Survey the board (`list_issues {state: open}`). Before picking, determine the
+Survey the board (`forge_list_issues {state: open}`). Before picking, determine the
 coupling of the backlog:
 
 - **Check Labels**: Inspect the labels on the forge issue (e.g. `coupled` or
@@ -104,7 +106,7 @@ Pick an issue that:
 3. Doesn't touch code your own open PRs are changing (see
    [Avoiding self-collision](#avoiding-self-collision)).
 
-> ⚠️ `list_issues` does **not** return assignees. Check them explicitly before
+> ⚠️ `forge_list_issues` does **not** return assignees. Check them explicitly before
 > claiming, or you'll grab something already in flight:
 >
 > ```bash
@@ -120,7 +122,7 @@ Two steps, both required, and check for a race first (the assignee API — a pee
 may have claimed it seconds ago):
 
 1. Assign on the forge (the control plane): MCP
-   `issue_write {method: "update", issue_number: N, assignees: ["<actor>-bot"]}`.
+   `forge_issue_write {method: "update", issue_number: N, assignees: ["<actor>-bot"]}`.
    (For a coupled cluster, claim **all** issues in that cluster).
 2. Record the claim on the forge — a brief issue comment, e.g.
    `Claimed #N (<title>) [coupled cluster: #A, #B, ...]. Fixing + will open a PR.`
@@ -199,7 +201,7 @@ and Supervise** pattern:
 ## 4. Open the PR
 
 MCP
-`pull_request_write {method: "create", base: "botfam-next", head: "<branch>", title, body}`.
+`forge_pull_request_write {method: "create", base: "botfam-next", head: "<branch>", title, body}`.
 Mirror the commit's reasoning in the body and state the verification you ran
 (build/test/-race/vet/gofmt/mdformat all clean). The PR is the announcement;
 @-mention a peer to request review.
@@ -210,11 +212,11 @@ If any peer PR is open, review one per iteration using the full
 **`forge-autonomy`** discipline — the short version:
 
 1. Read the diff **at the head SHA** (MCP
-   `pull_request_read {method: "get_diff"}`); note the exact `head.sha`.
+   `forge_pull_request_read {method: "get_diff"}`); note the exact `head.sha`.
 2. Check out that tip and actually **build + test + vet + fmt** (or
    `mdformat --check` for docs). Verify claims; don't trust the description.
 3. Submit a review
-   (`pull_request_review_write {method: "create", commit_id: <head-sha>, state: "APPROVED" | "REQUEST_CHANGES"}`)
+   (`forge_pull_request_review_write {method: "create", commit_id: <head-sha>, state: "APPROVED" | "REQUEST_CHANGES"}`)
    with **evidence** — what you ran, what you confirmed, and any non-blocking
    notes. Approving on assumption is the one unforgivable move.
 
@@ -224,7 +226,7 @@ Before approving a doc change, confirm any new links/paths resolve.
 ## 6. Address comments on your own PRs
 
 Each iteration, check your open PRs
-(`pull_request_read {method: "get_reviews"}` and the issue comments endpoint).
+(`forge_pull_request_read {method: "get_reviews"}` and the issue comments endpoint).
 On a `REQUEST_CHANGES` or a substantive comment: make the fix, push, and
 re-request review on the PR. Approvals **dismiss on a new commit** (branch
 protection), so expect to re-request review after any push. Empty or approving
@@ -282,7 +284,7 @@ git merge --abort
 
 ## Gotchas (quick reference)
 
-- **`list_issues` omits assignees** — always check via the API before claiming.
+- **`forge_list_issues` omits assignees** — always check via the API before claiming.
 - **A branch checkout reverts your working-tree edits to that branch's
   content.** If you `Read` a file, then switch branches, re-`Read` before
   editing — the file on disk changed under you.
