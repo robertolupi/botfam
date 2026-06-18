@@ -180,7 +180,7 @@ func TestClaudeMCPListAndGlobal(t *testing.T) {
 }
 
 // TestRenderClaudeMCPPreservesForeign: the #227 regression at the renderer
-// level — RenderClaudeMCP yields botfam+forge(+gopls) AND keeps a foreign entry.
+// level — RenderClaudeMCP yields botfam(+gopls) AND keeps a foreign entry.
 func TestRenderClaudeMCPPreservesForeign(t *testing.T) {
 	wt := t.TempDir()
 	seed := `{
@@ -191,11 +191,11 @@ func TestRenderClaudeMCPPreservesForeign(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wt, ".mcp.json"), []byte(seed), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := RenderClaudeMCP(wt, "http://gitea:3000/", "/t/token"); err != nil {
+	if err := RenderClaudeMCP(wt); err != nil {
 		t.Fatalf("RenderClaudeMCP: %v", err)
 	}
 	s := servers(t, wt)
-	for _, want := range []string{"botfam", "forge", "codebase-memory-mcp"} {
+	for _, want := range []string{"botfam", "codebase-memory-mcp"} {
 		if _, ok := s[want]; !ok {
 			t.Errorf("missing server %q after render: %v", want, s)
 		}

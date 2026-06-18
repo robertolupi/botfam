@@ -480,6 +480,29 @@ func TestCallToolUnknownTool(t *testing.T) {
 	}
 }
 
+// TestNativeToolCapability verifies the #427 tiering: capability lives on the
+// registry entry and each tool carries a matching MCP read-only/write annotation.
+func TestNativeToolCapability(t *testing.T) {
+	s := &server{}
+	entries := s.buildEntries()
+
+	if ro := entries["irc_read"].tool.Annotations.ReadOnlyHint; ro == nil || !*ro {
+		t.Error("irc_read should carry ReadOnlyHint=true")
+	}
+	if ro := entries["irc_write"].tool.Annotations.ReadOnlyHint; ro == nil || *ro {
+		t.Error("irc_write should carry ReadOnlyHint=false")
+	}
+	if !entries["irc_read"].readOnly {
+		t.Error("irc_read entry.readOnly should be true")
+	}
+	if entries["irc_write"].readOnly {
+		t.Error("irc_write entry.readOnly should be false (it mutates)")
+	}
+	if !entries["worktree_init"].identityOptional || !entries["worktree_sync"].identityOptional {
+		t.Error("worktree_init/worktree_sync should be identityOptional")
+	}
+}
+
 // TestWithRecoveryPanicDoesNotKillSession verifies the #426 WithRecovery setting:
 // a panicking tool handler is converted to an error by the MCP server's dispatch
 // instead of tearing down the stdio session. We register a panicking tool on a
@@ -684,6 +707,43 @@ func TestIrcWaitToolTimeout(t *testing.T) {
 	}
 	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
 		t.Errorf("next_offset = %d, want snapshot size %d", out.NextOffset, len("12:00 <bob> static\n"))
+	}
+}
+
+// TestIrcWaitAcceptsStringNumbers verifies the #428 win: numeric args passed as
+// JSON strings (LLMs routinely do this) are coerced — here from_offset "0" and
+// timeout_s "0.05" — instead of falling back to defaults.
+func TestIrcWaitAcceptsStringNumbers(t *testing.T) {
+	s, _ := newTestServer(t)
+	base := t.TempDir()
+	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
+	writeMockRegistry(t, base, aliceDir, "mockfam")
+	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
+	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte("12:00 <bob> static\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
+		"work_dir":    aliceDir,
+		"from_offset": "0",    // string, not number
+		"timeout_s":   "0.05", // string fractional seconds
+	})
+	if err != nil {
+		t.Fatalf("irc_wait failed: %v", err)
+	}
+	// If "0.05" were ignored, the default 60s timeout would apply.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("string timeout_s was not honored; waited %v", elapsed)
+	}
+	var out struct {
+		NextOffset int64 `json:"next_offset"`
+		TimedOut   bool  `json:"timed_out"`
+	}
+	decodeToolResult(t, res, &out)
+	// from_offset "0" means start-from-zero, so the snapshot advances to EOF.
+	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
+		t.Errorf("from_offset string not honored; next_offset = %d", out.NextOffset)
 	}
 }
 

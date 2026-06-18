@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# tools/install.sh — compile and install botfam and gitea-mcp-server into ~/bin.
+# tools/install.sh — compile and install botfam into ~/bin.
+#
+# botfam now serves the forge (gitea-mcp) tools in-process as forge_* subtools
+# (#429), so the standalone gitea-mcp-server binary is no longer built or used.
 #
 set -euo pipefail
 
@@ -33,20 +36,13 @@ if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 go build -v -ldflags "-X 'github.com/robertolupi/botfam/internal/version.BuildSHA=$version'" -o "$BIN_DIR/botfam" "$REPO_ROOT/cmd/botfam"
 
-# 4. Build gitea-mcp-server
-echo "Building gitea-mcp-server..."
-version=$(git -C "$REPO_ROOT/third_party/gitea-mcp" describe --tags --always 2>/dev/null | sed 's/-/+/' | sed 's/^v//' || echo "unknown")
-(cd "$REPO_ROOT/third_party/gitea-mcp" && go build -v -ldflags "-s -w -X main.Version=$version" -o "$BIN_DIR/gitea-mcp-server")
-
-# 5. Codesign on macOS (Darwin)
+# 4. Codesign on macOS (Darwin)
 if [ "$(uname)" = "Darwin" ]; then
-  echo "Signing binaries for macOS..."
+  echo "Signing binary for macOS..."
   codesign --force --sign - "$BIN_DIR/botfam"
-  codesign --force --sign - "$BIN_DIR/gitea-mcp-server"
 fi
 
 echo ""
-echo "Success! Binaries installed at:"
+echo "Success! Binary installed at:"
 echo "  - $BIN_DIR/botfam"
-echo "  - $BIN_DIR/gitea-mcp-server"
 echo "Make sure $BIN_DIR is in your PATH."

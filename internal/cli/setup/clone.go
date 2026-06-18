@@ -152,7 +152,7 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 		}
 		switch ac.Harness {
 		case "claude-code":
-			if err := harness.RenderClaudeMCP(wt, opts.forgeURL, activeTokenPath); err != nil {
+			if err := harness.RenderClaudeMCP(wt); err != nil {
 				return fmt.Errorf("render .mcp.json for %s: %w", n, err)
 			}
 			fmt.Fprintf(out, "Rendered %s/.mcp.json (claude-code)\n", n)

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
-	"github.com/robertolupi/botfam/internal/forge"
 	harnesslib "github.com/robertolupi/botfam/internal/harness"
 	"github.com/spf13/cobra"
 )
@@ -200,45 +199,17 @@ func RegisterMCPServerGlobally(forgeURL string, slug string, out io.Writer) erro
 		// Remove legacy collab server
 		_ = cfg.Remove("collab", harnesslib.Global)
 
-		// 2. Configure forge server (merge to preserve existing properties)
-		if forgeURL != "" {
-			tokenPath, err := forge.HarnessTokenPath(harness)
-			if err != nil {
-				return err
-			}
-
-			// Scope the global registration by slug to prevent collisions (Issue #225)
-			forgeName := "forge"
-			if slug != "" && slug != "botfam" {
-				forgeName = "forge-" + slug
-			}
-
-			forgeSpec, ok, _ := cfg.Get(forgeName, harnesslib.Global)
-			forgeEnv := map[string]string{
-				"GITEA_ACCESS_TOKEN_FILE": tokenPath,
-			}
-			if ok && forgeSpec.Env != nil {
-				for k, v := range forgeSpec.Env {
-					forgeEnv[k] = v
-				}
-			}
-			forgeEnv["GITEA_ACCESS_TOKEN_FILE"] = tokenPath
-
-			err = cfg.Set(harnesslib.MCPServerSpec{
-				Name:    forgeName,
-				Command: filepath.Join(home, "bin", "gitea-mcp-server"),
-				Args:    []string{"-t", "stdio", "-H", forgeURL},
-				Env:     forgeEnv,
-				Scope:   harnesslib.Global,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to register %s for %s: %w", forgeName, harness, err)
-			}
-		} else {
-			// Issue #227 fix by construction: never delete the forge entry if forgeURL is empty.
-			// Just output a warning so the user knows.
-			fmt.Fprintln(out, "Warning: forge_url is empty; skipping global forge MCP registration")
+		// 2. Retire the standalone forge server: its tools are now served
+		// in-process by the botfam server registered above (#429). Remove any
+		// legacy (slug-scoped) forge entry so the two don't both appear.
+		// forgeURL is retained in the signature for caller compatibility but is
+		// no longer needed here — the in-process forge resolves its host/token
+		// from the fam context at runtime.
+		forgeName := "forge"
+		if slug != "" && slug != "botfam" {
+			forgeName = "forge-" + slug
 		}
+		_ = cfg.Remove(forgeName, harnesslib.Global)
 	}
 
 	return nil

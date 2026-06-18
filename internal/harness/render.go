@@ -23,34 +23,28 @@ type mcpServer struct {
 }
 
 // RenderClaudeMCP writes <worktree>/.mcp.json for a claude-code agent: the
-// botfam stdio server plus the forge MCP pointed at forgeURL with the per-fam
-// token file. This is the project-scoped renderer from
-// wiki/proposal-unified-fam-config §4.5 — forgeURL/tokenPath come from the one
-// resolver, so the config cannot disagree with the health check (#183/#184).
+// botfam stdio server — which now also serves the forge tools in-process as
+// forge_* subtools (#429) — plus, when available, the gopls MCP server.
 //
-// It edits the file through the claude-code MCPConfigurator (Set the botfam,
-// forge, and gopls entries), so any OTHER servers a developer hand-added (e.g.
-// codebase-memory-mcp, gopls) are PRESERVED instead of being clobbered. This is
-// the merge-not-overwrite fix for #227 (setup wiping unrelated entries) and the
-// collisions in #225 — the renderer used to os.WriteFile the whole file.
+// It edits the file through the claude-code MCPConfigurator, so any OTHER
+// servers a developer hand-added (e.g. codebase-memory-mcp) are PRESERVED
+// instead of being clobbered — the merge-not-overwrite fix for #227 (setup
+// wiping unrelated entries) and the collisions in #225.
 //
-// Both server commands are the absolute `~/bin/<binary>` paths that
-// tools/install.sh produces (botfam + the vendored gitea-mcp-server from the
-// third_party/gitea-mcp submodule), not bare PATH names — so a brew-installed
-// gitea-mcp-server (or a stale botfam) earlier on PATH cannot shadow the
-// vendored builds (the ambiguity that bit deep-cuts).
+// It also removes any legacy standalone "forge" entry: the forge tools used to
+// come from a separate gitea-mcp-server process configured with a
+// GITEA_ACCESS_TOKEN_FILE. botfam now resolves the per-harness token itself, so
+// that second server and its token config are gone (#429).
+//
+// The botfam command is the absolute `~/bin/botfam` path that tools/install.sh
+// produces, not a bare PATH name — so a stale botfam earlier on PATH cannot
+// shadow it (the ambiguity that bit deep-cuts).
 //
 // When gopls is installed, its built-in MCP server (`gopls mcp`) is also
 // registered, giving the agent Go-aware tooling (diagnostics, symbol
 // references, rename, search, vulncheck). gopls is an optional developer tool
 // resolved via PATH to an absolute path; its absence is not an error.
-func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
-	if forgeURL == "" {
-		return fmt.Errorf("cannot render .mcp.json: forge_url is empty (set it in ~/.botfam/config.toml)")
-	}
-	if tokenPath == "" {
-		return fmt.Errorf("cannot render .mcp.json: token path is empty")
-	}
+func RenderClaudeMCP(worktree string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home dir: %w", err)
@@ -67,14 +61,11 @@ func RenderClaudeMCP(worktree, forgeURL, tokenPath string) error {
 	}); err != nil {
 		return fmt.Errorf("set botfam server: %w", err)
 	}
-	if err := cfg.Set(MCPServerSpec{
-		Name:    "forge",
-		Command: filepath.Join(binDir, "gitea-mcp-server"),
-		Args:    []string{"-t", "stdio", "-H", forgeURL},
-		Env:     map[string]string{"GITEA_ACCESS_TOKEN_FILE": tokenPath},
-		Scope:   Project,
-	}); err != nil {
-		return fmt.Errorf("set forge server: %w", err)
+	// Forge tools are served in-process by botfam now (#429); remove any legacy
+	// standalone forge server so the two don't both appear. Idempotent — a no-op
+	// when there is no forge entry.
+	if err := cfg.Remove("forge", Project); err != nil {
+		return fmt.Errorf("remove legacy forge server: %w", err)
 	}
 	// gopls ships an MCP server (`gopls mcp`); register it for Go tooling when
 	// installed, resolved to an absolute path so a stale copy can't shadow it.
