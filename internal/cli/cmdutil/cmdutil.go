@@ -42,6 +42,25 @@ func RunWithFamCtx(fn func(context.Context, *cobra.Command, []string) error) fun
 	}
 }
 
+// RunWithRegistryCtx is like RunWithFamCtx but uses the non-strict registry
+// resolver (famctx.WithRegistryCtx) instead of the agent-runtime gate. Use it
+// for general forge/utility commands that should run in human ([user.<name>])
+// and base checkouts, not only agent worktrees — they still fail loudly when no
+// [repo.<k>] stanza matches.
+func RunWithRegistryCtx(fn func(context.Context, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		ctx, err := famctx.WithRegistryCtx(cmd.Context(), wd)
+		if err != nil {
+			return err
+		}
+		return fn(ctx, cmd, args)
+	}
+}
+
 // Unique returns a deduplicated copy of xs, preserving order.
 func Unique(xs []string) []string {
 	seen := map[string]bool{}

@@ -12,7 +12,26 @@ import (
 	giteasdk "gitea.dev/sdk"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
 )
+
+// TestNewClientBuildsSDK is a regression guard: NewClient must construct the
+// gitea SDK client, not return a Client with a nil sdk (which nil-panicked on
+// the first API call, e.g. `forge lint` → ListAllIssues). Hermetic — the SDK
+// makes no network call at construction when the version is pinned.
+func TestNewClientBuildsSDK(t *testing.T) {
+	t.Setenv("GITEA_TOKEN", "tok")
+	ctx := famctx.NewContext(context.Background(), famctx.Context{
+		Registry: famconfig.Registry{ForgeURL: "http://forge.test/", Repository: "botfam/botfam"},
+	})
+	c, err := NewClient(ctx)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if c.sdk == nil {
+		t.Fatal("NewClient must build the SDK client (nil sdk → panic on first API call)")
+	}
+}
 
 // roundTripFunc adapts a function to http.RoundTripper.
 type roundTripFunc func(*http.Request) (*http.Response, error)

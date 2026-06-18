@@ -103,6 +103,53 @@ func TestResolveWalkUp(t *testing.T) {
 	}
 }
 
+// TestWithRegistryCtxAllowsHumanWorktree verifies the fix for general forge
+// tooling: a [user.<name>] (human) checkout is refused by the strict
+// agent-runtime gate, but WithRegistryCtx resolves it (RoleUser) with the forge
+// registry populated, so commands like `forge lint`/`forge graph` can run there.
+func TestWithRegistryCtxAllowsHumanWorktree(t *testing.T) {
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+	setConfig(t, famconfig.Config{
+		Users: map[string]famconfig.AgentConfig{"rlupi": {ForgeUser: "rlupi"}},
+		Repos: map[string]famconfig.RepoConfig{
+			"mf": {Path: famDir, Slug: "mf", ForgeURL: "http://gitea:3000/", Repository: "botfam/botfam"},
+		},
+	})
+	userDir := filepath.Join(famDir, "rlupi")
+	if err := os.Mkdir(userDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, userDir)
+
+	// Strict agent-runtime gate refuses the human checkout.
+	if _, err := ResolveAgentRuntime(userDir); err == nil {
+		t.Fatal("expected ResolveAgentRuntime to refuse a [user.<name>] worktree")
+	}
+
+	// Non-strict registry resolver allows it.
+	ctx, err := WithRegistryCtx(context.Background(), userDir)
+	if err != nil {
+		t.Fatalf("WithRegistryCtx should resolve a human worktree, got: %v", err)
+	}
+	fctx, ok := FromContext(ctx)
+	if !ok {
+		t.Fatal("expected a famctx in the returned context")
+	}
+	if fctx.ActorRole != RoleUser {
+		t.Errorf("expected RoleUser, got %q", fctx.ActorRole)
+	}
+	if fctx.Registry.ForgeURL != "http://gitea:3000/" || fctx.Registry.Repository != "botfam/botfam" {
+		t.Errorf("registry not populated: %+v", fctx.Registry)
+	}
+	// Humans carry no per-harness token path (they supply GITEA_TOKEN).
+	if fctx.TokenPath != "" {
+		t.Errorf("human worktree should have no TokenPath, got %q", fctx.TokenPath)
+	}
+}
+
 // TestResolveLocateNoConfig: with no matching [repo.<k>] stanza, ModeLocate no
 // longer synthesizes a git-hash fam (#404 dropped the legacy fallback). It
 // returns an empty identity plus an error diagnostic rather than failing.
