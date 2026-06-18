@@ -470,6 +470,49 @@ func decodeToolResult(t *testing.T, res *mcplib.CallToolResult, v any) {
 	}
 }
 
+// TestCallToolUnknownTool verifies the registry dispatch returns a clear error
+// for a name that isn't registered (replaces the old switch's fallthrough).
+func TestCallToolUnknownTool(t *testing.T) {
+	s := &server{}
+	_, err := s.callTool(context.Background(), "does_not_exist", nil)
+	if err == nil || !strings.Contains(err.Error(), "unknown tool") {
+		t.Fatalf("expected unknown-tool error, got %v", err)
+	}
+}
+
+// TestWithRecoveryPanicDoesNotKillSession verifies the #426 WithRecovery setting:
+// a panicking tool handler is converted to an error by the MCP server's dispatch
+// instead of tearing down the stdio session. We register a panicking tool on a
+// server built the same way Serve does and drive it through HandleMessage.
+func TestWithRecoveryPanicDoesNotKillSession(t *testing.T) {
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRecovery())
+	mcpSrv.AddTool(mcplib.NewTool("boom", mcplib.WithDescription("panics on call")),
+		func(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+			panic("boom")
+		})
+
+	req := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"boom","arguments":{}}}`)
+	var resp mcplib.JSONRPCMessage
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resp = mcpSrv.HandleMessage(context.Background(), req)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HandleMessage did not return — recovery missing?")
+	}
+
+	out, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(string(out)), "panic") {
+		t.Fatalf("expected recovered panic surfaced as error, got %s", out)
+	}
+}
+
 func TestIrcReadTool(t *testing.T) {
 	s, _ := newTestServer(t)
 	base := t.TempDir()
