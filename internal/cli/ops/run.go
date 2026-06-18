@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -410,7 +411,7 @@ func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string,
 	case famconfig.HarnessCodex:
 		return runDirectHarnessCommand(ctx, "codex", []string{"exec", prompt}, issue)
 	case famconfig.HarnessClaudeCode:
-		return runDirectHarnessCommand(ctx, "claude", []string{"-p", prompt}, issue)
+		return runClaudeHarnessCommand(ctx, prompt, issue)
 	case famconfig.HarnessAntigravity:
 		return runDirectHarnessCommand(ctx, "agy", []string{"--print", prompt}, issue)
 	}
@@ -420,6 +421,59 @@ func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string,
 		CommandLine: fallbackCommand,
 		Stderr:      "run: no harness binary found for harness " + harness + "; use --harness-command or --target harness:<command>\n",
 	}
+}
+
+func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64) harnessResult {
+	args := []string{
+		"-p",
+		prompt,
+		"--verbose",
+		"--output-format",
+		"stream-json",
+		"--include-hook-events",
+		"--include-partial-messages",
+	}
+	result := runDirectHarnessCommand(ctx, "claude", args, issue)
+	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
+		result.Transcript = parsed
+	}
+	return result
+}
+
+func parseStreamJSONTranscript(raw string) []map[string]any {
+	rows := make([]map[string]any, 0)
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			rows = append(rows, map[string]any{
+				"event":      "raw_line",
+				"line":       lineNo,
+				"raw_output": line,
+				"error":      err.Error(),
+			})
+			continue
+		}
+		if row != nil {
+			rows = append(rows, row)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		rows = append(rows, map[string]any{
+			"event": "stream_scan_error",
+			"error": err.Error(),
+		})
+	}
+	return rows
 }
 
 func runDirectHarnessCommand(ctx context.Context, command string, args []string, issue int64) harnessResult {

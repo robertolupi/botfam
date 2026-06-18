@@ -296,6 +296,18 @@ func TestRunIssueAgentFlagAndPrompt(t *testing.T) {
 	if !strings.Contains(env.HarnessCmd, "claude") {
 		t.Fatalf("HarnessCmd = %q, want to contain claude", env.HarnessCmd)
 	}
+	if !strings.Contains(env.HarnessCmd, "--output-format") || !strings.Contains(env.HarnessCmd, "stream-json") {
+		t.Fatalf("HarnessCmd = %q, want stream-json output format args", env.HarnessCmd)
+	}
+	if !strings.Contains(env.HarnessCmd, "--verbose") {
+		t.Fatalf("HarnessCmd = %q, want verbose output mode for stream-json", env.HarnessCmd)
+	}
+	if !strings.Contains(env.HarnessCmd, "--include-hook-events") {
+		t.Fatalf("HarnessCmd = %q, want hook event capture flag", env.HarnessCmd)
+	}
+	if !strings.Contains(env.HarnessCmd, "--include-partial-messages") {
+		t.Fatalf("HarnessCmd = %q, want partial message capture flag", env.HarnessCmd)
+	}
 	if env.Harness != "claude" {
 		t.Fatalf("Harness = %q, want claude", env.Harness)
 	}
@@ -315,6 +327,61 @@ func TestRunIssueAgentFlagAndPrompt(t *testing.T) {
 	}
 	if !strings.Contains(string(stdout), "Do a quick summary.") {
 		t.Fatalf("prompt.md missing issue body: %q", string(stdout))
+	}
+}
+
+func TestRunIssueClaudeHarnessParsesStreamJSONTranscript(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   21,
+		Title:   "Claude stream transcript",
+		Body:    "Emit two JSON lines.",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/21",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "claude")
+	fakeScript := []byte(`#!/bin/sh
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}],"model":"claude-3"}}'
+printf '%s\n' '{"type":"result","subtype":"success","duration_ms":1,"duration_api_ms":1,"is_error":false,"num_turns":1,"session_id":"s1"}'
+`)
+	if err := os.WriteFile(fakeCmd, fakeScript, 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      21,
+		agent:      "claude",
+		agentSet:   true,
+		prompt:     "Summarize this issue",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	transcriptPath := filepath.Join(runDir, "transcript.jsonl")
+	b, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("missing transcript.jsonl: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("transcript lines = %d, want 2", len(lines))
+	}
+	var first map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("parse first transcript line: %v", err)
+	}
+	if got := first["type"]; got != "assistant" {
+		t.Fatalf("first event type = %v, want assistant", got)
 	}
 }
 
