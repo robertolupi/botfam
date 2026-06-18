@@ -5,6 +5,7 @@
 /botfam
 .claude/settings.local.json
 .mcp.json
+.mcp.json.lock
 scratch/
 # The top-level synced wiki clone only — anchored so it does not also ignore
 # the internal/wiki Go package.
