@@ -208,6 +208,54 @@ func TestRunIssueHarnessCommandTarget(t *testing.T) {
 	}
 }
 
+func TestRunIssueDefaultHarnessCommandForCodex(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   16,
+		Title:   "Default harness invocation",
+		Body:    "Implement something useful",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/16",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "codex")
+	if err := os.WriteFile(fakeCmd, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\"\n"), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      16,
+		harness:    "codex",
+		target:     "harness",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.FailureClass != runStatusSuccess {
+		t.Fatalf("FailureClass = %q, want %q", env.FailureClass, runStatusSuccess)
+	}
+	if !strings.Contains(env.HarnessCmd, "codex") {
+		t.Fatalf("HarnessCmd = %q, want to contain codex", env.HarnessCmd)
+	}
+	stdout, err := os.ReadFile(filepath.Join(runDir, "stdout.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(stdout), "Default harness invocation") {
+		t.Fatalf("stdout missing prompt title: %q", string(stdout))
+	}
+}
+
 func TestRunIssueHarnessCommandFromEnv(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)
@@ -254,6 +302,7 @@ func TestRunIssueHarnessMissingCommand(t *testing.T) {
 
 	err := runIssue(ctx, client, fctx, runOptions{
 		issue:      15,
+		harness:    "bogus-harness",
 		target:     "harness",
 		captureDir: outDir,
 	})

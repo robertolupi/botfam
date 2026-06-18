@@ -182,7 +182,13 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	}
 
 	start := time.Now().UTC()
-	hResult := runFakeHarness(runCtx, opts.harness, opts.target, opts.harnessCmd, issue)
+	runEnv, runRepo := resolveIssueInfo(fctx.Registry)
+	if runRepo == "" && issue.Repository != nil && issue.Repository.FullName != "" {
+		runRepo = issue.Repository.FullName
+	}
+	issueURL := issueURL(issue, runEnv, runRepo, opts.issue)
+	harnessPrompt := makePrompt(issue, issueURL)
+	hResult := runFakeHarness(runCtx, opts.harness, opts.target, opts.harnessCmd, issue, harnessPrompt)
 	end := time.Now().UTC()
 	status := hResult.Status
 	if status == runStatusSuccess && runCtx.Err() != nil {
@@ -191,12 +197,6 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 			status = runStatusCancelled
 		}
 	}
-
-	runEnv, runRepo := resolveIssueInfo(fctx.Registry)
-	if runRepo == "" && issue.Repository != nil && issue.Repository.FullName != "" {
-		runRepo = issue.Repository.FullName
-	}
-	issueURL := issueURL(issue, runEnv, runRepo, opts.issue)
 
 	artifact := runEnvelope{
 		RunID:        runID,
@@ -276,7 +276,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	return nil
 }
 
-func runFakeHarness(ctx context.Context, harness, target, harnessCommand string, issue *forge.Issue) harnessResult {
+func runFakeHarness(ctx context.Context, harness, target, harnessCommand string, issue *forge.Issue, harnessPrompt string) harnessResult {
 	cmd := fmt.Sprintf("fake-harness --harness=%s --target=%s --issue=%d", harness, target, issue.Index)
 	target = strings.ToLower(strings.TrimSpace(target))
 	switch {
@@ -350,12 +350,7 @@ func runFakeHarness(ctx context.Context, harness, target, harnessCommand string,
 		}
 		resolved, ok := resolveHarnessCommand(command, harnessCommand)
 		if !ok {
-			return harnessResult{
-				Status:      runStatusRunnerError,
-				ExitCode:    3,
-				CommandLine: cmd,
-				Stderr:      "run: no harness command configured; use --harness-command or BOTFAM_RUN_HARNESS_CMD or --target harness:<command>\n",
-			}
+			return runHarnessCLI(ctx, harness, harnessPrompt, cmd, issue.Index)
 		}
 		return runBashHarness(ctx, resolved, resolved, issue.Index)
 	default:
@@ -374,6 +369,74 @@ func resolveHarnessCommand(inline, fallback string) (string, bool) {
 		return envCmd, true
 	}
 	return "", false
+}
+
+func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string, issue int64) harnessResult {
+	switch famconfig.CanonicalHarness(harness) {
+	case famconfig.HarnessCodex:
+		return runDirectHarnessCommand(ctx, "codex", []string{"exec", prompt}, issue)
+	case famconfig.HarnessClaudeCode:
+		return runDirectHarnessCommand(ctx, "claude", []string{"-p", prompt}, issue)
+	case famconfig.HarnessAntigravity:
+		return runDirectHarnessCommand(ctx, "agy", []string{"--print", prompt}, issue)
+	}
+	return harnessResult{
+		Status:      runStatusRunnerError,
+		ExitCode:    4,
+		CommandLine: fallbackCommand,
+		Stderr:      "run: no harness binary found for harness " + harness + "; use --harness-command or --target harness:<command>\n",
+	}
+}
+
+func runDirectHarnessCommand(ctx context.Context, command string, args []string, issue int64) harnessResult {
+	cmd := exec.CommandContext(ctx, command, args...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	status := runFailureClass(runStatusSuccess)
+	exitCode := 0
+	if err != nil {
+		status = runFailureClass(runStatusToolError)
+		exitCode = 1
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			status = runFailureClass(runStatusTimeout)
+			exitCode = 124
+		}
+		if ctx.Err() == context.Canceled {
+			status = runFailureClass(runStatusCancelled)
+			exitCode = 124
+		}
+	}
+
+	return harnessResult{
+		Status:      status,
+		ExitCode:    exitCode,
+		CommandLine: commandLineForArgs(command, args),
+		Stdout:      stdout.String(),
+		Stderr:      stderr.String(),
+		Transcript: []map[string]any{
+			{"event": "harness", "command": command, "args": args},
+			{"event": "issue", "index": issue},
+		},
+		Artifacts: map[string]any{
+			"command": command,
+			"args":    args,
+		},
+	}
+}
+
+func commandLineForArgs(command string, args []string) string {
+	parts := make([]string, 0, 1+len(args))
+	parts = append(parts, command)
+	for _, arg := range args {
+		parts = append(parts, strconv.Quote(arg))
+	}
+	return strings.Join(parts, " ")
 }
 
 func runBashOllamaCommand(target string) string {
