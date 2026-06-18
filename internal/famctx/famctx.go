@@ -334,6 +334,18 @@ func FromContext(ctx context.Context) (Context, bool) {
 	return v, ok
 }
 
+// MustHaveIdentity returns the famctx.Context carried in ctx, or panics if none
+// was stamped. Call this at every service-interface entry point that requires a
+// resolved identity — it turns a missing-context bug into an immediate, loud
+// failure rather than a silent zero-value propagation.
+func MustHaveIdentity(ctx context.Context) Context {
+	v, ok := ctx.Value(contextKey{}).(Context)
+	if !ok {
+		panic("famctx: no identity in context — stamp with famctx.NewContext before crossing a service boundary")
+	}
+	return v
+}
+
 // WithFamCtx resolves the agent runtime context for workDir and stores it in
 // ctx, returning the enriched context. It is NewContext composed with
 // ResolveAgentRuntime — the single call site for commands and handlers that
