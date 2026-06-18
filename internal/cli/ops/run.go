@@ -23,6 +23,7 @@ type runOptions struct {
 	issue      int
 	harness    string
 	target     string
+	harnessCmd string
 	timeoutS   int
 	captureDir string
 }
@@ -38,6 +39,7 @@ Default target is 'success', which executes 'bash -lc env' as a baseline command
 Use --target "shell:<command>" to run a custom shell command.
 Use --target "ollama:<prompt>" to run an Ollama command with gpt-oss:20b.
 Use --target "ollama" for a canned demonstration prompt.
+Use --target "harness[:<command>]" to run a harness command (from --harness-command or BOTFAM_RUN_HARNESS_CMD).
   run.json
   prompt.md
   stdout.log
@@ -58,6 +60,8 @@ const (
 	runDefaultHarness      = "codex"
 	runTargetSuccessPrefix = "success"
 	runTargetOllamaPrefix  = "ollama"
+	runTargetHarnessPrefix = "harness"
+	runHarnessCmdEnvVar    = "BOTFAM_RUN_HARNESS_CMD"
 )
 
 type issueClient interface {
@@ -142,6 +146,7 @@ func NewRunCmd() *cobra.Command {
 	flags.IntVar(&opts.issue, "issue", 0, "forge issue/PR number to run")
 	flags.StringVar(&opts.harness, "harness", "", "harness override (default: detected harness, then codex)")
 	flags.StringVar(&opts.target, "target", "", "harness target for fake mode (e.g. success, fail, sleep:2s)")
+	flags.StringVar(&opts.harnessCmd, "harness-command", "", "command for --target harness (or set BOTFAM_RUN_HARNESS_CMD)")
 	flags.IntVar(&opts.timeoutS, "timeout", 0, "wall-clock timeout in seconds (0 = no timeout)")
 	flags.StringVar(&opts.captureDir, "capture-dir", "", "capture directory (default: $FAMDIR/runs)")
 	return c
@@ -177,7 +182,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	}
 
 	start := time.Now().UTC()
-	hResult := runFakeHarness(runCtx, opts.harness, opts.target, issue)
+	hResult := runFakeHarness(runCtx, opts.harness, opts.target, opts.harnessCmd, issue)
 	end := time.Now().UTC()
 	status := hResult.Status
 	if status == runStatusSuccess && runCtx.Err() != nil {
@@ -271,7 +276,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	return nil
 }
 
-func runFakeHarness(ctx context.Context, harness, target string, issue *forge.Issue) harnessResult {
+func runFakeHarness(ctx context.Context, harness, target, harnessCommand string, issue *forge.Issue) harnessResult {
 	cmd := fmt.Sprintf("fake-harness --harness=%s --target=%s --issue=%d", harness, target, issue.Index)
 	target = strings.ToLower(strings.TrimSpace(target))
 	switch {
@@ -338,9 +343,37 @@ func runFakeHarness(ctx context.Context, harness, target string, issue *forge.Is
 		return runBashHarness(ctx, script, cmd, issue.Index)
 	case target == runTargetOllamaPrefix || strings.HasPrefix(target, runTargetOllamaPrefix+":"):
 		return runBashHarness(ctx, runBashOllamaCommand(target), cmd, issue.Index)
+	case target == runTargetHarnessPrefix || strings.HasPrefix(target, runTargetHarnessPrefix+":"):
+		command := ""
+		if strings.HasPrefix(target, runTargetHarnessPrefix+":") {
+			command = strings.TrimSpace(strings.TrimPrefix(target, runTargetHarnessPrefix+":"))
+		}
+		resolved, ok := resolveHarnessCommand(command, harnessCommand)
+		if !ok {
+			return harnessResult{
+				Status:      runStatusRunnerError,
+				ExitCode:    3,
+				CommandLine: cmd,
+				Stderr:      "run: no harness command configured; use --harness-command or BOTFAM_RUN_HARNESS_CMD or --target harness:<command>\n",
+			}
+		}
+		return runBashHarness(ctx, resolved, resolved, issue.Index)
 	default:
 		return runBashHarness(ctx, "env", cmd, issue.Index)
 	}
+}
+
+func resolveHarnessCommand(inline, fallback string) (string, bool) {
+	if inline != "" {
+		return inline, true
+	}
+	if fallback != "" {
+		return strings.TrimSpace(fallback), true
+	}
+	if envCmd := strings.TrimSpace(os.Getenv(runHarnessCmdEnvVar)); envCmd != "" {
+		return envCmd, true
+	}
+	return "", false
 }
 
 func runBashOllamaCommand(target string) string {

@@ -177,6 +177,97 @@ func TestRunIssueShellCommand(t *testing.T) {
 	}
 }
 
+func TestRunIssueHarnessCommandTarget(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 13, Title: "Harness command target"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      13,
+		target:     "harness:printf harness-ok",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.FailureClass != runStatusSuccess {
+		t.Fatalf("FailureClass = %q, want %q", env.FailureClass, runStatusSuccess)
+	}
+	stdout, err := os.ReadFile(filepath.Join(runDir, "stdout.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(stdout)) != "harness-ok" {
+		t.Fatalf("stdout = %q, want harness-ok", string(stdout))
+	}
+}
+
+func TestRunIssueHarnessCommandFromEnv(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 14, Title: "Harness env command"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	t.Setenv("BOTFAM_RUN_HARNESS_CMD", "printf env-ok")
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      14,
+		target:     "harness",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.FailureClass != runStatusSuccess {
+		t.Fatalf("FailureClass = %q, want %q", env.FailureClass, runStatusSuccess)
+	}
+	stdout, err := os.ReadFile(filepath.Join(runDir, "stdout.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(stdout)) != "env-ok" {
+		t.Fatalf("stdout = %q, want env-ok", string(stdout))
+	}
+}
+
+func TestRunIssueHarnessMissingCommand(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 15, Title: "Harness missing command"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	// Ensure env fallback is not set and no command flag is provided.
+	t.Setenv("BOTFAM_RUN_HARNESS_CMD", "")
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      15,
+		target:     "harness",
+		captureDir: outDir,
+	})
+	if err == nil {
+		t.Fatalf("runIssue succeeded unexpectedly")
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.FailureClass != runStatusRunnerError {
+		t.Fatalf("FailureClass = %q, want %q", env.FailureClass, runStatusRunnerError)
+	}
+}
+
 func TestRunBashOllamaCommand(t *testing.T) {
 	t.Run("uses_default_prompt", func(t *testing.T) {
 		got := runBashOllamaCommand("ollama")
