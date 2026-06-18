@@ -1,4 +1,4 @@
-package cli
+package review
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/issuegraph"
 	"github.com/robertolupi/botfam/internal/mangle"
@@ -46,7 +47,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
   botfam forge graph --milestone M7 --format dot | dot -Tsvg > m7.svg`,
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+	cmd.RunE = cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		switch format {
 		case "mermaid", "dot", "html":
 		default:
@@ -104,7 +105,7 @@ rule set (misattributed work, double-close, merged-but-open). Exits non-zero
 when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 	}
 	build := exportSelectors(cmd)
-	cmd.RunE = RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+	cmd.RunE = cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 		sc, err := build()
 		if err != nil {
 			return err
