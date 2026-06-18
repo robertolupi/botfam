@@ -272,6 +272,16 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 					tokenPath = tp
 				}
 			}
+		} else if isUser {
+			// Hand a human their own token file (~/.botfam/token-<user>) only when
+			// NO agent harness is detected — a bot operating in a [user.<name>]
+			// worktree must not silently borrow the human's forge credentials.
+			// DetectHarnessFromEnv(nil) reads the live process env.
+			if famconfig.DetectHarnessFromEnv(inputs.Env) == "" && famconfig.DetectHarnessFromClientName(inputs.ClientName) == "" {
+				if tp, err := famconfig.UserTokenPath(actor); err == nil {
+					tokenPath = tp
+				}
+			}
 		}
 
 		slug := famconfig.FamSlug(reg)
@@ -367,12 +377,14 @@ func ResolveAgentRuntime(workDir string) (Context, error) {
 }
 
 // WithRegistryCtx resolves the family *registry* context (forge URL, repository,
-// and — for an agent worktree — the per-harness token) and embeds it, WITHOUT
-// the strict agent-runtime gate. It is for general tooling (e.g. `forge lint` /
-// `forge graph`) that must also run in human ([user.<name>]) and base checkouts,
-// not only agent worktrees. It still fails loudly when no [repo.<k>] stanza
-// matches the work dir (the fail-loud invariant); a human supplies a forge token
-// via GITEA_TOKEN, since [user.<name>] checkouts carry no per-harness token path.
+// and the token path) and embeds it, WITHOUT the strict agent-runtime gate. It
+// is for general tooling (e.g. `forge lint` / `forge graph`) that must also run
+// in human ([user.<name>]) and base checkouts, not only agent worktrees. It
+// still fails loudly when no [repo.<k>] stanza matches the work dir (the
+// fail-loud invariant). Token path: an agent gets ~/.botfam/token-<harness>; a
+// human gets ~/.botfam/token-<user>, but ONLY when no agent harness is detected
+// in the environment (so a bot in a human worktree can't borrow the human's
+// credentials) — otherwise the token comes from GITEA_TOKEN.
 func WithRegistryCtx(ctx context.Context, workDir string) (context.Context, error) {
 	fctx, err := Resolve(ctx, Inputs{WorkDir: workDir, Mode: ModeRegistry})
 	if err != nil {

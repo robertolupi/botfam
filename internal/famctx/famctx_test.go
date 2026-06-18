@@ -144,9 +144,47 @@ func TestWithRegistryCtxAllowsHumanWorktree(t *testing.T) {
 	if fctx.Registry.ForgeURL != "http://gitea:3000/" || fctx.Registry.Repository != "botfam/botfam" {
 		t.Errorf("registry not populated: %+v", fctx.Registry)
 	}
-	// Humans carry no per-harness token path (they supply GITEA_TOKEN).
-	if fctx.TokenPath != "" {
-		t.Errorf("human worktree should have no TokenPath, got %q", fctx.TokenPath)
+	// Token resolution depends on the live env (bot-detection guard) and is
+	// covered hermetically by TestResolveUserTokenGuard.
+}
+
+// TestResolveUserTokenGuard verifies a human worktree resolves its own token
+// file (~/.botfam/token-<user>) ONLY when no agent harness is detected — a bot
+// (e.g. CLAUDECODE in env) operating in a [user.<name>] worktree must not borrow
+// the human's forge credentials.
+func TestResolveUserTokenGuard(t *testing.T) {
+	famDir := t.TempDir()
+	if eval, err := filepath.EvalSymlinks(famDir); err == nil {
+		famDir = eval
+	}
+	setConfig(t, famconfig.Config{
+		Users: map[string]famconfig.AgentConfig{"rlupi": {ForgeUser: "rlupi"}},
+		Repos: map[string]famconfig.RepoConfig{"mf": {Path: famDir, Slug: "mf", ForgeURL: "http://gitea:3000/", Repository: "botfam/botfam"}},
+	})
+	userDir := filepath.Join(famDir, "rlupi")
+	if err := os.Mkdir(userDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, userDir)
+
+	wantPath, _ := famconfig.UserTokenPath("rlupi")
+
+	// Genuine human shell: no harness env → token file resolved.
+	human, err := Resolve(context.Background(), Inputs{WorkDir: userDir, Mode: ModeRegistry, Env: []string{}})
+	if err != nil {
+		t.Fatalf("Resolve(human): %v", err)
+	}
+	if human.TokenPath != wantPath {
+		t.Errorf("human TokenPath = %q, want %q", human.TokenPath, wantPath)
+	}
+
+	// Bot in a human worktree (CLAUDECODE set): token must NOT be resolved.
+	bot, err := Resolve(context.Background(), Inputs{WorkDir: userDir, Mode: ModeRegistry, Env: []string{"CLAUDECODE=1"}})
+	if err != nil {
+		t.Fatalf("Resolve(bot): %v", err)
+	}
+	if bot.TokenPath != "" {
+		t.Errorf("bot in human worktree should get no TokenPath, got %q", bot.TokenPath)
 	}
 }
 

@@ -180,6 +180,20 @@ func HarnessTokenPath(harness string) (string, error) {
 	return filepath.Join(home, ".botfam", "token-"+CanonicalHarness(harness)), nil
 }
 
+// UserTokenPath returns the per-user forge token path ~/.botfam/token-<name> —
+// the human-operator analogue of HarnessTokenPath. The name is literal (no
+// harness canonicalization), so user 'rlupi' resolves to token-rlupi.
+func UserTokenPath(name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("user name is empty")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get user home directory: %w", err)
+	}
+	return filepath.Join(home, ".botfam", "token-"+name), nil
+}
+
 // ResolveFam resolves the fam identity for workDir, fail-closed. It locates the
 // git worktree root, treats its parent as the fam dir, resolves the merged
 // Registry from ~/.botfam/config.toml (ResolveConfig), and requires the
