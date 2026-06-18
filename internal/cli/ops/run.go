@@ -22,6 +22,7 @@ import (
 type runOptions struct {
 	issue      int
 	agent      string
+	agentSet   bool
 	harness    string
 	target     string
 	prompt     string
@@ -38,6 +39,7 @@ writes the required artifacts:
 The run.json schema lives in doc/run-issue-session-capture.schema.json.
 
 Default target is 'success', which executes 'bash -lc env' as a baseline command.
+If --agent is explicitly provided and --target is omitted, target defaults to 'harness'.
 Use --target "shell:<command>" to run a custom shell command.
 Use --target "ollama:<prompt>" to run an Ollama command with gpt-oss:20b.
 Use --target "ollama" for a canned demonstration prompt.
@@ -123,6 +125,7 @@ func NewRunCmd() *cobra.Command {
 			if ro.harness != "" && ro.agent != "" && ro.harness != ro.agent {
 				return fmt.Errorf("--agent and --harness disagree; pass only one")
 			}
+			ro.agentSet = ro.agent != "" || ro.harness != ""
 			if ro.agent == "" {
 				ro.agent = ro.harness
 			}
@@ -136,7 +139,11 @@ func NewRunCmd() *cobra.Command {
 				ro.agent = runDefaultHarness
 			}
 			if ro.target == "" {
-				ro.target = runTargetSuccessPrefix
+				if ro.agentSet {
+					ro.target = runTargetHarnessPrefix
+				} else {
+					ro.target = runTargetSuccessPrefix
+				}
 			}
 
 			fctx, ok := famctx.FromContext(ctx)
@@ -176,6 +183,13 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	}
 	if opts.agent == "" {
 		opts.agent = runDefaultHarness
+	}
+	if opts.target == "" {
+		if opts.agentSet {
+			opts.target = runTargetHarnessPrefix
+		} else {
+			opts.target = runTargetSuccessPrefix
+		}
 	}
 
 	captureRoot := opts.captureDir

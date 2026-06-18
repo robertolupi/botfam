@@ -280,7 +280,7 @@ func TestRunIssueAgentFlagAndPrompt(t *testing.T) {
 	err := runIssue(ctx, client, fctx, runOptions{
 		issue:      18,
 		agent:      "claude",
-		target:     "harness",
+		agentSet:   true,
 		prompt:     "Summarize this issue",
 		captureDir: outDir,
 	})
