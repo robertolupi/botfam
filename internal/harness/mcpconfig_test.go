@@ -2,8 +2,10 @@ package harness
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -310,5 +312,72 @@ func TestCodexMCPConfigurator(t *testing.T) {
 	names, _ = c.List(Global)
 	if len(names) != 0 {
 		t.Errorf("expected empty list, got %v", names)
+	}
+}
+
+// TestClaudeMCPSetConcurrent is the executable Detection for #272: N concurrent
+// Set calls each adding a distinct server must ALL survive. Without the
+// flock-serialized read-modify-write, the unprotected loadRaw→merge→writeRaw
+// cycle loses updates (last writer wins), and fewer than N servers remain.
+func TestClaudeMCPSetConcurrent(t *testing.T) {
+	wt := t.TempDir()
+	c := NewClaudeMCPConfigurator(wt)
+	const n = 24
+
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errs <- c.Set(MCPServerSpec{
+				Name:    fmt.Sprintf("srv-%02d", i),
+				Command: "/bin/echo",
+				Args:    []string{fmt.Sprintf("%d", i)},
+				Scope:   Project,
+			})
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Set: %v", err)
+		}
+	}
+
+	got := servers(t, wt)
+	if len(got) != n {
+		t.Fatalf("lost-update clobber: want %d servers to survive, got %d", n, len(got))
+	}
+	for i := 0; i < n; i++ {
+		name := fmt.Sprintf("srv-%02d", i)
+		if _, ok := got[name]; !ok {
+			t.Errorf("server %q was dropped by a concurrent writer", name)
+		}
+	}
+}
+
+// TestClaudeMCPSetAtomicWriteNoTornFile asserts a successful Set leaves a
+// well-formed, fully-parseable file (the tmp+rename half of #272) and no leftover
+// temp debris that would corrupt a later parse. Only .mcp.json and its sibling
+// lock file may remain.
+func TestClaudeMCPSetAtomicWriteNoTornFile(t *testing.T) {
+	wt := t.TempDir()
+	c := NewClaudeMCPConfigurator(wt)
+	if err := c.Set(MCPServerSpec{Name: "botfam", Command: "/h/bin/botfam", Args: []string{"serve"}, Scope: Project}); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	// readMCP fails the test if .mcp.json is missing or not valid JSON (torn).
+	readMCP(t, wt)
+
+	entries, err := os.ReadDir(wt)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	for _, e := range entries {
+		if name := e.Name(); name != ".mcp.json" && name != ".mcp.json.lock" {
+			t.Errorf("unexpected leftover file in worktree: %q (atomicWrite temp not cleaned up?)", name)
+		}
 	}
 }

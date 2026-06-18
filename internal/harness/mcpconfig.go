@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"syscall"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -136,7 +137,63 @@ func writeRaw(path string, root map[string]any) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	return atomicWrite(path, data, 0o644)
+}
+
+// atomicWrite writes data to path via a uniquely-named temp file in the same
+// directory followed by os.Rename, so a crash mid-write can never leave a torn
+// config (the second half of the #272 fix; mirrors famconfig.WriteConfig's
+// tmp+rename discipline). The temp file shares path's directory so the rename
+// stays on one filesystem and is atomic.
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
+// withConfigLock runs fn while holding an exclusive advisory flock for the
+// config file at path, so concurrent Set/Remove calls (multiple harnesses of one
+// agent, or two agents sharing a global config) serialize their
+// read-modify-write instead of silently dropping each other's entries — the
+// residual lost-update tail of #227/#225 that merge-not-overwrite alone cannot
+// close (#272).
+//
+// The lock lives on a sibling "<path>.lock" file, never on the config file
+// itself: Set rewrites the config via atomicWrite's tmp+rename, which swaps the
+// inode, so a lock taken on the config fd would not exclude a writer that opened
+// the post-rename inode. The sibling lock file's inode is stable. The kernel
+// releases the lock when the fd closes (including on crash), so there is no
+// stale-lock hazard.
+func withConfigLock(path string, fn func() error) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	lockPath := path + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fmt.Errorf("open config lock %s: %w", lockPath, err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock config %s: %w", lockPath, err)
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return fn()
 }
 
 // mergeServerEntry merges spec into the existing server entry, preserving
@@ -180,14 +237,16 @@ func (c *ClaudeMCPConfigurator) Set(spec MCPServerSpec) error {
 	if err != nil {
 		return err
 	}
-	root, err := loadRaw(path)
-	if err != nil {
-		return err
-	}
-	servers := mcpServersOf(root)
-	existing, _ := servers[spec.Name].(map[string]any)
-	servers[spec.Name] = mergeServerEntry(existing, spec)
-	return writeRaw(path, root)
+	return withConfigLock(path, func() error {
+		root, err := loadRaw(path)
+		if err != nil {
+			return err
+		}
+		servers := mcpServersOf(root)
+		existing, _ := servers[spec.Name].(map[string]any)
+		servers[spec.Name] = mergeServerEntry(existing, spec)
+		return writeRaw(path, root)
+	})
 }
 
 // Remove implements MCPConfigurator: drop name from scope s, no-op if absent.
@@ -196,19 +255,21 @@ func (c *ClaudeMCPConfigurator) Remove(name string, s Scope) error {
 	if err != nil {
 		return err
 	}
-	root, err := loadRaw(path)
-	if err != nil {
-		return err
-	}
-	servers, ok := root["mcpServers"].(map[string]any)
-	if !ok {
-		return nil // nothing to remove
-	}
-	if _, present := servers[name]; !present {
-		return nil
-	}
-	delete(servers, name)
-	return writeRaw(path, root)
+	return withConfigLock(path, func() error {
+		root, err := loadRaw(path)
+		if err != nil {
+			return err
+		}
+		servers, ok := root["mcpServers"].(map[string]any)
+		if !ok {
+			return nil // nothing to remove
+		}
+		if _, present := servers[name]; !present {
+			return nil
+		}
+		delete(servers, name)
+		return writeRaw(path, root)
+	})
 }
 
 // Get implements MCPConfigurator: return the spec for name in scope s.
@@ -312,14 +373,16 @@ func (a *AntigravityMCPConfigurator) Set(spec MCPServerSpec) error {
 	if err != nil {
 		return err
 	}
-	root, err := loadRaw(path)
-	if err != nil {
-		return err
-	}
-	servers := mcpServersOf(root)
-	existing, _ := servers[spec.Name].(map[string]any)
-	servers[spec.Name] = mergeServerEntry(existing, spec)
-	return writeRaw(path, root)
+	return withConfigLock(path, func() error {
+		root, err := loadRaw(path)
+		if err != nil {
+			return err
+		}
+		servers := mcpServersOf(root)
+		existing, _ := servers[spec.Name].(map[string]any)
+		servers[spec.Name] = mergeServerEntry(existing, spec)
+		return writeRaw(path, root)
+	})
 }
 
 // Remove implements MCPConfigurator: drop name from scope s, no-op if absent.
@@ -328,19 +391,21 @@ func (a *AntigravityMCPConfigurator) Remove(name string, s Scope) error {
 	if err != nil {
 		return err
 	}
-	root, err := loadRaw(path)
-	if err != nil {
-		return err
-	}
-	servers, ok := root["mcpServers"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	if _, present := servers[name]; !present {
-		return nil
-	}
-	delete(servers, name)
-	return writeRaw(path, root)
+	return withConfigLock(path, func() error {
+		root, err := loadRaw(path)
+		if err != nil {
+			return err
+		}
+		servers, ok := root["mcpServers"].(map[string]any)
+		if !ok {
+			return nil
+		}
+		if _, present := servers[name]; !present {
+			return nil
+		}
+		delete(servers, name)
+		return writeRaw(path, root)
+	})
 }
 
 // Get implements MCPConfigurator: return the spec for name in scope s.
@@ -457,7 +522,7 @@ func writeTOML(path string, root map[string]any) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return atomicWrite(path, data, 0o644)
 }
 
 // mcpServersOfTOML returns the mcp_servers sub-map of root.
@@ -492,24 +557,26 @@ func (c *CodexMCPConfigurator) Set(spec MCPServerSpec) error {
 	if err != nil {
 		return err
 	}
-	root, err := loadTOML(path)
-	if err != nil {
-		return err
-	}
-	servers := mcpServersOfTOML(root)
-	var existing map[string]any
-	if val, ok := servers[spec.Name].(map[string]any); ok {
-		existing = val
-	} else if val, ok := servers[spec.Name].(map[any]any); ok {
-		existing = map[string]any{}
-		for k, v := range val {
-			if kStr, ok := k.(string); ok {
-				existing[kStr] = v
+	return withConfigLock(path, func() error {
+		root, err := loadTOML(path)
+		if err != nil {
+			return err
+		}
+		servers := mcpServersOfTOML(root)
+		var existing map[string]any
+		if val, ok := servers[spec.Name].(map[string]any); ok {
+			existing = val
+		} else if val, ok := servers[spec.Name].(map[any]any); ok {
+			existing = map[string]any{}
+			for k, v := range val {
+				if kStr, ok := k.(string); ok {
+					existing[kStr] = v
+				}
 			}
 		}
-	}
-	servers[spec.Name] = mergeServerEntry(existing, spec)
-	return writeTOML(path, root)
+		servers[spec.Name] = mergeServerEntry(existing, spec)
+		return writeTOML(path, root)
+	})
 }
 
 // Remove implements MCPConfigurator: drop name from scope s, no-op if absent.
@@ -518,30 +585,32 @@ func (c *CodexMCPConfigurator) Remove(name string, s Scope) error {
 	if err != nil {
 		return err
 	}
-	root, err := loadTOML(path)
-	if err != nil {
-		return err
-	}
-	serversVal, ok := root["mcp_servers"]
-	if !ok {
+	return withConfigLock(path, func() error {
+		root, err := loadTOML(path)
+		if err != nil {
+			return err
+		}
+		serversVal, ok := root["mcp_servers"]
+		if !ok {
+			return nil
+		}
+		var deleted bool
+		if servers, ok := serversVal.(map[string]any); ok {
+			if _, present := servers[name]; present {
+				delete(servers, name)
+				deleted = true
+			}
+		} else if servers, ok := serversVal.(map[any]any); ok {
+			if _, present := servers[name]; present {
+				delete(servers, name)
+				deleted = true
+			}
+		}
+		if deleted {
+			return writeTOML(path, root)
+		}
 		return nil
-	}
-	var deleted bool
-	if servers, ok := serversVal.(map[string]any); ok {
-		if _, present := servers[name]; present {
-			delete(servers, name)
-			deleted = true
-		}
-	} else if servers, ok := serversVal.(map[any]any); ok {
-		if _, present := servers[name]; present {
-			delete(servers, name)
-			deleted = true
-		}
-	}
-	if deleted {
-		return writeTOML(path, root)
-	}
-	return nil
+	})
 }
 
 // Get implements MCPConfigurator: return the spec for name in scope s.
