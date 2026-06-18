@@ -93,6 +93,9 @@ func credentialHelperCheck(workDir string) doctorCheck {
 	if err != nil || url == "" {
 		return doctorCheck{name, doctorWarn, "could not resolve a forge remote URL", "configure a `gitea` or `origin` remote"}
 	}
+	if isSSHRemote(url) {
+		return doctorCheck{name, doctorOK, fmt.Sprintf("SSH remote %s — key-based auth, no credential helper needed", url), ""}
+	}
 	raw, values, err := gitCredentialHelpers(workDir, url)
 	if err != nil {
 		return doctorCheck{name, doctorWarn, fmt.Sprintf("could not read credential.helper for %s: %v", url, err), ""}
@@ -109,13 +112,13 @@ func credentialHelperCheck(workDir string) doctorCheck {
 				url, strings.Join(offending, ", "), strings.ReplaceAll(raw, "\n", "\n   ")),
 			`clear inherited helpers in the worktree — ` +
 				"`git config --local credential.helper \"\"` before configuring " +
-				"`botfam credential` (run `botfam setup` / `tools/forge-setup.sh`)",
+				"`botfam credential` (run `botfam setup`); if the problem persists, report to the operator",
 		}
 	}
 	if len(values) == 0 {
 		return doctorCheck{name, doctorWarn,
 			fmt.Sprintf("no credential helper configured for %s", url),
-			"run `botfam setup` / `tools/forge-setup.sh` to configure `botfam credential`"}
+			"run `botfam setup` to configure `botfam credential`; if the problem persists, report to the operator"}
 	}
 	return doctorCheck{name, doctorOK, fmt.Sprintf("effective helper(s) for %s: %s", url, strings.Join(values, ", ")), ""}
 }
@@ -234,6 +237,14 @@ func parseCredentialHelpers(showOriginOutput string) []string {
 		values = append(values, strings.TrimSpace(val))
 	}
 	return values
+}
+
+// isSSHRemote reports whether url uses SSH transport (ssh://, git@, or
+// SCP-style host:path). Credential helpers apply only to HTTP(S) remotes.
+func isSSHRemote(url string) bool {
+	return strings.HasPrefix(url, "ssh://") ||
+		strings.HasPrefix(url, "git@") ||
+		(!strings.Contains(url, "://") && strings.Contains(url, ":"))
 }
 
 // forgeRemoteURL resolves the forge remote URL, preferring the botfam `gitea`

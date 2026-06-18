@@ -11,26 +11,22 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
-func TestNewfam(t *testing.T) {
-	tempDir := t.TempDir()
-	mainDir := filepath.Join(tempDir, "main")
+// newFamEnv creates a temp git repo, sets USER/HOME/BOTFAM_CONFIG, cds into the
+// repo, and returns tempDir. The caller inherits the chdir via t.Cleanup.
+func newFamEnv(t *testing.T) (tempDir, mainDir string) {
+	t.Helper()
+	tempDir = t.TempDir()
+	mainDir = filepath.Join(tempDir, "main")
 	if err := os.Mkdir(mainDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-
 	initGitRepo(t, mainDir)
-
-	// Set environment variables for the test
 	t.Setenv("USER", "testoperator")
 	t.Setenv("HOME", tempDir)
 	t.Setenv("BOTFAM_CONFIG", filepath.Join(tempDir, ".botfam", "config.toml"))
-
-	// Create mock home .botfam directory to hold symlinks
 	if err := os.MkdirAll(filepath.Join(tempDir, ".botfam"), 0755); err != nil {
 		t.Fatal(err)
 	}
-
-	// Change directory to main repo root
 	origDir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -38,9 +34,13 @@ func TestNewfam(t *testing.T) {
 	if err := os.Chdir(mainDir); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = os.Chdir(origDir) }()
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
+	return tempDir, mainDir
+}
 
-	// Run NewfamCmd
+func TestNewfam(t *testing.T) {
+	tempDir, mainDir := newFamEnv(t)
+
 	var out bytes.Buffer
 	args := []string{"myproject", "--agents", "agy,claude"}
 	if err := NewfamCmd(args, &out); err != nil {
@@ -77,25 +77,25 @@ func TestNewfam(t *testing.T) {
 		t.Errorf("missing user testoperator from global roster: %v", cfg.Users)
 	}
 
-	// Verify that the worktree directories exist
-	expectedRoster := []string{"agy", "claude", "testoperator"}
-	for _, actor := range expectedRoster {
-		wtDir := filepath.Join(tempDir, "wt-"+actor)
+	checkWorktreeFiles(t, tempDir, "agy", "claude", "testoperator")
+}
+
+// checkWorktreeFiles asserts that every actor's worktree directory contains the
+// expected settings and agent-doc files.
+func checkWorktreeFiles(t *testing.T, baseDir string, actors ...string) {
+	t.Helper()
+	agentDocs := []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
+	for _, actor := range actors {
+		wtDir := filepath.Join(baseDir, "wt-"+actor)
 		if _, err := os.Stat(wtDir); os.IsNotExist(err) {
 			t.Errorf("worktree directory %s does not exist", wtDir)
 		}
-
-		// Verify Claude settings file
-		claudeSettings := filepath.Join(wtDir, ".claude", "settings.json")
-		if _, err := os.Stat(claudeSettings); os.IsNotExist(err) {
-			t.Errorf("claude settings %s does not exist", claudeSettings)
+		if _, err := os.Stat(filepath.Join(wtDir, ".claude", "settings.json")); os.IsNotExist(err) {
+			t.Errorf("claude settings missing in %s", wtDir)
 		}
-
-		// Verify Agent docs files
-		for _, docName := range []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md"} {
-			docPath := filepath.Join(wtDir, docName)
-			if _, err := os.Stat(docPath); os.IsNotExist(err) {
-				t.Errorf("agent doc %s does not exist", docPath)
+		for _, doc := range agentDocs {
+			if _, err := os.Stat(filepath.Join(wtDir, doc)); os.IsNotExist(err) {
+				t.Errorf("agent doc %s missing in %s", doc, wtDir)
 			}
 		}
 	}
@@ -260,40 +260,13 @@ func TestWriteClaudeSettingsPreservesFields(t *testing.T) {
 }
 
 func TestNewfamMCPSelfDiscoverability(t *testing.T) {
-	tempDir := t.TempDir()
-	mainDir := filepath.Join(tempDir, "main")
-	if err := os.Mkdir(mainDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	tempDir, _ := newFamEnv(t)
 
-	initGitRepo(t, mainDir)
-
-	// Set environment variables for the test
-	t.Setenv("USER", "testoperator")
-	t.Setenv("HOME", tempDir)
-	t.Setenv("BOTFAM_CONFIG", filepath.Join(tempDir, ".botfam", "config.toml"))
-
-	// Create mock home .botfam directory to hold symlinks
-	if err := os.MkdirAll(filepath.Join(tempDir, ".botfam"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create parent directory for antigravity config so it is not skipped
+	// Create parent directory for antigravity config so it is not skipped.
 	if err := os.MkdirAll(filepath.Join(tempDir, ".gemini", "antigravity"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Change directory to main repo root
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(mainDir); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chdir(origDir) }()
-
-	// Run NewfamCmd
 	var out bytes.Buffer
 	args := []string{"testfam", "--agents", "agy,claude"}
 	if err := NewfamCmd(args, &out); err != nil {
