@@ -88,7 +88,7 @@ func newMangleExportCmd() *cobra.Command {
 			defer f.Close()
 			w = f
 		}
-		st, err := mangle.Export(c, mangle.ExportOptions{Scope: sc, WithCommits: !noCommits}, w)
+		st, err := mangle.Export(cmd.Context(), c, mangle.ExportOptions{Scope: sc, WithCommits: !noCommits}, w)
 		if err != nil {
 			return err
 		}
@@ -129,7 +129,7 @@ func newMangleEvalCmd() *cobra.Command {
 				return err
 			}
 			defer os.Remove(f.Name())
-			st, err := mangle.Export(c, mangle.ExportOptions{Scope: sc, WithCommits: true}, f)
+			st, err := mangle.Export(cmd.Context(), c, mangle.ExportOptions{Scope: sc, WithCommits: true}, f)
 			f.Close()
 			if err != nil {
 				return err

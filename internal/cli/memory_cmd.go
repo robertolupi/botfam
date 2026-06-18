@@ -33,18 +33,7 @@ func NewMemoryCmd() *cobra.Command {
 
 // openMemoryStore resolves the actor + forge config for the current worktree and
 // returns a store over a per-actor clone of the fam wiki, plus the clone dir.
-func openMemoryStore() (store *memory.Store, actor, cloneDir string, err error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return nil, "", "", err
-	}
-	// WithFamCtx handles wiki/ and submodule subdirs by stripping the nested git
-	// root and re-resolving at the enclosing agent worktree. Direct GitResolver
-	// use would return actor="wiki", which is not a declared agent.
-	ctx, err := famctx.WithFamCtx(context.Background(), wd)
-	if err != nil {
-		return nil, "", "", err
-	}
+func openMemoryStore(ctx context.Context) (store *memory.Store, actor, cloneDir string, err error) {
 	rf, _ := famctx.FromContext(ctx)
 	client, err := forge.NewClient(ctx)
 	if err != nil {
@@ -103,7 +92,7 @@ func newMemoryWriteCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" {
 				return errors.New("--title is required")
 			}
@@ -114,7 +103,7 @@ func newMemoryWriteCmd() *cobra.Command {
 				}
 				body = strings.TrimSpace(string(b))
 			}
-			store, actor, _, err := openMemoryStore()
+			store, actor, _, err := openMemoryStore(ctx)
 			if err != nil {
 				return err
 			}
@@ -146,7 +135,7 @@ func newMemoryWriteCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "wrote memory: %s (%s)\n", memory.Slug(title), title)
 			return nil
-		},
+		}),
 	}
 	c.Flags().StringVar(&title, "title", "", "fact title (required)")
 	c.Flags().StringVar(&body, "body", "", "fact body (default: read from stdin)")
@@ -165,11 +154,11 @@ func newMemoryForgetCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" {
 				return errors.New("--title is required")
 			}
-			store, actor, _, err := openMemoryStore()
+			store, actor, _, err := openMemoryStore(ctx)
 			if err != nil {
 				return err
 			}
@@ -178,7 +167,7 @@ func newMemoryForgetCmd() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "forgot (tombstoned) memory: %s\n", memory.Slug(title))
 			return nil
-		},
+		}),
 	}
 	c.Flags().StringVar(&title, "title", "", "fact title (required)")
 	return c
@@ -192,11 +181,11 @@ func newMemoryGetCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" {
 				return errors.New("--title is required")
 			}
-			store, _, _, err := openMemoryStore()
+			store, _, _, err := openMemoryStore(ctx)
 			if err != nil {
 				return err
 			}
@@ -209,7 +198,7 @@ func newMemoryGetCmd() *cobra.Command {
 			}
 			_, err = io.WriteString(cmd.OutOrStdout(), m.Render())
 			return err
-		},
+		}),
 	}
 	c.Flags().StringVar(&title, "title", "", "fact title (required)")
 	return c
@@ -223,8 +212,8 @@ func newMemoryListCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			_, _, cloneDir, err := openMemoryStore()
+		RunE: RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+			_, _, cloneDir, err := openMemoryStore(ctx)
 			if err != nil {
 				return err
 			}
@@ -240,7 +229,7 @@ func newMemoryListCmd() *cobra.Command {
 				fmt.Fprintf(out, "%-12s %s\t%s\n", orElse(m.Status, "Live"), m.Slug, m.Title)
 			}
 			return nil
-		},
+		}),
 	}
 	c.Flags().BoolVar(&all, "all", false, "include tombstoned (Historical) facts")
 	return c

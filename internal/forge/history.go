@@ -1,13 +1,15 @@
 package forge
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
+	"time"
+
+	giteasdk "gitea.dev/sdk"
 )
 
 // History read endpoints used by `botfam mangle export`. These are read-only
-// list/paginate calls over the existing authenticated Client (no new forge
-// client, no extra SDK — see wiki concept-fragmentation).
+// list/paginate calls over the SDK-backed Client.
 
 // PullSummary is the subset of a pull request returned by the list endpoint
 // that the fact exporter needs (the timestamps the issue list omits).
@@ -46,58 +48,111 @@ func (pc PullCommit) AuthorLogin() string {
 	return pc.Commit.Author.Name
 }
 
-const pageLimit = 50
+const sdkPageLimit = 50
 
-// ListAllIssues returns every issue (state=all), excluding pull requests.
-func (c *Client) ListAllIssues() ([]*Issue, error) {
+// ListRecentIssues returns one page of issues (newest first), useful for
+// hygiene checks that only need recent items without fetching the full history.
+func (c *Client) ListRecentIssues(ctx context.Context, page, pageSize int) ([]*Issue, error) {
+	issues, _, err := c.sdk.Issues.ListRepoIssues(ctx, c.Owner, c.Repo, giteasdk.ListIssueOption{
+		ListOptions: giteasdk.ListOptions{Page: page, PageSize: pageSize},
+		Type:        giteasdk.IssueTypeIssue,
+		State:       giteasdk.StateAll,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list recent issues: %w", err)
+	}
+	out := make([]*Issue, len(issues))
+	for i, iss := range issues {
+		out[i] = sdkIssueToLocal(iss)
+	}
+	return out, nil
+}
+
+// ListAllIssues returns every issue (excluding pull requests), state=all.
+func (c *Client) ListAllIssues(ctx context.Context) ([]*Issue, error) {
 	var out []*Issue
 	for page := 1; ; page++ {
-		path := fmt.Sprintf("repos/%s/%s/issues?type=issues&state=all&page=%d&limit=%d", c.Owner, c.Repo, page, pageLimit)
-		b, err := c.request("GET", path, nil)
+		issues, resp, err := c.sdk.Issues.ListRepoIssues(ctx, c.Owner, c.Repo, giteasdk.ListIssueOption{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: sdkPageLimit},
+			Type:        giteasdk.IssueTypeIssue,
+			State:       giteasdk.StateAll,
+		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list issues page %d: %w", page, err)
 		}
-		var batch []*Issue
-		if err := json.Unmarshal(b, &batch); err != nil {
-			return nil, fmt.Errorf("decode issues page %d: %w", page, err)
+		for _, iss := range issues {
+			out = append(out, sdkIssueToLocal(iss))
 		}
-		out = append(out, batch...)
-		if len(batch) < pageLimit {
-			return out, nil
+		if resp.NextPage == 0 {
+			break
 		}
 	}
+	return out, nil
 }
 
 // ListAllPulls returns every pull request (state=all).
-func (c *Client) ListAllPulls() ([]*PullSummary, error) {
+func (c *Client) ListAllPulls(ctx context.Context) ([]*PullSummary, error) {
 	var out []*PullSummary
 	for page := 1; ; page++ {
-		path := fmt.Sprintf("repos/%s/%s/pulls?state=all&page=%d&limit=%d", c.Owner, c.Repo, page, pageLimit)
-		b, err := c.request("GET", path, nil)
+		pulls, resp, err := c.sdk.PullRequests.ListRepoPullRequests(ctx, c.Owner, c.Repo, giteasdk.ListPullRequestsOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: sdkPageLimit},
+			State:       giteasdk.StateAll,
+		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list pulls page %d: %w", page, err)
 		}
-		var batch []*PullSummary
-		if err := json.Unmarshal(b, &batch); err != nil {
-			return nil, fmt.Errorf("decode pulls page %d: %w", page, err)
+		for _, pr := range pulls {
+			ps := &PullSummary{
+				Number: int(pr.Index),
+				Title:  pr.Title,
+				Body:   pr.Body,
+				State:  string(pr.State),
+				Merged: pr.HasMerged,
+			}
+			if pr.Created != nil {
+				ps.CreatedAt = pr.Created.UTC().Format(time.RFC3339)
+			}
+			if pr.Merged != nil {
+				ps.MergedAt = pr.Merged.UTC().Format(time.RFC3339)
+			}
+			if pr.Poster != nil {
+				ps.User.Login = pr.Poster.UserName
+			}
+			out = append(out, ps)
 		}
-		out = append(out, batch...)
-		if len(batch) < pageLimit {
-			return out, nil
+		if resp.NextPage == 0 {
+			break
 		}
 	}
+	return out, nil
 }
 
 // GetPullCommits returns the commits on a pull request (with author identity).
-func (c *Client) GetPullCommits(num int) ([]*PullCommit, error) {
-	path := fmt.Sprintf("repos/%s/%s/pulls/%d/commits", c.Owner, c.Repo, num)
-	b, err := c.request("GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
+func (c *Client) GetPullCommits(ctx context.Context, num int) ([]*PullCommit, error) {
 	var out []*PullCommit
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil, fmt.Errorf("decode pull %d commits: %w", num, err)
+	for page := 1; ; page++ {
+		commits, resp, err := c.sdk.PullRequests.ListPullRequestCommits(ctx, c.Owner, c.Repo, int64(num), giteasdk.ListPullRequestCommitsOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: sdkPageLimit},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("get pull %d commits page %d: %w", num, page, err)
+		}
+		for _, cm := range commits {
+			pc := &PullCommit{SHA: cm.SHA}
+			if cm.RepoCommit != nil && cm.RepoCommit.Author != nil {
+				pc.Commit.Author.Name = cm.RepoCommit.Author.Name
+				pc.Commit.Author.Date = cm.RepoCommit.Author.Date
+			}
+			if cm.Author != nil {
+				pc.Author = &struct {
+					Login string `json:"login"`
+				}{Login: cm.Author.UserName}
+			}
+			out = append(out, pc)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
 	}
 	return out, nil
 }

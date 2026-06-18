@@ -144,7 +144,7 @@ background ingester (hosted in the botfam MCP server) is what fills the spool.`,
 // timelineClient is the slice of the forge client the per-item watcher needs;
 // an interface so it is testable with a fake.
 type timelineClient interface {
-	GetIssueTimeline(issueNum int) ([]*forge.TimelineEvent, error)
+	GetIssueTimeline(ctx context.Context, issueNum int) ([]*forge.TimelineEvent, error)
 }
 
 // runWatchItem polls one issue/PR's timeline and returns when a new event
@@ -156,7 +156,7 @@ type timelineClient interface {
 func runWatchItem(ctx context.Context, out, errw io.Writer, tc timelineClient, repo string, num int, timeout, poll time.Duration) error {
 	fmt.Fprintf(errw, "wait: watching %s#%d (timeout=%s, poll=%s)\n", repo, num, durOrBlock(timeout), poll)
 
-	seen, err := timelineIDs(tc, num)
+	seen, err := timelineIDs(ctx, tc, num)
 	if err != nil {
 		return fmt.Errorf("wait: %w", err)
 	}
@@ -172,7 +172,7 @@ func runWatchItem(ctx context.Context, out, errw io.Writer, tc timelineClient, r
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-t.C:
-			evs, err := tc.GetIssueTimeline(num)
+			evs, err := tc.GetIssueTimeline(ctx, num)
 			if err != nil {
 				continue // transient; keep watching
 			}
@@ -198,8 +198,8 @@ func runWatchItem(ctx context.Context, out, errw io.Writer, tc timelineClient, r
 	}
 }
 
-func timelineIDs(tc timelineClient, num int) (map[int64]bool, error) {
-	evs, err := tc.GetIssueTimeline(num)
+func timelineIDs(ctx context.Context, tc timelineClient, num int) (map[int64]bool, error) {
+	evs, err := tc.GetIssueTimeline(ctx, num)
 	if err != nil {
 		return nil, err
 	}

@@ -17,19 +17,14 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // fakeForgeClient builds a forge.Client whose transport serves handler in
-// memory (no TCP listener).
+// memory (no TCP listener), via the SDK's SetHTTPClient option (#73).
 func fakeForgeClient(handler http.HandlerFunc) *forge.Client {
-	return &forge.Client{
-		BaseURL: "http://forge.test",
-		Owner:   "o",
-		Repo:    "r",
-		Token:   "t",
-		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			rec := httptest.NewRecorder()
-			handler(rec, req)
-			return rec.Result(), nil
-		})},
-	}
+	hc := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		rec := httptest.NewRecorder()
+		handler(rec, req)
+		return rec.Result(), nil
+	})}
+	return forge.NewTestClient("http://forge.test", "o", "r", "t", hc)
 }
 
 func TestValidPageName(t *testing.T) {
@@ -194,7 +189,9 @@ func TestWikiNormalization(t *testing.T) {
 		client := fakeForgeClient(func(w http.ResponseWriter, r *http.Request) {
 			requests++
 			if r.URL.Path == "/api/v1/repos/o/r/wiki/page/test-hyphen-page" {
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"message":"not found"}`))
 				return
 			}
 			if r.URL.Path == "/api/v1/repos/o/r/wiki/page/test-hyphen-page.-" {

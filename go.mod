@@ -1,6 +1,6 @@
 module github.com/robertolupi/botfam
 
-go 1.25.11
+go 1.26
 
 require (
 	github.com/mark3labs/mcp-go v0.54.1
@@ -12,10 +12,15 @@ require (
 
 require (
 	bitbucket.org/creachadair/stringset v0.0.11 // indirect
+	gitea.dev/sdk v1.1.0 // indirect
+	github.com/42wim/httpsig v1.2.4 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
+	github.com/davidmz/go-pageant v1.0.2 // indirect
+	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20240707233637-46b078467d37 // indirect
 )
 
@@ -33,7 +38,7 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
 
 replace codeberg.org/TauCeti/mangle-go => ./third_party/mangle-go

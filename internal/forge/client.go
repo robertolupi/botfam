@@ -2,29 +2,23 @@ package forge
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"context"
+	giteasdk "gitea.dev/sdk"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/famctx"
 )
 
-// defaultHTTPClient is the shared fallback used by every Client that does not
-// supply its own HTTPClient. Unlike http.DefaultClient it has a finite timeout
-// so a slow or stalled Gitea host cannot wedge a caller (e.g. the forge-wait
-// loop) forever. It is process-wide but never mutated, so it is safe to share.
-var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
-
+// Client wraps the Gitea SDK client with fam-specific identity resolution.
+// The SDK handles auth, pagination, and HTTP; this type adds fam-level
+// Owner/Repo scoping and the botfam token-resolution path.
 type Client struct {
 	BaseURL string // e.g. "http://gitea:3000/"
 	Owner   string // e.g. "botfam"
@@ -32,9 +26,7 @@ type Client struct {
 	Token   string
 	Remote  string
 
-	// HTTPClient, when set, overrides defaultHTTPClient for this Client's
-	// requests. Leave nil to use the timeout-bearing shared default.
-	HTTPClient *http.Client
+	sdk *giteasdk.Client
 }
 
 type PullRequest struct {
@@ -129,12 +121,6 @@ func NewClientForWorkDir(workDir string, actor string) (*Client, error) {
 	repo := os.Getenv("GITEA_REPO")
 	token := os.Getenv("GITEA_TOKEN")
 
-	// Resolve fam identity through the single canonical resolver (#231, #404). A
-	// declared [agent.<name>] worktree yields forge_url, repository, and the
-	// per-harness token path in one shot (env vars set above still win).
-	// ResolveFam fails closed outside an agent worktree, so for non-agent /
-	// base checkouts (and tools) we fall back to ResolveConfig (the merged
-	// registry for the matching [repo.<k>] stanza), then to the git remote below.
 	var reg famconfig.Registry
 	var haveReg bool
 	if rf, err := famconfig.ResolveFam(workDir); err == nil {
@@ -163,9 +149,6 @@ func NewClientForWorkDir(workDir string, actor string) (*Client, error) {
 		}
 	}
 
-	// remoteName is the git remote consulted as a last-resort fallback below.
-	// Overridable via BOTFAM_FORGE_REMOTE; defaults to "gitea". (The old
-	// undocumented fam.toml forge_remote key is dropped — it was set nowhere.)
 	remoteName := os.Getenv("BOTFAM_FORGE_REMOTE")
 	if remoteName == "" {
 		remoteName = "gitea"
@@ -227,15 +210,8 @@ func NewClientForWorkDir(workDir string, actor string) (*Client, error) {
 				declared = a.Harness
 			}
 		}
-		// Key the token on the harness actually running, not just whatever the
-		// fam.toml declared: detect from the inherited env (botfam runs as a child
-		// of the harness), falling back to the declared value (#371). clientInfo
-		// isn't available on this CLI/forge path, so detection here is env-only.
 		harness := famconfig.ResolveHarness(declared, "", nil).Effective
 
-		// Fail closed: the token is the canonical per-harness one. There is NO
-		// silent legacy (token-botfam-<actor>) or per-fam (token-<fam>-<actor>)
-		// fallback — those masking a missing token are exactly the #183 disease.
 		var tokenFile string
 		if harness != "" {
 			tokenFile, err = HarnessTokenPath(harness)
@@ -244,9 +220,6 @@ func NewClientForWorkDir(workDir string, actor string) (*Client, error) {
 			}
 		}
 
-		// The only non-canonical path is the explicit opt-in test credential
-		// (BOTFAM_ALLOW_TEST_TOKEN_FALLBACK=1) for the local test forge — never a
-		// silent production fallback (#70).
 		needTest := tokenFile == ""
 		if !needTest {
 			if _, statErr := os.Stat(tokenFile); os.IsNotExist(statErr) {
@@ -254,7 +227,7 @@ func NewClientForWorkDir(workDir string, actor string) (*Client, error) {
 			}
 		}
 		if needTest && os.Getenv("BOTFAM_ALLOW_TEST_TOKEN_FALLBACK") == "1" {
-			testFile := filepath.Join(home, ".botfam", fmt.Sprintf("token-botfam-%s-test", actor))
+			testFile := fmt.Sprintf("%s/.botfam/token-botfam-%s-test", home, actor)
 			if _, statErr := os.Stat(testFile); statErr == nil {
 				tokenFile = testFile
 			}
@@ -274,133 +247,78 @@ func NewClientForWorkDir(workDir string, actor string) (*Client, error) {
 		return nil, errors.New("access token is empty")
 	}
 
+	sdkClient, err := giteasdk.NewClient(strings.TrimSuffix(baseURL, "/"),
+		giteasdk.SetToken(token),
+		giteasdk.SetGiteaVersion(""),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create SDK client: %w", err)
+	}
+
 	return &Client{
 		BaseURL: baseURL,
 		Owner:   owner,
 		Repo:    repo,
 		Token:   token,
 		Remote:  remoteName,
+		sdk:     sdkClient,
 	}, nil
 }
 
-func (c *Client) Request(method, path string, body []byte) ([]byte, error) {
-	return c.request(method, path, body)
+// AuthLogin returns the login of the token's owner — e.g. "claude-bot" — so
+// callers can recognise when an issue/PR is assigned to or mentions this agent.
+func (c *Client) AuthLogin(ctx context.Context) (string, error) {
+	u, _, err := c.sdk.Users.GetMyUserInfo(ctx)
+	if err != nil {
+		return "", fmt.Errorf("get auth user: %w", err)
+	}
+	return u.UserName, nil
 }
 
-func (c *Client) request(method, path string, body []byte) ([]byte, error) {
-	url := fmt.Sprintf("%s/api/v1/%s", strings.TrimSuffix(c.BaseURL, "/"), strings.TrimPrefix(path, "/"))
-	var reqBody io.Reader
-	if body != nil {
-		reqBody = bytes.NewReader(body)
-	}
-
-	req, err := http.NewRequest(method, url, reqBody)
+func (c *Client) GetPR(ctx context.Context, prNum int) (*PullRequest, error) {
+	pr, _, err := c.sdk.PullRequests.GetPullRequest(ctx, c.Owner, c.Repo, int64(prNum))
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header.Set("Authorization", "token "+c.Token)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		httpClient = defaultHTTPClient
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	respBytes, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("API request to %s failed with status %s: %s", url, resp.Status, string(respBytes))
-	}
-
-	return respBytes, nil
+	return sdkPRToLocal(pr), nil
 }
 
-// AuthLogin returns the login of the token's owner (GET /user) — e.g. "claude-bot"
-// — so callers can recognize when an issue/PR is assigned to, or mentions, this
-// agent. The actor name ("claude") is not the forge username, so it must be
-// resolved from the forge, not assumed.
-func (c *Client) AuthLogin() (string, error) {
-	b, err := c.request("GET", "user", nil)
+func (c *Client) GetPRReviews(ctx context.Context, prNum int) ([]*Review, error) {
+	reviews, _, err := c.sdk.PullRequests.ListPullReviews(ctx, c.Owner, c.Repo, int64(prNum), giteasdk.ListPullReviewsOptions{})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var u struct {
-		Login string `json:"login"`
+	out := make([]*Review, len(reviews))
+	for i, r := range reviews {
+		out[i] = &Review{
+			ID:          r.ID,
+			State:       string(r.State),
+			Body:        r.Body,
+			Stale:       r.Stale,
+			SubmittedAt: r.Submitted.UTC().Format(time.RFC3339),
+		}
+		if r.Reviewer != nil {
+			out[i].User.Login = r.Reviewer.UserName
+		}
 	}
-	if err := json.Unmarshal(b, &u); err != nil {
-		return "", fmt.Errorf("decode user: %w", err)
-	}
-	return u.Login, nil
+	return out, nil
 }
 
-func (c *Client) GetPR(prNum int) (*PullRequest, error) {
-	path := fmt.Sprintf("repos/%s/%s/pulls/%d", c.Owner, c.Repo, prNum)
-	b, err := c.request("GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var pr PullRequest
-	if err := json.Unmarshal(b, &pr); err != nil {
-		return nil, err
-	}
-	return &pr, nil
-}
-
-func (c *Client) GetPRReviews(prNum int) ([]*Review, error) {
-	path := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", c.Owner, c.Repo, prNum)
-	b, err := c.request("GET", path, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	var reviews []*Review
-	if err := json.Unmarshal(b, &reviews); err != nil {
-		return nil, err
-	}
-	return reviews, nil
-}
-
-func (c *Client) PostPRReview(prNum int, commitSHA string, state string, body string) error {
-	path := fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", c.Owner, c.Repo, prNum)
-	payload := map[string]any{
-		"commit_id": commitSHA,
-		"event":     state,
-		"body":      body,
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	_, err = c.request("POST", path, b)
+func (c *Client) PostPRReview(ctx context.Context, prNum int, commitSHA string, state string, body string) error {
+	_, _, err := c.sdk.PullRequests.CreatePullReview(ctx, c.Owner, c.Repo, int64(prNum), giteasdk.CreatePullReviewOptions{
+		CommitID: commitSHA,
+		State:    giteasdk.ReviewStateType(state),
+		Body:     body,
+	})
 	return err
 }
 
-func (c *Client) PostCommitStatus(commitSHA string, state string, context string, desc string) error {
-	path := fmt.Sprintf("repos/%s/%s/statuses/%s", c.Owner, c.Repo, commitSHA)
-	payload := map[string]any{
-		"state":       state,
-		"context":     context,
-		"description": desc,
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	_, err = c.request("POST", path, b)
+func (c *Client) PostCommitStatus(ctx context.Context, commitSHA string, state string, statusContext string, desc string) error {
+	_, _, err := c.sdk.Repositories.CreateStatus(ctx, c.Owner, c.Repo, commitSHA, giteasdk.CreateStatusOption{
+		State:       giteasdk.StatusState(state),
+		Context:     statusContext,
+		Description: desc,
+	})
 	return err
 }
 
@@ -446,80 +364,213 @@ type TimelineEvent struct {
 	ReviewID     int64  `json:"review_id"`
 }
 
-func (c *Client) ListMilestones() ([]*Milestone, error) {
+func (c *Client) ListMilestones(ctx context.Context) ([]*Milestone, error) {
 	var all []*Milestone
-	page := 1
-	limit := 50
-	for {
-		path := fmt.Sprintf("repos/%s/%s/milestones?state=all&page=%d&limit=%d", c.Owner, c.Repo, page, limit)
-		b, err := c.request("GET", path, nil)
+	for page := 1; ; page++ {
+		ms, resp, err := c.sdk.Issues.ListRepoMilestones(ctx, c.Owner, c.Repo, giteasdk.ListMilestoneOption{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: 50},
+			State:       giteasdk.StateAll,
+		})
 		if err != nil {
 			return nil, err
 		}
-		var list []*Milestone
-		if err := json.Unmarshal(b, &list); err != nil {
-			return nil, err
+		for _, m := range ms {
+			all = append(all, &Milestone{
+				ID:    m.ID,
+				Title: m.Title,
+				State: string(m.State),
+			})
 		}
-		if len(list) == 0 {
+		if resp.NextPage == 0 {
 			break
 		}
-		all = append(all, list...)
-		if len(list) < limit {
-			break
-		}
-		page++
 	}
 	return all, nil
 }
 
-func (c *Client) ListIssuesByMilestone(milestoneID int64) ([]*Issue, error) {
+func (c *Client) ListIssuesByMilestone(ctx context.Context, milestoneID int64) ([]*Issue, error) {
+	// Gitea's milestone filter uses the milestone title, but we have the ID.
+	// Fetch milestone title first so we can filter by title.
+	ms, _, err := c.sdk.Issues.GetMilestone(ctx, c.Owner, c.Repo, milestoneID)
+	if err != nil {
+		return nil, fmt.Errorf("get milestone %d: %w", milestoneID, err)
+	}
 	var all []*Issue
-	page := 1
-	limit := 50
-	for {
-		path := fmt.Sprintf("repos/%s/%s/issues?milestones=%d&state=all&type=all&page=%d&limit=%d", c.Owner, c.Repo, milestoneID, page, limit)
-		b, err := c.request("GET", path, nil)
+	for page := 1; ; page++ {
+		issues, resp, err := c.sdk.Issues.ListRepoIssues(ctx, c.Owner, c.Repo, giteasdk.ListIssueOption{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: 50},
+			Type:        giteasdk.IssueTypeIssue,
+			State:       giteasdk.StateAll,
+			Milestones:  []string{ms.Title},
+		})
 		if err != nil {
 			return nil, err
 		}
-		var list []*Issue
-		if err := json.Unmarshal(b, &list); err != nil {
-			return nil, err
+		for _, iss := range issues {
+			all = append(all, sdkIssueToLocal(iss))
 		}
-		if len(list) == 0 {
+		if resp.NextPage == 0 {
 			break
 		}
-		all = append(all, list...)
-		if len(list) < limit {
-			break
-		}
-		page++
 	}
 	return all, nil
 }
 
-func (c *Client) GetIssueTimeline(issueNum int) ([]*TimelineEvent, error) {
+func (c *Client) GetIssueTimeline(ctx context.Context, issueNum int) ([]*TimelineEvent, error) {
 	var all []*TimelineEvent
-	page := 1
-	limit := 50
-	for {
-		path := fmt.Sprintf("repos/%s/%s/issues/%d/timeline?page=%d&limit=%d", c.Owner, c.Repo, issueNum, page, limit)
-		b, err := c.request("GET", path, nil)
+	for page := 1; ; page++ {
+		evs, resp, err := c.sdk.Issues.ListIssueTimeline(ctx, c.Owner, c.Repo, int64(issueNum), giteasdk.ListIssueCommentOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: 50},
+		})
 		if err != nil {
 			return nil, err
 		}
-		var list []*TimelineEvent
-		if err := json.Unmarshal(b, &list); err != nil {
+		for _, ev := range evs {
+			te := &TimelineEvent{
+				ID:        ev.ID,
+				Type:      ev.Type,
+				CreatedAt: ev.Created.UTC().Format(time.RFC3339),
+				Body:      ev.Body,
+			}
+			if ev.Poster != nil {
+				te.User = &struct {
+					Login string `json:"login"`
+				}{Login: ev.Poster.UserName}
+			}
+			all = append(all, te)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return all, nil
+}
+
+// sdkPRToLocal converts an SDK PullRequest to our local type.
+func sdkPRToLocal(pr *giteasdk.PullRequest) *PullRequest {
+	local := &PullRequest{
+		Number:    int(pr.Index),
+		State:     string(pr.State),
+		Merged:    pr.HasMerged,
+		Mergeable: pr.Mergeable,
+		Title:     pr.Title,
+		Body:      pr.Body,
+	}
+	if pr.Poster != nil {
+		local.User.Login = pr.Poster.UserName
+	}
+	if pr.Head != nil {
+		local.Head.Ref = pr.Head.Ref
+		local.Head.SHA = pr.Head.Sha
+	}
+	if pr.Base != nil {
+		local.Base.Ref = pr.Base.Ref
+		local.Base.SHA = pr.Base.Sha
+	}
+	return local
+}
+
+// sdkIssueToLocal converts an SDK Issue to our local type.
+func sdkIssueToLocal(iss *giteasdk.Issue) *Issue {
+	local := &Issue{
+		ID:        iss.ID,
+		Number:    int(iss.Index),
+		Title:     iss.Title,
+		Body:      iss.Body,
+		State:     string(iss.State),
+		CreatedAt: iss.Created.UTC().Format(time.RFC3339),
+	}
+	if iss.Poster != nil {
+		local.User.Login = iss.Poster.UserName
+	}
+	if iss.Closed != nil {
+		local.ClosedAt = iss.Closed.UTC().Format(time.RFC3339)
+	}
+	if iss.PullRequest != nil {
+		local.PullRequest = &struct {
+			URL string `json:"url"`
+		}{URL: iss.HTMLURL}
+	}
+	for _, l := range iss.Labels {
+		local.Labels = append(local.Labels, Label{ID: l.ID, Name: l.Name, Color: l.Color})
+	}
+	for _, a := range iss.Assignees {
+		local.Assignees = append(local.Assignees, struct {
+			Login string `json:"login"`
+		}{Login: a.UserName})
+	}
+	if iss.Milestone != nil {
+		local.Milestone = &struct {
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		}{ID: iss.Milestone.ID, Title: iss.Milestone.Title}
+	}
+	return local
+}
+
+// WikiPage is a single wiki page from the forge.
+type WikiPage struct {
+	Title         string
+	ContentBase64 string
+	SubURL        string
+	CommitSHA     string
+	CommitDate    string // RFC3339
+}
+
+// WikiPageMeta is wiki index metadata (no content).
+type WikiPageMeta struct {
+	Title      string
+	SubURL     string
+	CommitSHA  string
+	CommitDate string
+}
+
+// GetWikiPage fetches a single wiki page by name.
+func (c *Client) GetWikiPage(ctx context.Context, name string) (*WikiPage, error) {
+	p, _, err := c.sdk.Wiki.GetPage(ctx, c.Owner, c.Repo, name)
+	if err != nil {
+		return nil, err
+	}
+	wp := &WikiPage{
+		Title:         p.Title,
+		ContentBase64: p.ContentBase64,
+		SubURL:        p.SubURL,
+	}
+	if p.LastCommit != nil {
+		wp.CommitSHA = p.LastCommit.ID
+		if p.LastCommit.Author != nil {
+			wp.CommitDate = p.LastCommit.Author.Date
+		}
+	}
+	return wp, nil
+}
+
+// ListWikiPages returns wiki page metadata for all pages.
+func (c *Client) ListWikiPages(ctx context.Context) ([]*WikiPageMeta, error) {
+	var all []*WikiPageMeta
+	for page := 1; ; page++ {
+		pages, resp, err := c.sdk.Wiki.ListPages(ctx, c.Owner, c.Repo, giteasdk.ListWikiPagesOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
 			return nil, err
 		}
-		if len(list) == 0 {
+		for _, mp := range pages {
+			m := &WikiPageMeta{
+				Title:  mp.Title,
+				SubURL: mp.SubURL,
+			}
+			if mp.LastCommit != nil {
+				m.CommitSHA = mp.LastCommit.ID
+				if mp.LastCommit.Author != nil {
+					m.CommitDate = mp.LastCommit.Author.Date
+				}
+			}
+			all = append(all, m)
+		}
+		if resp.NextPage == 0 {
 			break
 		}
-		all = append(all, list...)
-		if len(list) < limit {
-			break
-		}
-		page++
 	}
 	return all, nil
 }

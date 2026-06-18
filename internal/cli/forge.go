@@ -60,7 +60,7 @@ adds dashed prose #N edges. Closed issues are greyed; epics get a bold border.
 		if err != nil {
 			return err
 		}
-		g, err := issuegraph.Build(c, issuegraph.Options{Scope: sc, WithMentions: withMentions})
+		g, err := issuegraph.Build(cmd.Context(), c, issuegraph.Options{Scope: sc, WithMentions: withMentions})
 		if err != nil {
 			return err
 		}
@@ -113,7 +113,7 @@ when the violation count exceeds --max (default 0) — usable as a CI gate.`,
 		if err != nil {
 			return err
 		}
-		results, ls, err := mangle.Lint(c, mangle.ExportOptions{Scope: sc, WithCommits: true}, cmd.ErrOrStderr())
+		results, ls, err := mangle.Lint(cmd.Context(), c, mangle.ExportOptions{Scope: sc, WithCommits: true}, cmd.ErrOrStderr())
 		if err != nil {
 			return err
 		}

@@ -95,7 +95,7 @@ func NewMetaReviewCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("meta-review: %w", err)
 			}
-			return runMetaReview(num, opts, client, cmd.OutOrStdout())
+			return runMetaReview(ctx, num, opts, client, cmd.OutOrStdout())
 		}),
 	}
 	addMetaReviewModelFlags(c, &opts)
@@ -113,9 +113,9 @@ func newMetaReviewEvalCmd(opts *metaReviewOpts) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMetaReviewEval(*opts, cmd.OutOrStdout())
-		},
+		RunE: RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+			return runMetaReviewEval(ctx, *opts, cmd.OutOrStdout())
+		}),
 	}
 	addMetaReviewModelFlags(c, opts)
 	c.Flags().StringVar(&opts.setFile, "set", "", "labelled JSON set (required)")
@@ -146,7 +146,7 @@ func (o metaReviewOpts) classifiers() (local, escalate metareview.Classifier, ta
 	return local, escalate, tag, nil
 }
 
-func runMetaReview(num int, opts metaReviewOpts, client *forge.Client, out io.Writer) error {
+func runMetaReview(ctx context.Context, num int, opts metaReviewOpts, client *forge.Client, out io.Writer) error {
 	local, escalate, tag, err := opts.classifiers()
 	if err != nil {
 		return err
@@ -157,7 +157,7 @@ func runMetaReview(num int, opts metaReviewOpts, client *forge.Client, out io.Wr
 		return err
 	}
 
-	_, err = metareview.Run(context.Background(), metareview.Options{
+	_, err = metareview.Run(ctx, metareview.Options{
 		Number:      num,
 		Forge:       client,
 		Corpus:      corpus,
@@ -171,7 +171,7 @@ func runMetaReview(num int, opts metaReviewOpts, client *forge.Client, out io.Wr
 	return err
 }
 
-func runMetaReviewEval(opts metaReviewOpts, out io.Writer) error {
+func runMetaReviewEval(ctx context.Context, opts metaReviewOpts, out io.Writer) error {
 	if opts.setFile == "" {
 		return fmt.Errorf("--set <labelled.json> is required")
 	}
@@ -187,7 +187,7 @@ func runMetaReviewEval(opts metaReviewOpts, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	rep, err := metareview.Eval(context.Background(), cases, local, escalate, out)
+	rep, err := metareview.Eval(ctx, cases, local, escalate, out)
 	if err != nil {
 		return err
 	}

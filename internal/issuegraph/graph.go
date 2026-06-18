@@ -6,6 +6,7 @@
 package issuegraph
 
 import (
+	"context"
 	"fmt"
 	"sort"
 
@@ -39,8 +40,8 @@ type Edge struct {
 }
 
 // Build fetches the forge issues and extracts the DAG for the selected scope.
-func Build(c *forge.Client, opt Options) (Graph, error) {
-	issues, err := c.ListAllIssues()
+func Build(ctx context.Context, c *forge.Client, opt Options) (Graph, error) {
+	issues, err := c.ListAllIssues(ctx)
 	if err != nil {
 		return Graph{}, fmt.Errorf("list issues: %w", err)
 	}

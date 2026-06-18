@@ -21,17 +21,17 @@ type fakeForge struct {
 	addLabelErr error
 }
 
-func (f *fakeForge) GetIssue(num int) (*forge.Issue, error) { return f.issue, nil }
-func (f *fakeForge) GetPRDiff(num int) (string, error)      { return f.diff, nil }
-func (f *fakeForge) PostIssueComment(num int, body string) error {
+func (f *fakeForge) GetIssue(_ context.Context, num int) (*forge.Issue, error) { return f.issue, nil }
+func (f *fakeForge) GetPRDiff(_ context.Context, num int) (string, error)      { return f.diff, nil }
+func (f *fakeForge) PostIssueComment(_ context.Context, num int, body string) error {
 	if f.postErr != nil {
 		return f.postErr
 	}
 	f.postedBody = body
 	return nil
 }
-func (f *fakeForge) ListRepoLabels() ([]forge.Label, error) { return f.labels, nil }
-func (f *fakeForge) AddLabels(num int, ids []int64) error {
+func (f *fakeForge) ListRepoLabels(_ context.Context) ([]forge.Label, error) { return f.labels, nil }
+func (f *fakeForge) AddLabels(_ context.Context, num int, ids []int64) error {
 	if f.addLabelErr != nil {
 		return f.addLabelErr
 	}

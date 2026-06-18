@@ -10,6 +10,7 @@
 package mangle
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
@@ -39,11 +40,11 @@ type ExportStats struct {
 }
 
 // Export materializes forge history (optionally a subset) as Mangle facts.
-func Export(c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error) {
+func Export(ctx context.Context, c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error) {
 	start := time.Now()
 	var st ExportStats
 
-	issues, err := c.ListAllIssues()
+	issues, err := c.ListAllIssues(ctx)
 	if err != nil {
 		return st, fmt.Errorf("list issues: %w", err)
 	}
@@ -69,7 +70,7 @@ func Export(c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error
 		}
 	}
 
-	pulls, err := c.ListAllPulls()
+	pulls, err := c.ListAllPulls(ctx)
 	if err != nil {
 		return st, fmt.Errorf("list pulls: %w", err)
 	}
@@ -98,7 +99,7 @@ func Export(c *forge.Client, opt ExportOptions, w io.Writer) (ExportStats, error
 			}
 		}
 		if opt.WithCommits {
-			commits, err := c.GetPullCommits(pr.Number)
+			commits, err := c.GetPullCommits(ctx, pr.Number)
 			if err != nil {
 				return st, fmt.Errorf("pull %d commits: %w", pr.Number, err)
 			}
@@ -133,7 +134,7 @@ type LintStats struct {
 // Lint materializes a forge snapshot for the selected scope and evaluates the
 // embedded curated rule set (rules/forge_lint.mg) over it — the forge-linter
 // (botfam#389, use case C). Returns per-rule violations.
-func Lint(c *forge.Client, opt ExportOptions, progress io.Writer) ([]interp.Result, LintStats, error) {
+func Lint(ctx context.Context, c *forge.Client, opt ExportOptions, progress io.Writer) ([]interp.Result, LintStats, error) {
 	var ls LintStats
 
 	facts, err := os.CreateTemp("", "botfam-lint-facts-*.mg")
@@ -141,7 +142,7 @@ func Lint(c *forge.Client, opt ExportOptions, progress io.Writer) ([]interp.Resu
 		return nil, ls, err
 	}
 	defer os.Remove(facts.Name())
-	st, err := Export(c, opt, facts)
+	st, err := Export(ctx, c, opt, facts)
 	facts.Close()
 	if err != nil {
 		return nil, ls, err
