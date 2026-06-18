@@ -85,6 +85,8 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		review.NewExternalReviewCmd(),
 		review.NewMetaReviewCmd(),
 		review.NewVerifyCmd(),
+		review.NewMangleCmd(),
+		review.NewForgeCmd(),
 	)
 	addTo(groupServer,
 		newServeCmd(),

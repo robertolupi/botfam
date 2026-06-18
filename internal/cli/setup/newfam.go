@@ -9,11 +9,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 const newfamHelp = `Usage:
@@ -24,12 +24,6 @@ It sets up the registry, creates git worktrees for all agents and the human oper
 (based on the current $USER), configures git worktree identities, authorizes Claude
 harness permissions, and generates agent documentation.
 `
-
-// NewfamCmd is the thin args/io entry point retained for tests; it builds the
-// Cobra command and runs it against args.
-func NewfamCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewNewfamCmd(), args, out)
-}
 
 // NewNewfamCmd builds the `botfam newfam` Cobra command (issue #44).
 func NewNewfamCmd() *cobra.Command {

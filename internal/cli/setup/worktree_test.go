@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // makeLinkedWorktree creates a main git repo under tempDir/main, creates
@@ -39,7 +41,7 @@ func TestWorktreeCmd(t *testing.T) {
 
 	// 1. Test "worktree init" in the main repo (should fail)
 	var out bytes.Buffer
-	err := WorktreeCmd([]string{"init", "bob", mainDir}, &out)
+	err := cmdutil.RunCobra(NewWorktreeCmd(), []string{"init", "bob", mainDir}, &out)
 	if err == nil {
 		t.Fatal("expected error running worktree init on main repo, got nil")
 	}
@@ -49,7 +51,7 @@ func TestWorktreeCmd(t *testing.T) {
 
 	// 2. Test "worktree init" in the linked worktree (should succeed)
 	out.Reset()
-	err = WorktreeCmd([]string{"init", "bob", wtDir}, &out)
+	err = cmdutil.RunCobra(NewWorktreeCmd(), []string{"init", "bob", wtDir}, &out)
 	if err != nil {
 		t.Fatalf("worktree init failed: %v", err)
 	}
@@ -70,7 +72,7 @@ func TestWorktreeCmd(t *testing.T) {
 
 	// 3. Test "worktree sync" (should succeed when clean)
 	out.Reset()
-	err = WorktreeCmd([]string{"sync", wtDir}, &out)
+	err = cmdutil.RunCobra(NewWorktreeCmd(), []string{"sync", wtDir}, &out)
 	if err != nil {
 		t.Fatalf("worktree sync failed: %v", err)
 	}
@@ -86,7 +88,7 @@ func TestWorktreeCmd(t *testing.T) {
 	}
 
 	out.Reset()
-	err = WorktreeCmd([]string{"sync", wtDir}, &out)
+	err = cmdutil.RunCobra(NewWorktreeCmd(), []string{"sync", wtDir}, &out)
 	if err != nil {
 		t.Fatalf("worktree sync with dirty tree failed: %v", err)
 	}
@@ -112,7 +114,7 @@ func TestWorktreeSyncWiki(t *testing.T) {
 	_, wtDir := makeLinkedWorktree(t, tempDir)
 
 	var out bytes.Buffer
-	if err := WorktreeCmd([]string{"init", "bob", wtDir}, &out); err != nil {
+	if err := cmdutil.RunCobra(NewWorktreeCmd(), []string{"init", "bob", wtDir}, &out); err != nil {
 		t.Fatalf("worktree init failed: %v", err)
 	}
 
@@ -156,7 +158,7 @@ func TestWorktreeSyncWiki(t *testing.T) {
 
 	// Run worktree sync in wtDir. It should sync both main repo and the wiki!
 	out.Reset()
-	if err := WorktreeCmd([]string{"sync", wtDir}, &out); err != nil {
+	if err := cmdutil.RunCobra(NewWorktreeCmd(), []string{"sync", wtDir}, &out); err != nil {
 		t.Fatalf("worktree sync failed: %v\nOutput: %s", err, out.String())
 	}
 

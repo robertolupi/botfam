@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
@@ -31,9 +30,6 @@ func SpoolDir(workDir string) (string, error) {
 	}
 	return filepath.Join(rf.FamDir, "spool", rf.Actor), nil
 }
-
-// WaitCmd is the thin args/io entry point retained for tests and the MCP layer.
-func WaitCmd(args []string, out io.Writer) error { return cmdutil.RunCobra(NewWaitCmd(), args, out) }
 
 // NewWaitCmd builds the `botfam wait` Cobra command — the single wake point that
 // blocks on the per-agent spool and prints whatever arrives (#229).

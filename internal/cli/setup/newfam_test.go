@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
@@ -43,7 +44,7 @@ func TestNewfam(t *testing.T) {
 
 	var out bytes.Buffer
 	args := []string{"myproject", "--agents", "agy,claude"}
-	if err := NewfamCmd(args, &out); err != nil {
+	if err := cmdutil.RunCobra(NewNewfamCmd(), args, &out); err != nil {
 		t.Fatalf("NewfamCmd failed: %v\nOutput:\n%s", err, out.String())
 	}
 
@@ -269,7 +270,7 @@ func TestNewfamMCPSelfDiscoverability(t *testing.T) {
 
 	var out bytes.Buffer
 	args := []string{"testfam", "--agents", "agy,claude"}
-	if err := NewfamCmd(args, &out); err != nil {
+	if err := cmdutil.RunCobra(NewNewfamCmd(), args, &out); err != nil {
 		t.Fatalf("NewfamCmd failed: %v\nOutput:\n%s", err, out.String())
 	}
 

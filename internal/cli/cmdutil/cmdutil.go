@@ -42,26 +42,6 @@ func RunWithFamCtx(fn func(context.Context, *cobra.Command, []string) error) fun
 	}
 }
 
-// RunWithFamCtxDir is like RunWithFamCtx but reads the work directory from
-// workDir at call time (pointer evaluated lazily after flag parsing).
-func RunWithFamCtxDir(workDir *string, fn func(context.Context, *cobra.Command, []string) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		wd := *workDir
-		if wd == "" {
-			var err error
-			wd, err = os.Getwd()
-			if err != nil {
-				return err
-			}
-		}
-		ctx, err := famctx.WithFamCtx(cmd.Context(), wd)
-		if err != nil {
-			return err
-		}
-		return fn(ctx, cmd, args)
-	}
-}
-
 // Unique returns a deduplicated copy of xs, preserving order.
 func Unique(xs []string) []string {
 	seen := map[string]bool{}

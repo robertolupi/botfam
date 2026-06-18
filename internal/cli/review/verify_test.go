@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // initGoRepo creates a minimal buildable+testable Go module repo at dir with a
@@ -80,7 +82,7 @@ func runVerifyIn(t *testing.T, dir string, args ...string) (string, error) {
 	defer func() { _ = os.Chdir(orig) }()
 
 	var buf bytes.Buffer
-	cmdErr := VerifyCmd(args, &buf)
+	cmdErr := cmdutil.RunCobra(NewVerifyCmd(), args, &buf)
 	return buf.String(), cmdErr
 }
 
@@ -152,7 +154,7 @@ func TestVerifyBadSha(t *testing.T) {
 
 func TestVerifyMissingSha(t *testing.T) {
 	var buf bytes.Buffer
-	if err := VerifyCmd(nil, &buf); err == nil {
+	if err := cmdutil.RunCobra(NewVerifyCmd(), nil, &buf); err == nil {
 		t.Fatal("expected usage error when sha missing")
 	}
 }

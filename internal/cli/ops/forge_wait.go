@@ -10,7 +10,6 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // indentTruncate prefixes every line of s and caps the total length so a long
@@ -24,12 +23,6 @@ func indentTruncate(s, prefix string, max int) string {
 		lines[i] = prefix + lines[i]
 	}
 	return strings.Join(lines, "\n")
-}
-
-// ForgeWaitCmd is the thin args/io entry point retained for tests and the MCP
-// layer; it builds the Cobra command and runs it against args.
-func ForgeWaitCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewForgeWaitCmd(), args, out)
 }
 
 // NewForgeWaitCmd builds the `botfam forge-wait` Cobra command (issue #17).

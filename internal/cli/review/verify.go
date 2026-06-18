@@ -12,14 +12,7 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
-
-// VerifyCmd is the thin args/io entry point retained for tests and the MCP
-// layer; it builds the Cobra command and runs it against args.
-func VerifyCmd(args []string, out io.Writer) error {
-	return cmdutil.RunCobra(NewVerifyCmd(), args, out)
-}
 
 // NewVerifyCmd builds the `botfam verify` Cobra command.
 //

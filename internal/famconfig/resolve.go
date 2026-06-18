@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/robertolupi/botfam/internal/gitexec"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/robertolupi/botfam/internal/gitexec"
 )
 
 // Resolver resolves a worktree's fam identity (root set included). GitResolver is
@@ -200,51 +200,6 @@ func validateName(name string) error {
 	return nil
 }
 
-// GitObjectStores returns the absolute, symlink-resolved object store paths for
-// workDir's repository, including alternates.
-func GitObjectStores(workDir string) ([]string, error) {
-	common, err := gitexec.One(workDir, "rev-parse", "--git-common-dir")
-	if err != nil {
-		return nil, err
-	}
-	if !filepath.IsAbs(common) {
-		common = filepath.Join(workDir, common)
-	}
-	objects := filepath.Join(common, "objects")
-	out := []string{}
-	// Canonicalize to an absolute, symlink-resolved path so membership is matched
-	// on real Git object identity, not on a path string. git rev-parse can return
-	// a relative ".git" from a repo root, and EvalSymlinks of a relative path stays
-	// relative — which would collapse every repo's store to ".git/objects" and match
-	// any fam. Absolutize first, then resolve symlinks.
-	add := func(p string) {
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			abs = p
-		}
-		if rp, err := filepath.EvalSymlinks(abs); err == nil {
-			out = append(out, rp)
-		} else {
-			out = append(out, abs)
-		}
-	}
-	add(objects)
-	alts := filepath.Join(objects, "info", "alternates")
-	if b, err := os.ReadFile(alts); err == nil {
-		for _, line := range strings.Split(string(b), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			if !filepath.IsAbs(line) {
-				line = filepath.Join(objects, line)
-			}
-			add(line)
-		}
-	}
-	return unique(out), nil
-}
-
 // RepoPath returns the absolute, symlink-resolved top-level of workDir's
 // repository, falling back to the absolute workDir when it is not a git tree.
 func RepoPath(workDir string) string {
@@ -279,18 +234,6 @@ func ValidateHistoryPath(path string) error {
 		}
 	}
 	return nil
-}
-
-func unique(xs []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, x := range xs {
-		if !seen[x] {
-			seen[x] = true
-			out = append(out, x)
-		}
-	}
-	return out
 }
 
 func makeNoGitHistoryError() error {
