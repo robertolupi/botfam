@@ -20,8 +20,8 @@ func TestClient_GetIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIssue: %v", err)
 	}
-	if iss.Number != 306 {
-		t.Errorf("number: got %d", iss.Number)
+	if iss.Index != 306 {
+		t.Errorf("number: got %d", iss.Index)
 	}
 	if len(iss.Labels) != 1 || iss.Labels[0].Name != "risk/superseded" {
 		t.Errorf("labels: got %+v", iss.Labels)

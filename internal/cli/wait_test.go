@@ -306,9 +306,7 @@ func (f *fakeTimeline) GetIssueTimeline(_ context.Context, _ int) ([]*forge.Time
 func ev(id int64, typ, user, body string) *forge.TimelineEvent {
 	e := &forge.TimelineEvent{ID: id, Type: typ, Body: body}
 	if user != "" {
-		e.User = &struct {
-			Login string `json:"login"`
-		}{Login: user}
+		e.Poster = &forge.User{UserName: user}
 	}
 	return e
 }

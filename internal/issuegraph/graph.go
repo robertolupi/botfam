@@ -58,15 +58,15 @@ func build(issues []*forge.Issue, opt Options) Graph {
 
 	byNum := make(map[int]*forge.Issue, len(issues))
 	for _, iss := range issues {
-		byNum[iss.Number] = iss
+		byNum[int(iss.Index)] = iss
 	}
 
 	nodes := map[int]*Node{}
 	for _, iss := range issues {
-		if iss.PullRequest != nil || !inScope(iss.Number) {
+		if iss.PullRequest != nil || !inScope(int(iss.Index)) {
 			continue
 		}
-		nodes[iss.Number] = &Node{Number: iss.Number, Title: iss.Title, State: iss.State}
+		nodes[int(iss.Index)] = &Node{Number: int(iss.Index), Title: iss.Title, State: string(iss.State)}
 	}
 
 	seen := map[string]bool{}

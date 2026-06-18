@@ -54,7 +54,7 @@ func SelectIssues(issues []*Issue, sc Scope) map[int]bool {
 	case sc.Epic > 0:
 		byNum := make(map[int]*Issue, len(issues))
 		for _, iss := range issues {
-			byNum[iss.Number] = iss
+			byNum[int(iss.Index)] = iss
 		}
 		seen := map[int]bool{}
 		queue := []int{sc.Epic}
@@ -78,7 +78,7 @@ func SelectIssues(issues []*Issue, sc Scope) map[int]bool {
 		out := map[int]bool{}
 		for _, iss := range issues {
 			if iss.Milestone != nil && iss.Milestone.Title == sc.Milestone {
-				out[iss.Number] = true
+				out[int(iss.Index)] = true
 			}
 		}
 		return out
@@ -87,7 +87,7 @@ func SelectIssues(issues []*Issue, sc Scope) map[int]bool {
 		for _, iss := range issues {
 			for _, l := range iss.Labels {
 				if l.Name == sc.Label {
-					out[iss.Number] = true
+					out[int(iss.Index)] = true
 				}
 			}
 		}

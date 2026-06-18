@@ -6,7 +6,6 @@ package wiki
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path"
@@ -70,13 +69,9 @@ func (p ForgeProvider) Page(name string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	content, err := base64.StdEncoding.DecodeString(wp.ContentBase64)
-	if err != nil {
-		return Page{}, fmt.Errorf("decode wiki content %q: %w", name, err)
-	}
 	return Page{
 		Name:    name,
-		Content: string(content),
+		Content: wp.Content,
 		SHA:     wp.CommitSHA,
 		Updated: wp.CommitDate,
 		Source:  "gitea",

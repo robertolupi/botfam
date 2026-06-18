@@ -9,11 +9,7 @@ import (
 
 // Label is a repository label (the risk/*, triage/*, harness/* taxonomy lives
 // here on the forge — see wiki proposal-process-risk-labels).
-type Label struct {
-	ID    int64  `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
-}
+type Label = giteasdk.Label
 
 // GetIssue returns one issue's metadata including its labels.
 func (c *Client) GetIssue(ctx context.Context, num int) (*Issue, error) {
@@ -21,7 +17,7 @@ func (c *Client) GetIssue(ctx context.Context, num int) (*Issue, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get issue %d: %w", num, err)
 	}
-	return sdkIssueToLocal(iss), nil
+	return iss, nil
 }
 
 // PostIssueComment posts a discussion comment on an issue or PR.
@@ -41,7 +37,7 @@ func (c *Client) ListRepoLabels(ctx context.Context) ([]Label, error) {
 			return nil, fmt.Errorf("list labels: %w", err)
 		}
 		for _, l := range labels {
-			all = append(all, Label{ID: l.ID, Name: l.Name, Color: l.Color})
+			all = append(all, *l)
 		}
 		if resp.NextPage == 0 {
 			break

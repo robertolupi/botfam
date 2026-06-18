@@ -3,12 +3,12 @@ package forge
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	giteasdk "gitea.dev/sdk"
 
@@ -29,36 +29,14 @@ type Client struct {
 	sdk *giteasdk.Client
 }
 
-type PullRequest struct {
-	Number    int    `json:"number"`
-	State     string `json:"state"`
-	Merged    bool   `json:"merged"`
-	Mergeable bool   `json:"mergeable"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	Head      struct {
-		Ref string `json:"ref"`
-		SHA string `json:"sha"`
-	} `json:"head"`
-	Base struct {
-		Ref string `json:"ref"`
-		SHA string `json:"sha"`
-	} `json:"base"`
-	User struct {
-		Login string `json:"login"`
-	} `json:"user"`
-}
-
-type Review struct {
-	ID          int64  `json:"id"`
-	State       string `json:"state"` // e.g. "APPROVED", "REQUEST_CHANGES", "COMMENT"
-	Body        string `json:"body"`
-	Stale       bool   `json:"stale"`
-	SubmittedAt string `json:"submitted_at"`
-	User        struct {
-		Login string `json:"login"`
-	} `json:"user"`
-}
+type PullRequest = giteasdk.PullRequest
+type Review = giteasdk.PullReview
+type Issue = giteasdk.Issue
+type TimelineEvent = giteasdk.TimelineComment
+type Milestone = giteasdk.Milestone
+type User = giteasdk.User
+type PullRequestMeta = giteasdk.PullRequestMeta
+type StateType = giteasdk.StateType
 
 // NewClient builds a Client from a context.Context enriched by famctx.WithFamCtx.
 // It returns an error if ctx does not carry a famctx.Context (i.e. was not
@@ -277,31 +255,12 @@ func (c *Client) AuthLogin(ctx context.Context) (string, error) {
 
 func (c *Client) GetPR(ctx context.Context, prNum int) (*PullRequest, error) {
 	pr, _, err := c.sdk.PullRequests.GetPullRequest(ctx, c.Owner, c.Repo, int64(prNum))
-	if err != nil {
-		return nil, err
-	}
-	return sdkPRToLocal(pr), nil
+	return pr, err
 }
 
 func (c *Client) GetPRReviews(ctx context.Context, prNum int) ([]*Review, error) {
 	reviews, _, err := c.sdk.PullRequests.ListPullReviews(ctx, c.Owner, c.Repo, int64(prNum), giteasdk.ListPullReviewsOptions{})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]*Review, len(reviews))
-	for i, r := range reviews {
-		out[i] = &Review{
-			ID:          r.ID,
-			State:       string(r.State),
-			Body:        r.Body,
-			Stale:       r.Stale,
-			SubmittedAt: r.Submitted.UTC().Format(time.RFC3339),
-		}
-		if r.Reviewer != nil {
-			out[i].User.Login = r.Reviewer.UserName
-		}
-	}
-	return out, nil
+	return reviews, err
 }
 
 func (c *Client) PostPRReview(ctx context.Context, prNum int, commitSHA string, state string, body string) error {
@@ -322,48 +281,6 @@ func (c *Client) PostCommitStatus(ctx context.Context, commitSHA string, state s
 	return err
 }
 
-type Milestone struct {
-	ID    int64  `json:"id"`
-	Title string `json:"title"`
-	State string `json:"state"`
-}
-
-type Issue struct {
-	ID     int64  `json:"id"`
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	State  string `json:"state"`
-	User   struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	PullRequest *struct {
-		URL string `json:"url"`
-	} `json:"pull_request"`
-	Labels    []Label `json:"labels"`
-	CreatedAt string  `json:"created_at"`
-	ClosedAt  string  `json:"closed_at"`
-	Assignees []struct {
-		Login string `json:"login"`
-	} `json:"assignees"`
-	Milestone *struct {
-		ID    int64  `json:"id"`
-		Title string `json:"title"`
-	} `json:"milestone"`
-}
-
-type TimelineEvent struct {
-	ID        int64  `json:"id"`
-	Type      string `json:"type"`
-	CreatedAt string `json:"created_at"`
-	User      *struct {
-		Login string `json:"login"`
-	} `json:"user"`
-	Body         string `json:"body"`
-	RefCommitSHA string `json:"ref_commit_sha"`
-	ReviewID     int64  `json:"review_id"`
-}
-
 func (c *Client) ListMilestones(ctx context.Context) ([]*Milestone, error) {
 	var all []*Milestone
 	for page := 1; ; page++ {
@@ -374,13 +291,7 @@ func (c *Client) ListMilestones(ctx context.Context) ([]*Milestone, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, m := range ms {
-			all = append(all, &Milestone{
-				ID:    m.ID,
-				Title: m.Title,
-				State: string(m.State),
-			})
-		}
+		all = append(all, ms...)
 		if resp.NextPage == 0 {
 			break
 		}
@@ -406,9 +317,7 @@ func (c *Client) ListIssuesByMilestone(ctx context.Context, milestoneID int64) (
 		if err != nil {
 			return nil, err
 		}
-		for _, iss := range issues {
-			all = append(all, sdkIssueToLocal(iss))
-		}
+		all = append(all, issues...)
 		if resp.NextPage == 0 {
 			break
 		}
@@ -425,20 +334,7 @@ func (c *Client) GetIssueTimeline(ctx context.Context, issueNum int) ([]*Timelin
 		if err != nil {
 			return nil, err
 		}
-		for _, ev := range evs {
-			te := &TimelineEvent{
-				ID:        ev.ID,
-				Type:      ev.Type,
-				CreatedAt: ev.Created.UTC().Format(time.RFC3339),
-				Body:      ev.Body,
-			}
-			if ev.Poster != nil {
-				te.User = &struct {
-					Login string `json:"login"`
-				}{Login: ev.Poster.UserName}
-			}
-			all = append(all, te)
-		}
+		all = append(all, evs...)
 		if resp.NextPage == 0 {
 			break
 		}
@@ -446,75 +342,13 @@ func (c *Client) GetIssueTimeline(ctx context.Context, issueNum int) ([]*Timelin
 	return all, nil
 }
 
-// sdkPRToLocal converts an SDK PullRequest to our local type.
-func sdkPRToLocal(pr *giteasdk.PullRequest) *PullRequest {
-	local := &PullRequest{
-		Number:    int(pr.Index),
-		State:     string(pr.State),
-		Merged:    pr.HasMerged,
-		Mergeable: pr.Mergeable,
-		Title:     pr.Title,
-		Body:      pr.Body,
-	}
-	if pr.Poster != nil {
-		local.User.Login = pr.Poster.UserName
-	}
-	if pr.Head != nil {
-		local.Head.Ref = pr.Head.Ref
-		local.Head.SHA = pr.Head.Sha
-	}
-	if pr.Base != nil {
-		local.Base.Ref = pr.Base.Ref
-		local.Base.SHA = pr.Base.Sha
-	}
-	return local
-}
-
-// sdkIssueToLocal converts an SDK Issue to our local type.
-func sdkIssueToLocal(iss *giteasdk.Issue) *Issue {
-	local := &Issue{
-		ID:        iss.ID,
-		Number:    int(iss.Index),
-		Title:     iss.Title,
-		Body:      iss.Body,
-		State:     string(iss.State),
-		CreatedAt: iss.Created.UTC().Format(time.RFC3339),
-	}
-	if iss.Poster != nil {
-		local.User.Login = iss.Poster.UserName
-	}
-	if iss.Closed != nil {
-		local.ClosedAt = iss.Closed.UTC().Format(time.RFC3339)
-	}
-	if iss.PullRequest != nil {
-		local.PullRequest = &struct {
-			URL string `json:"url"`
-		}{URL: iss.HTMLURL}
-	}
-	for _, l := range iss.Labels {
-		local.Labels = append(local.Labels, Label{ID: l.ID, Name: l.Name, Color: l.Color})
-	}
-	for _, a := range iss.Assignees {
-		local.Assignees = append(local.Assignees, struct {
-			Login string `json:"login"`
-		}{Login: a.UserName})
-	}
-	if iss.Milestone != nil {
-		local.Milestone = &struct {
-			ID    int64  `json:"id"`
-			Title string `json:"title"`
-		}{ID: iss.Milestone.ID, Title: iss.Milestone.Title}
-	}
-	return local
-}
-
-// WikiPage is a single wiki page from the forge.
+// WikiPage is a single wiki page from the forge. It embeds the SDK type and
+// adds Content (decoded ContentBase64) plus CommitSHA/CommitDate flattened from LastCommit.
 type WikiPage struct {
-	Title         string
-	ContentBase64 string
-	SubURL        string
-	CommitSHA     string
-	CommitDate    string // RFC3339
+	giteasdk.WikiPage
+	Content    string // decoded from ContentBase64
+	CommitSHA  string
+	CommitDate string // RFC3339
 }
 
 // WikiPageMeta is wiki index metadata (no content).
@@ -531,10 +365,9 @@ func (c *Client) GetWikiPage(ctx context.Context, name string) (*WikiPage, error
 	if err != nil {
 		return nil, err
 	}
-	wp := &WikiPage{
-		Title:         p.Title,
-		ContentBase64: p.ContentBase64,
-		SubURL:        p.SubURL,
+	wp := &WikiPage{WikiPage: *p}
+	if decoded, decErr := base64.StdEncoding.DecodeString(p.ContentBase64); decErr == nil {
+		wp.Content = string(decoded)
 	}
 	if p.LastCommit != nil {
 		wp.CommitSHA = p.LastCommit.ID

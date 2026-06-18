@@ -54,19 +54,21 @@ func Export(ctx context.Context, c *forge.Client, opt ExportOptions, w io.Writer
 	fmt.Fprintf(w, "# generated %s; scope=%s\n\n", time.Now().UTC().Format(time.RFC3339), opt.Scope.String())
 
 	for _, iss := range issues {
-		if target != nil && !target[iss.Number] {
+		if target != nil && !target[int(iss.Index)] {
 			continue
 		}
 		st.Issues++
-		id := issueID(iss.Number)
-		if t := mTime(iss.CreatedAt); t != "" {
+		id := issueID(int(iss.Index))
+		if t := mTime(iss.Created.UTC().Format(time.RFC3339)); t != "" {
 			fmt.Fprintf(w, "issue_created(%s)@[%s].\n", id, t)
 		}
-		if t := mTime(iss.ClosedAt); t != "" {
-			fmt.Fprintf(w, "issue_closed(%s)@[%s].\n", id, t)
+		if iss.Closed != nil {
+			if t := mTime(iss.Closed.UTC().Format(time.RFC3339)); t != "" {
+				fmt.Fprintf(w, "issue_closed(%s)@[%s].\n", id, t)
+			}
 		}
 		for _, a := range iss.Assignees {
-			fmt.Fprintf(w, "issue_assignee(%s, %s).\n", id, nameC(a.Login))
+			fmt.Fprintf(w, "issue_assignee(%s, %s).\n", id, nameC(a.UserName))
 		}
 	}
 
@@ -81,12 +83,14 @@ func Export(ctx context.Context, c *forge.Client, opt ExportOptions, w io.Writer
 			continue
 		}
 		st.Pulls++
-		pid := prID(pr.Number)
-		if t := mTime(pr.CreatedAt); t != "" {
-			fmt.Fprintf(w, "pr_opened(%s)@[%s].\n", pid, t)
+		pid := prID(int(pr.Index))
+		if pr.Created != nil {
+			if t := mTime(pr.Created.UTC().Format(time.RFC3339)); t != "" {
+				fmt.Fprintf(w, "pr_opened(%s)@[%s].\n", pid, t)
+			}
 		}
-		if pr.Merged {
-			if t := mTime(pr.MergedAt); t != "" {
+		if pr.HasMerged && pr.Merged != nil {
+			if t := mTime(pr.Merged.UTC().Format(time.RFC3339)); t != "" {
 				fmt.Fprintf(w, "pr_merged(%s)@[%s].\n", pid, t)
 			}
 		}
@@ -99,9 +103,9 @@ func Export(ctx context.Context, c *forge.Client, opt ExportOptions, w io.Writer
 			}
 		}
 		if opt.WithCommits {
-			commits, err := c.GetPullCommits(ctx, pr.Number)
+			commits, err := c.GetPullCommits(ctx, int(pr.Index))
 			if err != nil {
-				return st, fmt.Errorf("pull %d commits: %w", pr.Number, err)
+				return st, fmt.Errorf("pull %d commits: %w", pr.Index, err)
 			}
 			for _, cm := range commits {
 				st.Commits++

@@ -3,28 +3,12 @@ package forge
 import (
 	"context"
 	"fmt"
-	"time"
 
 	giteasdk "gitea.dev/sdk"
 )
 
 // History read endpoints used by `botfam mangle export`. These are read-only
 // list/paginate calls over the SDK-backed Client.
-
-// PullSummary is the subset of a pull request returned by the list endpoint
-// that the fact exporter needs (the timestamps the issue list omits).
-type PullSummary struct {
-	Number    int    `json:"number"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	State     string `json:"state"`
-	Merged    bool   `json:"merged"`
-	CreatedAt string `json:"created_at"`
-	MergedAt  string `json:"merged_at"`
-	User      struct {
-		Login string `json:"login"`
-	} `json:"user"`
-}
 
 // PullCommit is one commit on a PR, with author identity and timestamp.
 type PullCommit struct {
@@ -61,11 +45,7 @@ func (c *Client) ListRecentIssues(ctx context.Context, page, pageSize int) ([]*I
 	if err != nil {
 		return nil, fmt.Errorf("list recent issues: %w", err)
 	}
-	out := make([]*Issue, len(issues))
-	for i, iss := range issues {
-		out[i] = sdkIssueToLocal(iss)
-	}
-	return out, nil
+	return issues, nil
 }
 
 // ListAllIssues returns every issue (excluding pull requests), state=all.
@@ -80,9 +60,7 @@ func (c *Client) ListAllIssues(ctx context.Context) ([]*Issue, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list issues page %d: %w", page, err)
 		}
-		for _, iss := range issues {
-			out = append(out, sdkIssueToLocal(iss))
-		}
+		out = append(out, issues...)
 		if resp.NextPage == 0 {
 			break
 		}
@@ -91,8 +69,8 @@ func (c *Client) ListAllIssues(ctx context.Context) ([]*Issue, error) {
 }
 
 // ListAllPulls returns every pull request (state=all).
-func (c *Client) ListAllPulls(ctx context.Context) ([]*PullSummary, error) {
-	var out []*PullSummary
+func (c *Client) ListAllPulls(ctx context.Context) ([]*PullRequest, error) {
+	var out []*PullRequest
 	for page := 1; ; page++ {
 		pulls, resp, err := c.sdk.PullRequests.ListRepoPullRequests(ctx, c.Owner, c.Repo, giteasdk.ListPullRequestsOptions{
 			ListOptions: giteasdk.ListOptions{Page: page, PageSize: sdkPageLimit},
@@ -101,25 +79,7 @@ func (c *Client) ListAllPulls(ctx context.Context) ([]*PullSummary, error) {
 		if err != nil {
 			return nil, fmt.Errorf("list pulls page %d: %w", page, err)
 		}
-		for _, pr := range pulls {
-			ps := &PullSummary{
-				Number: int(pr.Index),
-				Title:  pr.Title,
-				Body:   pr.Body,
-				State:  string(pr.State),
-				Merged: pr.HasMerged,
-			}
-			if pr.Created != nil {
-				ps.CreatedAt = pr.Created.UTC().Format(time.RFC3339)
-			}
-			if pr.Merged != nil {
-				ps.MergedAt = pr.Merged.UTC().Format(time.RFC3339)
-			}
-			if pr.Poster != nil {
-				ps.User.Login = pr.Poster.UserName
-			}
-			out = append(out, ps)
-		}
+		out = append(out, pulls...)
 		if resp.NextPage == 0 {
 			break
 		}

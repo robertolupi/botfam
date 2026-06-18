@@ -52,11 +52,11 @@ func TestClient_GetPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get PR: %v", err)
 	}
-	if pr.Number != 1 {
-		t.Errorf("expected PR number 1, got %d", pr.Number)
+	if pr.Index != 1 {
+		t.Errorf("expected PR number 1, got %d", pr.Index)
 	}
-	if pr.Head.SHA != "head-sha" {
-		t.Errorf("expected HEAD SHA head-sha, got %s", pr.Head.SHA)
+	if pr.Head == nil || pr.Head.Sha != "head-sha" {
+		t.Errorf("expected HEAD SHA head-sha, got %v", pr.Head)
 	}
 }
 
@@ -77,7 +77,7 @@ func TestClient_GetPRReviews(t *testing.T) {
 	if len(reviews) != 1 {
 		t.Fatalf("expected 1 review, got %d", len(reviews))
 	}
-	if reviews[0].ID != 123 || reviews[0].State != "APPROVED" || reviews[0].User.Login != "agy-bot" {
+	if reviews[0].ID != 123 || string(reviews[0].State) != "APPROVED" || reviews[0].Reviewer == nil || reviews[0].Reviewer.UserName != "agy-bot" {
 		t.Errorf("unexpected review data: %+v", reviews[0])
 	}
 }
