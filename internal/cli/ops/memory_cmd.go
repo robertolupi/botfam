@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/memory"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // NewMemoryCmd builds `botfam memory` — the shared-memory fact CLI
@@ -93,7 +93,7 @@ func newMemoryWriteCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+		RunE: cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" {
 				return errors.New("--title is required")
 			}
@@ -155,7 +155,7 @@ func newMemoryForgetCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+		RunE: cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" {
 				return errors.New("--title is required")
 			}
@@ -182,7 +182,7 @@ func newMemoryGetCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+		RunE: cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(title) == "" {
 				return errors.New("--title is required")
 			}
@@ -213,7 +213,7 @@ func newMemoryListCmd() *cobra.Command {
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+		RunE: cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			_, _, cloneDir, err := openMemoryStore(ctx)
 			if err != nil {
 				return err

@@ -366,6 +366,21 @@ func ResolveAgentRuntime(workDir string) (Context, error) {
 	})
 }
 
+// WithRegistryCtx resolves the family *registry* context (forge URL, repository,
+// and — for an agent worktree — the per-harness token) and embeds it, WITHOUT
+// the strict agent-runtime gate. It is for general tooling (e.g. `forge lint` /
+// `forge graph`) that must also run in human ([user.<name>]) and base checkouts,
+// not only agent worktrees. It still fails loudly when no [repo.<k>] stanza
+// matches the work dir (the fail-loud invariant); a human supplies a forge token
+// via GITEA_TOKEN, since [user.<name>] checkouts carry no per-harness token path.
+func WithRegistryCtx(ctx context.Context, workDir string) (context.Context, error) {
+	fctx, err := Resolve(ctx, Inputs{WorkDir: workDir, Mode: ModeRegistry})
+	if err != nil {
+		return ctx, err
+	}
+	return NewContext(ctx, fctx), nil
+}
+
 // FlagEnabled reads the already-resolved flag set and returns the boolean value.
 func (c *Context) FlagEnabled(name string, def bool) (bool, error) {
 	return famconfig.FlagFromMap(c.Flags, name, def)

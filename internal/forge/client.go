@@ -84,9 +84,21 @@ func NewClient(ctx context.Context) (*Client, error) {
 		return nil, errors.New("forge: cannot resolve repo from resolved config")
 	}
 	if token == "" {
+		if fctx.TokenPath == "" {
+			// Human ([user.<name>]) or base checkout: no per-harness token path,
+			// so the forge token comes from the environment.
+			return nil, errors.New("forge: no token — set GITEA_TOKEN (human checkout), or run from an agent worktree after `botfam mint`")
+		}
 		return nil, fmt.Errorf("forge: token is empty (TokenPath=%q); run `botfam mint`", fctx.TokenPath)
 	}
-	return &Client{BaseURL: baseURL, Owner: owner, Repo: repo, Token: token}, nil
+	sdkClient, err := giteasdk.NewClient(strings.TrimSuffix(baseURL, "/"),
+		giteasdk.SetToken(token),
+		giteasdk.SetGiteaVersion(""),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("forge: create SDK client: %w", err)
+	}
+	return &Client{BaseURL: baseURL, Owner: owner, Repo: repo, Token: token, sdk: sdkClient}, nil
 }
 
 // NewClientForWorkDir builds a Client by re-resolving fam identity from workDir

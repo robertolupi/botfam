@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/gitexec"
 	"github.com/robertolupi/botfam/internal/metareview"
 	"github.com/robertolupi/botfam/internal/wiki"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 const metaReviewHelp = `Usage:
@@ -87,7 +87,7 @@ func NewMetaReviewCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.ExactArgs(1),
-		RunE: cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+		RunE: cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			num, err := strconv.Atoi(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid issue/PR number %q: %w", args[0], err)
@@ -114,7 +114,7 @@ func newMetaReviewEvalCmd(opts *metaReviewOpts) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          cobra.NoArgs,
-		RunE: cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+		RunE: cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 			return runMetaReviewEval(ctx, *opts, cmd.OutOrStdout())
 		}),
 	}

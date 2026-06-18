@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/spf13/cobra"
-	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
 // ExtractOptions holds flags for the session extract command.
@@ -53,7 +53,7 @@ func newSessionExtractCmd() *cobra.Command {
 			if err := validateExtractTimes(opts); err != nil {
 				return err
 			}
-			return cmdutil.RunWithFamCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
+			return cmdutil.RunWithRegistryCtx(func(ctx context.Context, cmd *cobra.Command, args []string) error {
 				client, err := forge.NewClient(ctx)
 				if err != nil {
 					return err
