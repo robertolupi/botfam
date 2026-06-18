@@ -59,8 +59,9 @@ var readOnlyTools = map[string]bool{
 }
 
 type server struct {
-	mcpSrv *mcpserver.MCPServer
-	ctx    context.Context // server lifetime; cancelled when serveStdio returns
+	mcpSrv  *mcpserver.MCPServer
+	entries map[string]dispatchEntry // tool name -> registered entry; built once in registerTools, read-only after
+	ctx     context.Context          // server lifetime; cancelled when serveStdio returns
 
 	mu             sync.Mutex
 	actor          string
@@ -111,7 +112,9 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 		s.mu.Unlock()
 		fmt.Fprintf(errout, "botfam: MCP client %q (%s) connected\n", name, req.Params.ClientInfo.Version)
 	})
-	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots(), mcpserver.WithLogging(), mcpserver.WithHooks(hooks))
+	// WithRecovery wraps every tool handler so a panic surfaces as a tool error
+	// rather than tearing down the stdio session (gitea-mcp lesson, #426).
+	mcpSrv := mcpserver.NewMCPServer(serverName, serverVersion, mcpserver.WithToolCapabilities(false), mcpserver.WithRoots(), mcpserver.WithLogging(), mcpserver.WithRecovery(), mcpserver.WithHooks(hooks))
 	s.mcpSrv = mcpSrv
 	s.registerTools(mcpSrv)
 	s.registerResources(mcpSrv)
@@ -238,87 +241,147 @@ func (s *server) nudge(m *mailbox.Message) {
 	})
 }
 
+// toolHandler runs one tool. For preamble tools, rc carries the resolved
+// (workDir, actor, fam context); for bypassPreamble tools (orient) rc is nil and
+// the handler resolves what it needs itself.
+type toolHandler func(ctx context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error)
+
+// dispatchEntry is one registered tool: its schema plus the handler to dispatch to.
+// Replacing the old per-name switch with a table of these gives every tool a
+// first-class handler value — the single point a future interceptor (CattleSeam)
+// can wrap uniformly (#426 / #425).
+type dispatchEntry struct {
+	tool    mcplib.Tool
+	handler toolHandler
+	// bypassPreamble skips the shared identity/serve-gate/cross-actor preamble.
+	// Only orient sets it: it is a read-only orientation probe that resolves the
+	// discovery root itself (the authoritative path on system-wide mounts, #132).
+	bypassPreamble bool
+}
+
+// resolvedCtx is the output of the shared preamble, handed to every (non-bypass)
+// tool handler: the resolved work dir, executing actor, and fam context.
+type resolvedCtx struct {
+	workDir string
+	actor   string
+	c       famctx.Context
+}
+
+// registerTools builds the dispatch table and registers each tool on the MCP
+// server. The handler closure routes back through callTool so the shared
+// preamble runs uniformly.
 func (s *server) registerTools(mcpSrv *mcpserver.MCPServer) {
-	add := func(tool mcplib.Tool) {
-		mcpSrv.AddTool(tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+	s.entries = s.buildEntries()
+	for _, e := range s.entries {
+		mcpSrv.AddTool(e.tool, func(ctx context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
 			return s.callTool(ctx, req.Params.Name, req.GetArguments())
 		})
 	}
-
-	add(mcplib.NewTool("irc_write",
-		mcplib.WithDescription("Write a raw line to the IRC client's input pipe."),
-		mcplib.WithString("message", mcplib.Required()),
-		mcplib.WithString("target"),
-		mcplib.WithString("actor"),
-		mcplib.WithString("work_dir"),
-	))
-	add(mcplib.NewTool("irc_read",
-		mcplib.WithDescription("Read lines from the IRC client's log (raw tail, no filtering)."),
-		mcplib.WithNumber("lines"),
-		mcplib.WithNumber("from_offset"),
-		mcplib.WithString("actor"),
-		mcplib.WithString("work_dir"),
-	))
-	add(mcplib.NewTool("irc_wait",
-		mcplib.WithDescription("Block until new IRC log lines relevant to the actor appear, or timeout."),
-		mcplib.WithNumber("timeout_s"),
-		mcplib.WithNumber("from_offset"),
-		mcplib.WithString("actor"),
-		mcplib.WithString("work_dir"),
-	))
-	add(mcplib.NewTool("irc_replay",
-		mcplib.WithDescription("Replay durable shared channel history logs."),
-		mcplib.WithString("since"),
-		mcplib.WithString("channels"),
-		mcplib.WithString("actor"),
-		mcplib.WithString("work_dir"),
-	))
-	add(mcplib.NewTool("worktree_init",
-		mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
-		mcplib.WithString("target_actor", mcplib.Required()),
-		mcplib.WithString("work_dir"),
-	))
-	add(mcplib.NewTool("worktree_sync",
-		mcplib.WithDescription("Safely bring the worktree up to date with main (auto-stash, merge main, pop stash)."),
-		mcplib.WithString("work_dir"),
-	))
-	add(mcplib.NewTool("orient",
-		mcplib.WithDescription("Return this fam's discovery root (fam, actor, health, channels) as botfam.discovery.v1 JSON, resolved from work_dir. Use this when botfam:/// shows <unresolved> (e.g. a system-wide MCP mount). Defaults work_dir to $PWD."),
-		mcplib.WithString("work_dir"),
-	))
 }
 
-func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
-	// orient is a read-only identity/orientation probe: it bypasses the
-	// membership/identity preamble and resolves the discovery root for the
-	// given work_dir (defaulting to $PWD). This is the authoritative path on
-	// system-wide mounts where the param-less botfam:/// resource can't see the
-	// caller's worktree (#132).
-	if name == "orient" {
-		wd := argString(args, "work_dir")
-		via := "work_dir"
-		cwd, err := os.Getwd()
-		if wd == "" || (wd == "." && err == nil && cwd == "/") {
-			wd, via = s.resolveDiscoveryWorkDirVia(ctx)
-		}
-		if wd == "" {
-			wd = os.Getenv("PWD")
-			via = "pwd"
-		}
-		if wd == "" {
-			wd = "."
-			via = "default"
-		}
-		s.maybeStartIngestForWorkDir(ctx, wd)
-		d := buildDiscoveryData(ctx, wd, s.clientName())
-		d.resolvedVia = via
-		body, err := renderIndexJSON(d)
-		if err != nil {
-			return nil, err
-		}
-		return mcplib.NewToolResultText(string(body)), nil
+// buildEntries constructs the tool dispatch table. It is pure (no server I/O),
+// so callTool can lazily populate it for direct-call unit tests that don't go
+// through Serve/registerTools.
+func (s *server) buildEntries() map[string]dispatchEntry {
+	entries := make(map[string]dispatchEntry)
+	add := func(e dispatchEntry) {
+		entries[e.tool.Name] = e
 	}
 
+	add(dispatchEntry{
+		tool: mcplib.NewTool("irc_write",
+			mcplib.WithDescription("Write a raw line to the IRC client's input pipe."),
+			mcplib.WithString("message", mcplib.Required()),
+			mcplib.WithString("target"),
+			mcplib.WithString("actor"),
+			mcplib.WithString("work_dir"),
+		),
+		handler: s.handleIrcWrite,
+	})
+	add(dispatchEntry{
+		tool: mcplib.NewTool("irc_read",
+			mcplib.WithDescription("Read lines from the IRC client's log (raw tail, no filtering)."),
+			mcplib.WithNumber("lines"),
+			mcplib.WithNumber("from_offset"),
+			mcplib.WithString("actor"),
+			mcplib.WithString("work_dir"),
+		),
+		handler: s.handleIrcRead,
+	})
+	add(dispatchEntry{
+		tool: mcplib.NewTool("irc_wait",
+			mcplib.WithDescription("Block until new IRC log lines relevant to the actor appear, or timeout."),
+			mcplib.WithNumber("timeout_s"),
+			mcplib.WithNumber("from_offset"),
+			mcplib.WithString("actor"),
+			mcplib.WithString("work_dir"),
+		),
+		handler: s.handleIrcWait,
+	})
+	add(dispatchEntry{
+		tool: mcplib.NewTool("irc_replay",
+			mcplib.WithDescription("Replay durable shared channel history logs."),
+			mcplib.WithString("since"),
+			mcplib.WithString("channels"),
+			mcplib.WithString("actor"),
+			mcplib.WithString("work_dir"),
+		),
+		handler: s.handleIrcReplay,
+	})
+	add(dispatchEntry{
+		tool: mcplib.NewTool("worktree_init",
+			mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
+			mcplib.WithString("target_actor", mcplib.Required()),
+			mcplib.WithString("work_dir"),
+		),
+		handler: s.handleWorktreeInit,
+	})
+	add(dispatchEntry{
+		tool: mcplib.NewTool("worktree_sync",
+			mcplib.WithDescription("Safely bring the worktree up to date with main (auto-stash, merge main, pop stash)."),
+			mcplib.WithString("work_dir"),
+		),
+		handler: s.handleWorktreeSync,
+	})
+	add(dispatchEntry{
+		tool: mcplib.NewTool("orient",
+			mcplib.WithDescription("Return this fam's discovery root (fam, actor, health, channels) as botfam.discovery.v1 JSON, resolved from work_dir. Use this when botfam:/// shows <unresolved> (e.g. a system-wide MCP mount). Defaults work_dir to $PWD."),
+			mcplib.WithString("work_dir"),
+		),
+		handler:        s.handleOrient,
+		bypassPreamble: true,
+	})
+
+	return entries
+}
+
+// callTool is the single dispatch point: look up the registered entry, run the
+// shared preamble (unless the entry opts out), then invoke its handler. The
+// preamble is the one place a future CattleSeam interceptor wraps every RPC.
+func (s *server) callTool(ctx context.Context, name string, args map[string]any) (*mcplib.CallToolResult, error) {
+	if s.entries == nil {
+		// Direct-call unit tests construct &server{} without Serve/registerTools.
+		s.entries = s.buildEntries()
+	}
+	entry, ok := s.entries[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown tool %q", name)
+	}
+	if entry.bypassPreamble {
+		return entry.handler(ctx, nil, args)
+	}
+	rc, err := s.runPreamble(ctx, name, args)
+	if err != nil {
+		return nil, err
+	}
+	return entry.handler(ctx, rc, args)
+}
+
+// runPreamble resolves the work dir, fam context, and executing actor, then
+// enforces the fail-closed serve gate and cross-actor read-only rule shared by
+// every non-bypass tool. It also lazily starts the spool ingester. The result
+// is handed to the tool handler.
+func (s *server) runPreamble(ctx context.Context, name string, args map[string]any) (*resolvedCtx, error) {
 	workDir := argString(args, "work_dir")
 	cwd, err := os.Getwd()
 	if workDir == "" || (workDir == "." && err == nil && cwd == "/") {
@@ -375,166 +438,193 @@ func (s *server) callTool(ctx context.Context, name string, args map[string]any)
 	// (runs for any resolved agent; fires at most once per server).
 	s.maybeStartIngest(workDir, actor)
 
-	if name == "worktree_init" {
-		targetActor := argString(args, "target_actor")
-		if targetActor == "" {
-			return nil, errors.New("target_actor is required")
-		}
-		var buf bytes.Buffer
-		err := provision.InitWorktree([]string{targetActor, workDir}, &buf)
-		if err != nil {
-			return nil, err
-		}
-		return toolResult(map[string]any{"ok": true, "output": buf.String()})
+	return &resolvedCtx{workDir: workDir, actor: actor, c: c}, nil
+}
+
+// handleOrient is the read-only orientation probe. It bypasses the preamble and
+// resolves the discovery root for the given work_dir (defaulting to $PWD) — the
+// authoritative path on system-wide mounts where the param-less botfam:///
+// resource can't see the caller's worktree (#132).
+func (s *server) handleOrient(ctx context.Context, _ *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+	wd := argString(args, "work_dir")
+	via := "work_dir"
+	cwd, err := os.Getwd()
+	if wd == "" || (wd == "." && err == nil && cwd == "/") {
+		wd, via = s.resolveDiscoveryWorkDirVia(ctx)
+	}
+	if wd == "" {
+		wd = os.Getenv("PWD")
+		via = "pwd"
+	}
+	if wd == "" {
+		wd = "."
+		via = "default"
+	}
+	s.maybeStartIngestForWorkDir(ctx, wd)
+	d := buildDiscoveryData(ctx, wd, s.clientName())
+	d.resolvedVia = via
+	body, err := renderIndexJSON(d)
+	if err != nil {
+		return nil, err
+	}
+	return mcplib.NewToolResultText(string(body)), nil
+}
+
+func (s *server) handleWorktreeInit(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+	targetActor := argString(args, "target_actor")
+	if targetActor == "" {
+		return nil, errors.New("target_actor is required")
+	}
+	var buf bytes.Buffer
+	if err := provision.InitWorktree([]string{targetActor, rc.workDir}, &buf); err != nil {
+		return nil, err
+	}
+	return toolResult(map[string]any{"ok": true, "output": buf.String()})
+}
+
+func (s *server) handleWorktreeSync(_ context.Context, rc *resolvedCtx, _ map[string]any) (*mcplib.CallToolResult, error) {
+	var buf bytes.Buffer
+	if err := provision.SyncWorktree([]string{rc.workDir}, &buf); err != nil {
+		return nil, err
+	}
+	return toolResult(map[string]any{"ok": true, "output": buf.String()})
+}
+
+func (s *server) handleIrcWrite(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+	message := argString(args, "message")
+	if message == "" {
+		return nil, errors.New("message is required")
+	}
+	target := argString(args, "target")
+
+	absWorkDir, err := filepath.Abs(rc.workDir)
+	if err != nil {
+		return nil, err
 	}
 
-	if name == "worktree_sync" {
-		var buf bytes.Buffer
-		err := provision.SyncWorktree([]string{workDir}, &buf)
-		if err != nil {
-			return nil, err
-		}
-		return toolResult(map[string]any{"ok": true, "output": buf.String()})
+	fifoPath := filepath.Join(absWorkDir, "scratch", "irc", rc.actor, "in")
+	fi, err := os.Stat(fifoPath)
+	if err != nil {
+		return nil, fmt.Errorf("IRC FIFO not found at %s: %w", fifoPath, err)
+	}
+	if fi.Mode()&os.ModeNamedPipe == 0 {
+		return nil, fmt.Errorf("path %s is not a named pipe", fifoPath)
 	}
 
-	if name == "irc_write" {
-		message := argString(args, "message")
-		if message == "" {
-			return nil, errors.New("message is required")
-		}
-		target := argString(args, "target")
+	f, err := os.OpenFile(fifoPath, os.O_WRONLY|syscall.O_NONBLOCK, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open IRC FIFO (is the client running?): %w", err)
+	}
+	defer f.Close()
 
-		absWorkDir, err := filepath.Abs(workDir)
-		if err != nil {
-			return nil, err
-		}
-
-		fifoPath := filepath.Join(absWorkDir, "scratch", "irc", actor, "in")
-		fi, err := os.Stat(fifoPath)
-		if err != nil {
-			return nil, fmt.Errorf("IRC FIFO not found at %s: %w", fifoPath, err)
-		}
-		if fi.Mode()&os.ModeNamedPipe == 0 {
-			return nil, fmt.Errorf("path %s is not a named pipe", fifoPath)
-		}
-
-		f, err := os.OpenFile(fifoPath, os.O_WRONLY|syscall.O_NONBLOCK, 0600)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open IRC FIFO (is the client running?): %w", err)
-		}
-		defer f.Close()
-
-		msg := message
-		if target != "" {
-			msg = fmt.Sprintf("/msg %s %s", target, message)
-		}
-		if !strings.HasSuffix(msg, "\n") {
-			msg += "\n"
-		}
-
-		if _, err := f.WriteString(msg); err != nil {
-			return nil, fmt.Errorf("failed to write to IRC FIFO: %w", err)
-		}
-
-		return toolResult(map[string]any{"ok": true})
+	msg := message
+	if target != "" {
+		msg = fmt.Sprintf("/msg %s %s", target, message)
+	}
+	if !strings.HasSuffix(msg, "\n") {
+		msg += "\n"
 	}
 
-	if name == "irc_read" {
-		absWorkDir, err := filepath.Abs(workDir)
-		if err != nil {
-			return nil, err
-		}
-
-		logPath := filepath.Join(absWorkDir, "scratch", "irc", c.Actor, "log")
-		if _, err := os.Stat(logPath); err != nil {
-			return nil, fmt.Errorf("IRC log not found at %s (is the client running?): %w", logPath, err)
-		}
-
-		maxLines := int(argFloatDefault(args, "lines", 0))
-		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
-		lines, nextOffset, err := irc.ReadIrcLog(logPath, fromOffset, maxLines)
-		if err != nil {
-			return nil, err
-		}
-		if lines == nil {
-			lines = []string{}
-		}
-		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
+	if _, err := f.WriteString(msg); err != nil {
+		return nil, fmt.Errorf("failed to write to IRC FIFO: %w", err)
 	}
 
-	if name == "irc_wait" {
-		absWorkDir, err := filepath.Abs(workDir)
-		if err != nil {
-			return nil, err
-		}
+	return toolResult(map[string]any{"ok": true})
+}
 
-		logPath := filepath.Join(absWorkDir, "scratch", "irc", c.Actor, "log")
-		timeoutS := argFloatDefault(args, "timeout_s", 60)
-		if timeoutS <= 0 {
-			timeoutS = 60
-		}
-		if timeoutS > 300 {
-			timeoutS = 300
-		}
-		fromOffset := int64(argFloatDefault(args, "from_offset", -1))
-		// The FIFO dir is keyed by the bare actor, but the agent's own messages
-		// appear under the fam-scoped nick (claude-botfam) in the log — match on
-		// the scoped nick or the wait wakes on its own traffic (#137; matches the
-		// `botfam irc-wait` CLI fix).
-		matchNick := c.ScopedNick
-		if actor != c.Actor {
-			matchNick = famconfig.FamScopedNick(actor, c.Slug)
-		}
-		lines, nextOffset, timedOut, err := irc.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
-		if err != nil {
-			return nil, err
-		}
-		if lines == nil {
-			lines = []string{}
-		}
-		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset, "timed_out": timedOut})
+func (s *server) handleIrcRead(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+	absWorkDir, err := filepath.Abs(rc.workDir)
+	if err != nil {
+		return nil, err
 	}
 
-	if name == "irc_replay" {
-		historyPath := filepath.Join(c.FamDir, famconfig.FamLedgerDirName(c.Registry), "history.jsonl")
-		since := argString(args, "since")
-		channelsStr := argString(args, "channels")
+	logPath := filepath.Join(absWorkDir, "scratch", "irc", rc.c.Actor, "log")
+	if _, err := os.Stat(logPath); err != nil {
+		return nil, fmt.Errorf("IRC log not found at %s (is the client running?): %w", logPath, err)
+	}
 
-		// Parse filter channels
-		var filterChans []string
-		if channelsStr != "" {
-			for _, ch := range strings.Split(channelsStr, ",") {
-				ch = strings.TrimSpace(ch)
-				if ch != "" {
-					filterChans = append(filterChans, ch)
-				}
+	maxLines := int(argFloatDefault(args, "lines", 0))
+	fromOffset := int64(argFloatDefault(args, "from_offset", -1))
+	lines, nextOffset, err := irc.ReadIrcLog(logPath, fromOffset, maxLines)
+	if err != nil {
+		return nil, err
+	}
+	if lines == nil {
+		lines = []string{}
+	}
+	return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
+}
+
+func (s *server) handleIrcWait(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+	absWorkDir, err := filepath.Abs(rc.workDir)
+	if err != nil {
+		return nil, err
+	}
+
+	logPath := filepath.Join(absWorkDir, "scratch", "irc", rc.c.Actor, "log")
+	timeoutS := argFloatDefault(args, "timeout_s", 60)
+	if timeoutS <= 0 {
+		timeoutS = 60
+	}
+	if timeoutS > 300 {
+		timeoutS = 300
+	}
+	fromOffset := int64(argFloatDefault(args, "from_offset", -1))
+	// The FIFO dir is keyed by the bare actor, but the agent's own messages
+	// appear under the fam-scoped nick (claude-botfam) in the log — match on
+	// the scoped nick or the wait wakes on its own traffic (#137; matches the
+	// `botfam irc-wait` CLI fix).
+	matchNick := rc.c.ScopedNick
+	if rc.actor != rc.c.Actor {
+		matchNick = famconfig.FamScopedNick(rc.actor, rc.c.Slug)
+	}
+	lines, nextOffset, timedOut, err := irc.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
+	if err != nil {
+		return nil, err
+	}
+	if lines == nil {
+		lines = []string{}
+	}
+	return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset, "timed_out": timedOut})
+}
+
+func (s *server) handleIrcReplay(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+	historyPath := filepath.Join(rc.c.FamDir, famconfig.FamLedgerDirName(rc.c.Registry), "history.jsonl")
+	since := argString(args, "since")
+	channelsStr := argString(args, "channels")
+
+	// Parse filter channels
+	var filterChans []string
+	if channelsStr != "" {
+		for _, ch := range strings.Split(channelsStr, ",") {
+			ch = strings.TrimSpace(ch)
+			if ch != "" {
+				filterChans = append(filterChans, ch)
 			}
-		} else {
-			// default to main + ccrep channels
-			mainChan, ccrepChan := famconfig.FamChannels(c.Registry)
-			if mainChan != "" {
-				filterChans = append(filterChans, mainChan)
-			}
-			if ccrepChan != "" {
-				filterChans = append(filterChans, ccrepChan)
-			}
 		}
-
-		matchNick := c.ScopedNick
-		if actor != c.Actor {
-			matchNick = famconfig.FamScopedNick(actor, c.Slug)
+	} else {
+		// default to main + ccrep channels
+		mainChan, ccrepChan := famconfig.FamChannels(rc.c.Registry)
+		if mainChan != "" {
+			filterChans = append(filterChans, mainChan)
 		}
-		lines, nextOffset, err := irc.ReplayHistory(historyPath, actor, matchNick, since, filterChans)
-		if err != nil {
-			return nil, err
+		if ccrepChan != "" {
+			filterChans = append(filterChans, ccrepChan)
 		}
-		if lines == nil {
-			lines = []string{}
-		}
-		return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
 	}
 
-	return nil, fmt.Errorf("unknown tool %q", name)
+	matchNick := rc.c.ScopedNick
+	if rc.actor != rc.c.Actor {
+		matchNick = famconfig.FamScopedNick(rc.actor, rc.c.Slug)
+	}
+	lines, nextOffset, err := irc.ReplayHistory(historyPath, rc.actor, matchNick, since, filterChans)
+	if err != nil {
+		return nil, err
+	}
+	if lines == nil {
+		lines = []string{}
+	}
+	return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
 }
 
 // resolveClientActor resolves the executing client actor by checking the MCP client's workspace roots.
