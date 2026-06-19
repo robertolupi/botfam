@@ -101,6 +101,8 @@ type externalReviewOpts struct {
 // selected by --design (vs the session-review default).
 const defaultDesignPrompt = "doc/review/DESIGN-REVIEW-PROMPT.md"
 
+var externalReviewHTTPClient = &http.Client{Timeout: 300 * time.Second}
+
 // loadSecrets parses a dotenv-style KEY=VALUE file into a map. Blank lines and
 // '#' comments are skipped; surrounding quotes on the value are stripped. Values
 // are never logged. It is the file-backed bridge to the #393 secret store: keys
@@ -522,8 +524,7 @@ func runReview(ctx context.Context, baseURL, apiKey, model, prompt string) (stri
 	} else {
 		opts = append(opts, option.WithAPIKey("none")) // ollama ignores it
 	}
-	httpClient := &http.Client{Timeout: 300 * time.Second}
-	opts = append(opts, option.WithHTTPClient(httpClient))
+	opts = append(opts, option.WithHTTPClient(externalReviewHTTPClient))
 	client := openai.NewClient(opts...)
 	resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 		Model:    shared.ChatModel(model),

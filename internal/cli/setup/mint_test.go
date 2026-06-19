@@ -10,19 +10,39 @@ import (
 	"testing"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func clientForHandler(handler http.Handler) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			return rec.Result(), nil
+		}),
+	}
+}
+
 func TestMintToken(t *testing.T) {
 	var gotUser, gotPass, gotPath string
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	oldClient := mintHTTPClient
+	mintHTTPClient = clientForHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotUser, gotPass, _ = r.BasicAuth()
 		gotPath = r.URL.Path
+		defer r.Body.Close()
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"sha1":"abc123token","name":"botfam"}`))
 	}))
-	defer srv.Close()
+	t.Cleanup(func() {
+		mintHTTPClient = oldClient
+	})
 
-	tok, err := mintToken(srv.URL, "claude-bot", "hunter2", []string{"write:repository", "write:issue"})
+	tok, err := mintToken("http://forge.test", "claude-bot", "hunter2", []string{"write:repository", "write:issue"})
 	if err != nil {
 		t.Fatalf("mintToken: %v", err)
 	}
@@ -41,12 +61,16 @@ func TestMintToken(t *testing.T) {
 }
 
 func TestMintTokenError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	oldClient := mintHTTPClient
+	mintHTTPClient = clientForHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"message":"bad credentials"}`))
 	}))
-	defer srv.Close()
-	if _, err := mintToken(srv.URL, "claude-bot", "wrong", nil); err == nil {
+	t.Cleanup(func() {
+		mintHTTPClient = oldClient
+	})
+	if _, err := mintToken("http://forge.test", "claude-bot", "wrong", nil); err == nil {
 		t.Fatal("expected error on 401")
 	}
 }

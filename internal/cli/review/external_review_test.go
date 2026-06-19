@@ -14,6 +14,22 @@ import (
 	"github.com/robertolupi/botfam/internal/cli/cmdutil"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func clientForHandler(handler http.Handler) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			return rec.Result(), nil
+		}),
+	}
+}
+
 // zeroReviewOpts builds options that pass the early model/material gates but
 // produce no reviews: an OpenAI model is selected while OPENAI_API_KEY is unset,
 // so the provider is skipped and `ran` stays empty.
@@ -67,15 +83,16 @@ func TestExternalReviewAllowZeroReviews(t *testing.T) {
 	}
 }
 
-// chatCompletionStub is a minimal OpenAI-compatible /v1/chat/completions server
+// chatCompletionStub is a minimal OpenAI-compatible /v1/chat/completions handler
 // that echoes a per-request review body, used to drive runExternalReview end to
 // end without real providers.
-func chatCompletionStub(t *testing.T) *httptest.Server {
+func chatCompletionStub(t *testing.T) string {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/chat/completions") {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
+		defer r.Body.Close()
 		var body struct {
 			Model string `json:"model"`
 		}
@@ -83,12 +100,17 @@ func chatCompletionStub(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"x","object":"chat.completion","model":"` + body.Model +
 			`","choices":[{"index":0,"message":{"role":"assistant","content":"review by ` + body.Model + `"},"finish_reason":"stop"}]}`))
-	}))
+	})
+	oldClient := externalReviewHTTPClient
+	externalReviewHTTPClient = clientForHandler(handler)
+	t.Cleanup(func() {
+		externalReviewHTTPClient = oldClient
+	})
+	return "http://chat-completion.test"
 }
 
 func TestExternalReviewWritesAllModelReviews(t *testing.T) {
-	server := chatCompletionStub(t)
-	defer server.Close()
+	chatCompletionURL := chatCompletionStub(t)
 
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.md")
@@ -105,7 +127,7 @@ func TestExternalReviewWritesAllModelReviews(t *testing.T) {
 		promptFile:  promptFile,
 		outDir:      outDir,
 		sessionFile: sessionFile,
-		ollamaHost:  server.URL,
+		ollamaHost:  chatCompletionURL,
 		ollama:      []string{"m1", "m2", "m3"},
 	}
 
@@ -214,8 +236,7 @@ func TestMergeSecrets(t *testing.T) {
 // TestExternalReviewWikiAndLMStudio drives the LM Studio provider and the
 // --wiki material source end to end against the chat-completions stub.
 func TestExternalReviewWikiAndLMStudio(t *testing.T) {
-	server := chatCompletionStub(t)
-	defer server.Close()
+	chatCompletionURL := chatCompletionStub(t)
 
 	dir := t.TempDir()
 	promptFile := filepath.Join(dir, "prompt.md")
@@ -234,7 +255,7 @@ func TestExternalReviewWikiAndLMStudio(t *testing.T) {
 	opts := externalReviewOpts{
 		promptFile:   promptFile,
 		outDir:       outDir,
-		lmstudioHost: server.URL,
+		lmstudioHost: chatCompletionURL,
 		lmstudio:     []string{"local-m"},
 		wiki:         []string{"MyPage"}, // also exercises the .md-suffix-stripping path below
 		wikiDir:      wikiDir,
