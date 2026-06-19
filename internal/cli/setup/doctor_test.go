@@ -36,7 +36,7 @@ func TestEvaluateGitIdentity(t *testing.T) {
 		{"whitespace name fails", "claude", "   ", "x@y.z", doctorFail},
 		{"mismatch warns", "claude", "agy", "x@y.z", doctorWarn},
 		{"missing email warns", "claude", "claude", "", doctorWarn},
-		{"match with email ok", "claude", "claude", "roberto.lupi+claude@gmail.com", doctorOK},
+		{"match with email ok", "claude", "claude", "dev+claude@example.com", doctorOK},
 		{"unresolved actor with name+email ok", "", "claude", "x@y.z", doctorOK},
 		{"unresolved actor empty name fails", "", "", "", doctorFail},
 	}

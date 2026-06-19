@@ -20,13 +20,22 @@ type WikiGit struct {
 	branch string // wiki default branch (gitea: "master")
 }
 
-// gitEmail maps an actor to its per-worktree commit identity, matching the
-// botfam convention (roberto.lupi+<actor>@gmail.com).
-func gitEmail(actor string) string {
+// gitEmail derives the actor's wiki-commit identity by plus-addressing the
+// host's configured git user.email with the actor name (e.g. dev@example.com →
+// dev+claude@example.com), mirroring harness.RenderGitIdentity. When the host
+// has no configured email it falls back to a neutral, non-routable identity so
+// no operator's personal address is baked in.
+func gitEmail(dir, actor string) string {
 	if actor == "" {
 		actor = "botfam"
 	}
-	return "roberto.lupi+" + actor + "@gmail.com"
+	host, _ := runGit(dir, "config", "user.email")
+	host = strings.TrimSpace(host)
+	at := strings.IndexByte(host, '@')
+	if at <= 0 {
+		return actor + "@botfam.invalid"
+	}
+	return host[:at] + "+" + actor + host[at:]
 }
 
 // CloneWiki clones authURL (a token-authenticated <repo>.wiki.git URL) into dir.
@@ -81,10 +90,11 @@ func (w *WikiGit) WriteCommit(rel, content, author, message string) error {
 	if _, err := w.run("add", rel); err != nil {
 		return err
 	}
-	ident := fmt.Sprintf("%s <%s>", author, gitEmail(author))
+	email := gitEmail(w.dir, author)
+	ident := fmt.Sprintf("%s <%s>", author, email)
 	if out, err := w.run(
 		"-c", "user.name="+author,
-		"-c", "user.email="+gitEmail(author),
+		"-c", "user.email="+email,
 		"commit", "-m", message, "--author", ident,
 	); err != nil {
 		return fmt.Errorf("commit: %v: %s", err, out)

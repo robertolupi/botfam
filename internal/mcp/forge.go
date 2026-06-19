@@ -62,9 +62,16 @@ func addForgeEntries(entries map[string]dispatchEntry) {
 			origName := tool.Name
 			tool.Name = forgeToolPrefix + origName
 			ro := tool.Annotations.ReadOnlyHint
+			h := st.Handler
+			// The wiki tools need transparent handling of Gitea's ".-" slug
+			// escaping; gitea-mcp upstream lacks it, so botfam wraps it here
+			// rather than forking gitea-mcp (#464). See wikiSlugFallback.
+			if origName == wiki.WikiReadToolName || origName == wiki.WikiWriteToolName {
+				h = wikiSlugFallback(h)
+			}
 			entries[tool.Name] = dispatchEntry{
 				tool:     tool,
-				handler:  forgeHandler(origName, st.Handler),
+				handler:  forgeHandler(origName, h),
 				readOnly: ro != nil && *ro,
 			}
 		}

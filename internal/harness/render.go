@@ -99,7 +99,7 @@ func lookGopls() string {
 
 // RenderGitIdentity sets the worktree's git user.name/user.email from the
 // canonical agent entry. When email is empty it defaults to the host git email
-// plus-addressed with the agent name (roberto.lupi@x → roberto.lupi+claude@x),
+// plus-addressed with the agent name (dev@example.com → dev+claude@example.com),
 // the existing convention. Replaces the per-worktree self-configuration that let
 // identities drift (§4.5).
 func RenderGitIdentity(worktree, name, email string) error {

@@ -69,10 +69,10 @@ func gitInit(t *testing.T, dir string) {
 // slug dc) registered at famDir, with the standard roster.
 func deepCutsConfig(famDir string) famconfig.Config {
 	return famconfig.Config{
-		ForgeURL: "http://gitea.home.rlupi.com:3000/",
+		ForgeURL: "http://gitea.example.com:3000/",
 		Agents: map[string]famconfig.AgentConfig{
 			"claude": {Harness: "claude-code", ForgeUser: "claude-bot"},
-			"agy":    {Harness: "antigravity", ForgeUser: "agy-bot", Email: "roberto.lupi+agy@gmail.com"},
+			"agy":    {Harness: "antigravity", ForgeUser: "agy-bot", Email: "dev+agy@example.com"},
 		},
 		Users: map[string]famconfig.AgentConfig{"rlupi": {ForgeUser: "rlupi"}},
 		Repos: map[string]famconfig.RepoConfig{

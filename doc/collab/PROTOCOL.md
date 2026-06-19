@@ -259,7 +259,7 @@ for by a 2026-06-12 incident:
   own worktree.
 - **Executor merges carry executor identity.** The main checkout matches no
   one's `includeIf`, so merge with explicit identity:
-  `git -c user.name=<actor> -c user.email=roberto.lupi+<actor>@gmail.com merge --no-ff <sha>`.
+  `git -c user.name=<actor> -c user.email=dev+<actor>@example.com merge --no-ff <sha>`.
 - **Worktree identity is set per-worktree, not via includeIf alone.** A
   `user.*` entry in the shared `.git/config` silently overrides `includeIf` for
   every linked worktree. With `extensions.worktreeConfig` enabled (repo-wide

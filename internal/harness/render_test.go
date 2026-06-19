@@ -80,7 +80,7 @@ func TestRenderGitIdentity(t *testing.T) {
 	wt := t.TempDir()
 	gitInit(t, wt) // from resolvefam_test.go
 
-	if err := RenderGitIdentity(wt, "claude", "roberto.lupi+claude@gmail.com"); err != nil {
+	if err := RenderGitIdentity(wt, "claude", "dev+claude@example.com"); err != nil {
 		t.Fatalf("RenderGitIdentity: %v", err)
 	}
 	name, _ := gitexec.One(wt, "config", "--worktree", "user.name")
@@ -88,7 +88,7 @@ func TestRenderGitIdentity(t *testing.T) {
 	if name != "claude" {
 		t.Errorf("user.name = %q", name)
 	}
-	if email != "roberto.lupi+claude@gmail.com" {
+	if email != "dev+claude@example.com" {
 		t.Errorf("user.email = %q", email)
 	}
 }
@@ -96,21 +96,21 @@ func TestRenderGitIdentity(t *testing.T) {
 func TestRenderGitIdentityEmailDefault(t *testing.T) {
 	wt := t.TempDir()
 	gitInit(t, wt)
-	if _, err := gitexec.Output(wt, "config", "user.email", "roberto.lupi@gmail.com"); err != nil {
+	if _, err := gitexec.Output(wt, "config", "user.email", "dev@example.com"); err != nil {
 		t.Fatal(err)
 	}
 	if err := RenderGitIdentity(wt, "agy", ""); err != nil {
 		t.Fatalf("RenderGitIdentity: %v", err)
 	}
 	email, _ := gitexec.One(wt, "config", "--worktree", "user.email")
-	if email != "roberto.lupi+agy@gmail.com" {
-		t.Errorf("plus-addressed email = %q, want roberto.lupi+agy@gmail.com", email)
+	if email != "dev+agy@example.com" {
+		t.Errorf("plus-addressed email = %q, want dev+agy@example.com", email)
 	}
 }
 
 func TestPlusAddress(t *testing.T) {
 	cases := map[string]string{
-		"roberto.lupi@gmail.com": "roberto.lupi+claude@gmail.com",
+		"dev@example.com": "dev+claude@example.com",
 		"noatsign":               "noatsign",
 		"":                       "",
 	}

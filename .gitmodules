@@ -1,7 +1,6 @@
 [submodule "third_party/gitea-mcp"]
 	path = third_party/gitea-mcp
-	url = http://gitea:3000/botfam/gitea-mcp.git
-	branch = botfam
+	url = https://gitea.com/gitea/gitea-mcp.git
 [submodule "third_party/mangle-go"]
 	path = third_party/mangle-go
 	url = https://codeberg.org/TauCeti/mangle-go.git
