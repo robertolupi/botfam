@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -8,18 +9,37 @@ import (
 	"strings"
 	"testing"
 
+	giteasdk "gitea.dev/sdk"
+
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/forge"
 )
 
 type fakeIssueClient struct {
-	issue *forge.Issue
-	err   error
+	issue     *forge.Issue
+	issues    map[int]*forge.Issue
+	wikiPages map[string]*forge.WikiPage
+	err       error
+	wikiErr   error
 }
 
-func (f fakeIssueClient) GetIssue(_ context.Context, _ int) (*forge.Issue, error) {
+func (f fakeIssueClient) GetIssue(_ context.Context, n int) (*forge.Issue, error) {
+	if f.issues != nil {
+		if issue, ok := f.issues[n]; ok {
+			return issue, nil
+		}
+	}
 	return f.issue, f.err
+}
+
+func (f fakeIssueClient) GetWikiPage(_ context.Context, name string) (*forge.WikiPage, error) {
+	if f.wikiPages != nil {
+		if page, ok := f.wikiPages[name]; ok {
+			return page, nil
+		}
+	}
+	return nil, f.wikiErr
 }
 
 func testRunContext(t *testing.T, worktree string) famctx.Context {
@@ -177,6 +197,149 @@ func TestRunIssueShellCommand(t *testing.T) {
 	}
 }
 
+func TestRunIssuePrintsArtifactDirectory(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 19, Title: "Print artifacts"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+	var out bytes.Buffer
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      19,
+		target:     "success",
+		captureDir: outDir,
+		output:     &out,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "run artifacts: ") {
+		t.Fatalf("output missing artifact directory: %q", got)
+	}
+	if strings.Contains(got, "run.json") {
+		t.Fatalf("non-verbose output should not list files: %q", got)
+	}
+}
+
+func TestRunIssueVerbosePrintsArtifactFiles(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 20, Title: "Print artifact files"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+	var out bytes.Buffer
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      20,
+		target:     "success",
+		captureDir: outDir,
+		verbose:    true,
+		output:     &out,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	got := out.String()
+	if !strings.Contains(got, "run artifacts: ") {
+		t.Fatalf("output missing artifact directory: %q", got)
+	}
+	if !strings.Contains(got, "run.json") || !strings.Contains(got, "prompt.md") {
+		t.Fatalf("verbose output missing artifact files: %q", got)
+	}
+}
+
+func TestRunPromptResolvesForgeEntities(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{
+		issues: map[int]*forge.Issue{
+			123: {
+				Index:   123,
+				Title:   "Resolved referenced issue",
+				Body:    "Issue body",
+				HTMLURL: "http://gitea:3000/botfam/botfam/issues/123",
+			},
+		},
+		wikiPages: map[string]*forge.WikiPage{
+			"Architecture": {
+				WikiPage: giteasdk.WikiPage{
+					Title:   "Architecture",
+					HTMLURL: "http://gitea:3000/botfam/botfam/wiki/Architecture",
+				},
+			},
+		},
+	}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		prompt:     "Design how to approach #123 using [[Architecture]]",
+		target:     "success",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.Goal.Prompt != "Design how to approach #123 using [[Architecture]]" {
+		t.Fatalf("Goal.Prompt = %q", env.Goal.Prompt)
+	}
+	if len(env.Goal.Entities) != 2 {
+		t.Fatalf("Goal.Entities len = %d, want 2: %#v", len(env.Goal.Entities), env.Goal.Entities)
+	}
+	if env.Goal.Entities[0].Kind != "issue" || env.Goal.Entities[0].Number != 123 || env.Goal.Entities[0].Name != "Resolved referenced issue" {
+		t.Fatalf("issue entity not resolved: %#v", env.Goal.Entities[0])
+	}
+	if env.Goal.Entities[1].Kind != "wiki_page" || env.Goal.Entities[1].Name != "Architecture" || env.Goal.Entities[1].URL == "" {
+		t.Fatalf("wiki entity not resolved: %#v", env.Goal.Entities[1])
+	}
+}
+
+func TestRunPromptResolvesPullRequestEntity(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{
+		issues: map[int]*forge.Issue{
+			456: {
+				Index:       456,
+				Title:       "Review run spike",
+				HTMLURL:     "http://gitea:3000/botfam/botfam/pulls/456",
+				PullRequest: &giteasdk.PullRequestMeta{},
+			},
+		},
+	}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		prompt:     "Review PR #456",
+		target:     "success",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if len(env.Goal.Entities) != 1 {
+		t.Fatalf("Goal.Entities len = %d, want 1: %#v", len(env.Goal.Entities), env.Goal.Entities)
+	}
+	if env.Goal.Entities[0].Kind != "pr" || env.Goal.Entities[0].Number != 456 {
+		t.Fatalf("PR entity not resolved: %#v", env.Goal.Entities[0])
+	}
+}
+
 func TestRunIssueHarnessCommandTarget(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)
@@ -319,8 +482,8 @@ func TestRunIssueAgentFlagAndPrompt(t *testing.T) {
 	if !strings.Contains(string(stdout), "Summarize this issue") {
 		t.Fatalf("prompt.md missing user prompt: %q", string(stdout))
 	}
-	if !strings.Contains(string(stdout), "Issue 18") {
-		t.Fatalf("prompt.md missing issue header: %q", string(stdout))
+	if !strings.Contains(string(stdout), "# Goal") {
+		t.Fatalf("prompt.md missing goal header: %q", string(stdout))
 	}
 	if !strings.Contains(string(stdout), "Agent flag prompt") {
 		t.Fatalf("prompt.md missing issue title: %q", string(stdout))
@@ -430,6 +593,12 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"duration_m
 	if !strings.Contains(env.HarnessCmd, "--json") {
 		t.Fatalf("HarnessCmd = %q, want codex --json", env.HarnessCmd)
 	}
+	if !strings.Contains(env.HarnessCmd, "-C") || !strings.Contains(env.HarnessCmd, repoRoot) {
+		t.Fatalf("HarnessCmd = %q, want codex worktree -C arg", env.HarnessCmd)
+	}
+	if !strings.Contains(env.HarnessCmd, "-o") || !strings.Contains(env.HarnessCmd, "final.md") {
+		t.Fatalf("HarnessCmd = %q, want codex final-message output arg", env.HarnessCmd)
+	}
 	transcriptPath := filepath.Join(runDir, "transcript.jsonl")
 	b, err := os.ReadFile(transcriptPath)
 	if err != nil {
@@ -445,6 +614,130 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"duration_m
 	}
 	if got := last["type"]; got != "result" {
 		t.Fatalf("last event type = %v, want result", got)
+	}
+}
+
+func TestRunIssueCodexHarnessCapturesTokenUsage(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   23,
+		Title:   "Codex usage",
+		Body:    "Emit usage.",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/23",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "codex")
+	fakeScript := []byte(`#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then
+    shift
+    printf 'final answer\n' > "$1"
+  fi
+  shift
+done
+printf '%s\n' '{"type":"thread.started","thread_id":"s1"}'
+printf '%s\n' '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"ok"}}'
+printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":40,"output_tokens":7,"reasoning_output_tokens":3}}'
+`)
+	if err := os.WriteFile(fakeCmd, fakeScript, 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      23,
+		agent:      "codex",
+		agentSet:   true,
+		prompt:     "Summarize this issue",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if got := env.TokenUsage["source"]; got != "stream_event" {
+		t.Fatalf("TokenUsage source = %v, want stream_event: %#v", got, env.TokenUsage)
+	}
+	if got := env.TokenUsage["input_tokens"]; got != float64(100) {
+		t.Fatalf("input_tokens = %v, want 100: %#v", got, env.TokenUsage)
+	}
+	final, err := os.ReadFile(filepath.Join(runDir, "final.md"))
+	if err != nil {
+		t.Fatalf("missing final.md: %v", err)
+	}
+	if strings.TrimSpace(string(final)) != "final answer" {
+		t.Fatalf("final.md = %q", string(final))
+	}
+}
+
+func TestRunIssueCodexHarnessPassesOTELEndpoint(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   24,
+		Title:   "Codex otel",
+		Body:    "Emit traces.",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/24",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+	tracePath := filepath.Join(t.TempDir(), "traces.jsonl")
+	if err := os.WriteFile(tracePath, []byte("old trace batch\n"), 0o644); err != nil {
+		t.Fatalf("write trace seed: %v", err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "codex")
+	fakeScript := []byte(`#!/bin/sh
+printf '%s\n' "$*"
+printf '%s\n' '{"resourceSpans":[{"scopeSpans":[]}]} ' >> "$BOTFAM_TEST_OTEL_TRACE_FILE"
+`)
+	if err := os.WriteFile(fakeCmd, fakeScript, 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+	t.Setenv("BOTFAM_TEST_OTEL_TRACE_FILE", tracePath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      24,
+		agent:      "codex",
+		agentSet:   true,
+		prompt:     "Summarize this issue",
+		captureDir: outDir,
+		otel:       "http://127.0.0.1:4318/v1/traces",
+		otelTraces: tracePath,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if !strings.Contains(env.HarnessCmd, "otel.trace_exporter") {
+		t.Fatalf("HarnessCmd = %q, want otel trace exporter override", env.HarnessCmd)
+	}
+	if !strings.Contains(env.HarnessCmd, "http://127.0.0.1:4318/v1/traces") {
+		t.Fatalf("HarnessCmd = %q, want otel endpoint", env.HarnessCmd)
+	}
+	if !strings.Contains(env.HarnessCmd, `otel.metrics_exporter=\"none\"`) {
+		t.Fatalf("HarnessCmd = %q, want local run to disable default metrics exporter", env.HarnessCmd)
+	}
+	traceArtifact, err := os.ReadFile(filepath.Join(runDir, "otel-traces.jsonl"))
+	if err != nil {
+		t.Fatalf("missing otel-traces.jsonl: %v", err)
+	}
+	if got := string(traceArtifact); strings.Contains(got, "old trace batch") || !strings.Contains(got, "resourceSpans") {
+		t.Fatalf("otel-traces.jsonl should contain only new trace data, got %q", got)
 	}
 }
 

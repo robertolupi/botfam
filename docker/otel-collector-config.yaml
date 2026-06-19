@@ -11,7 +11,7 @@ processors:
 
 exporters:
   file/trace:
-    path: /tmp/traces.jsonl
+    path: /data/traces.jsonl
 
 service:
   pipelines:
