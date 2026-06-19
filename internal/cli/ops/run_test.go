@@ -876,6 +876,71 @@ func TestRunIssuePermissionModeReachesHarnessCommand(t *testing.T) {
 	})
 }
 
+func TestParseAllowTools(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{"", nil},
+		{"   ", nil},
+		{"mcp__botfam", []string{"mcp__botfam"}},
+		{"mcp__botfam ToolSearch", []string{"mcp__botfam", "ToolSearch"}},
+		{"mcp__botfam,ToolSearch", []string{"mcp__botfam", "ToolSearch"}},
+		{"mcp__botfam, ToolSearch ", []string{"mcp__botfam", "ToolSearch"}},
+	} {
+		got := parseAllowTools(tc.in)
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Errorf("parseAllowTools(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestValidateAllowTools(t *testing.T) {
+	if err := validateAllowTools("codex", ""); err != nil {
+		t.Errorf("empty allow-tools should be fine on any harness: %v", err)
+	}
+	if err := validateAllowTools("claude", "mcp__botfam"); err != nil {
+		t.Errorf("claude allow-tools should be accepted: %v", err)
+	}
+	if err := validateAllowTools("codex", "mcp__botfam"); err == nil {
+		t.Errorf("allow-tools on codex should be rejected")
+	}
+}
+
+func TestRunIssueAllowToolsReachesHarnessCommand(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 27, Title: "Allow tools"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "claude"), []byte("#!/bin/sh\nprintf 'ok\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	outDir := t.TempDir()
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue: 27, agent: "claude", agentSet: true, target: "harness",
+		allowTools: "mcp__botfam ToolSearch", captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+	env := mustReadRunEnvelope(t, findRunDir(t, outDir))
+	for _, want := range []string{"--allowedTools", "mcp__botfam", "ToolSearch"} {
+		if !strings.Contains(env.HarnessCmd, want) {
+			t.Fatalf("HarnessCmd = %q, want to contain %q", env.HarnessCmd, want)
+		}
+	}
+	// Scoped allowlist must NOT escalate to full bypass.
+	if strings.Contains(env.HarnessCmd, "bypassPermissions") {
+		t.Fatalf("HarnessCmd = %q, allow-tools should not imply bypass", env.HarnessCmd)
+	}
+}
+
 func TestRunIssueCodexHarnessPassesOTELEndpoint(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)

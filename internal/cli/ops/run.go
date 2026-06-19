@@ -33,6 +33,7 @@ type runOptions struct {
 	prompt         string
 	harnessCmd     string
 	permissionMode string
+	allowTools     string
 	verbose        bool
 	otel           string
 	otelTraces     string
@@ -62,6 +63,10 @@ Use --target "harness[:<command>]" to run an agent command (from --harness-comma
 'default' denies tools (the harness default in non-interactive mode); 'auto' grants
 sandboxed/edit-level autonomy; 'bypass' grants full tool access. Forge/MCP-using goals
 typically need 'bypass'. Use deliberately — 'bypass' runs an unsandboxed agent.
+
+--allow-tools (claude only) auto-approves just the named tools while everything else
+stays gated, e.g. --allow-tools "mcp__botfam ToolSearch" grants the forge MCP without
+the full-access blast radius of --permission-mode bypass.
   run.json
   prompt.md
   stdout.log
@@ -88,6 +93,7 @@ const (
 	runOTELEndpointEnvVar  = "BOTFAM_RUN_OTEL_ENDPOINT"
 	runOTELTracesEnvVar    = "BOTFAM_RUN_OTEL_TRACES_FILE"
 	runPermissionModeEnv   = "BOTFAM_RUN_PERMISSION_MODE"
+	runAllowToolsEnv       = "BOTFAM_RUN_ALLOW_TOOLS"
 	runOTELTraceFlushWait  = time.Second
 
 	// Canonical tool-permission postures, mapped to harness-native flags by
@@ -193,6 +199,9 @@ func NewRunCmd() *cobra.Command {
 				return fmt.Errorf("run: missing family context")
 			}
 			ro = defaultRunOptions(ro, fctx)
+			if err := validateAllowTools(ro.agent, ro.allowTools); err != nil {
+				return err
+			}
 			client, err := forge.NewClient(ctx)
 			if err != nil {
 				return err
@@ -207,6 +216,7 @@ func NewRunCmd() *cobra.Command {
 	flags.StringVar(&opts.target, "target", "", "harness target for fake mode (e.g. success, fail, sleep:2s)")
 	flags.StringVar(&opts.harnessCmd, "harness-command", "", "command for --target harness (or set BOTFAM_RUN_HARNESS_CMD)")
 	flags.StringVar(&opts.permissionMode, "permission-mode", os.Getenv(runPermissionModeEnv), "harness tool-permission posture: default (deny, conservative) | auto (sandboxed/edit autonomy) | bypass (full tool access); or set BOTFAM_RUN_PERMISSION_MODE")
+	flags.StringVar(&opts.allowTools, "allow-tools", os.Getenv(runAllowToolsEnv), "claude only: comma/space-separated tools to auto-approve while keeping --permission-mode otherwise conservative, e.g. \"mcp__botfam ToolSearch\" to grant just the forge MCP (or set BOTFAM_RUN_ALLOW_TOOLS)")
 	flags.StringVar(&opts.prompt, "prompt", "", "goal prompt sent to the agent; may mention forge entities such as #444")
 	flags.BoolVar(&opts.verbose, "verbose", false, "print artifact files after the run")
 	flags.StringVar(&opts.otel, "otel-endpoint", os.Getenv(runOTELEndpointEnvVar), "OTLP/HTTP traces endpoint for harness telemetry (or set BOTFAM_RUN_OTEL_ENDPOINT)")
@@ -284,7 +294,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	harnessPrompt := buildHarnessPrompt(goal, issue, issueURL)
 	otelTracesFile := resolveOTELTracesFile(opts.otel, opts.otelTraces, fctx.WorktreeRoot)
 	otelTraceStart := traceFileOffset(otelTracesFile)
-	hResult := runHarnessTarget(runCtx, opts.agent, opts.target, opts.harnessCmd, opts.issue, harnessPrompt, fctx.WorktreeRoot, runDir, opts.otel, opts.permissionMode)
+	hResult := runHarnessTarget(runCtx, opts.agent, opts.target, opts.harnessCmd, opts.issue, harnessPrompt, fctx.WorktreeRoot, runDir, opts.otel, opts.permissionMode, opts.allowTools)
 	end := time.Now().UTC()
 	status := hResult.Status
 	if status == runStatusSuccess && runCtx.Err() != nil {
@@ -365,6 +375,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 		"harness":         opts.agent,
 		"target":          opts.target,
 		"permission_mode": opts.permissionMode,
+		"allow_tools":     opts.allowTools,
 		"working_tree":    fctx.WorktreeRoot,
 		"repository":      runRepo,
 		"status":          string(status),
@@ -394,7 +405,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	return nil
 }
 
-func runHarnessTarget(ctx context.Context, harness, target, harnessCommand string, issue int, harnessPrompt, worktreeRoot, runDir, otelEndpoint, permissionMode string) harnessResult {
+func runHarnessTarget(ctx context.Context, harness, target, harnessCommand string, issue int, harnessPrompt, worktreeRoot, runDir, otelEndpoint, permissionMode, allowTools string) harnessResult {
 	cmd := fmt.Sprintf("fake-harness --harness=%s --target=%s --issue=%d", harness, target, issue)
 	target = strings.ToLower(strings.TrimSpace(target))
 	switch {
@@ -468,7 +479,7 @@ func runHarnessTarget(ctx context.Context, harness, target, harnessCommand strin
 		}
 		resolved, ok := resolveHarnessCommand(command, harnessCommand)
 		if !ok {
-			return runHarnessCLI(ctx, harness, harnessPrompt, cmd, int64(issue), worktreeRoot, runDir, otelEndpoint, permissionMode)
+			return runHarnessCLI(ctx, harness, harnessPrompt, cmd, int64(issue), worktreeRoot, runDir, otelEndpoint, permissionMode, allowTools)
 		}
 		return runBashHarness(ctx, resolved, resolved, int64(issue), worktreeRoot)
 	default:
@@ -489,13 +500,13 @@ func resolveHarnessCommand(inline, fallback string) (string, bool) {
 	return "", false
 }
 
-func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string, issue int64, worktreeRoot, runDir, otelEndpoint, permissionMode string) harnessResult {
+func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string, issue int64, worktreeRoot, runDir, otelEndpoint, permissionMode, allowTools string) harnessResult {
 	canonical := famconfig.CanonicalHarness(harness)
 	switch canonical {
 	case famconfig.HarnessCodex:
 		return runCodexHarnessCommand(ctx, prompt, issue, worktreeRoot, runDir, otelEndpoint, permissionMode)
 	case famconfig.HarnessClaudeCode:
-		return runClaudeHarnessCommand(ctx, prompt, issue, worktreeRoot, permissionMode)
+		return runClaudeHarnessCommand(ctx, prompt, issue, worktreeRoot, permissionMode, allowTools)
 	case famconfig.HarnessAntigravity:
 		args := append(harnessPermissionArgs(canonical, permissionMode), "--print", prompt)
 		return runDirectHarnessCommand(ctx, "agy", args, issue, worktreeRoot)
@@ -506,6 +517,25 @@ func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string,
 		CommandLine: fallbackCommand,
 		Stderr:      "run: no harness binary found for harness " + harness + "; use --harness-command or --target harness:<command>\n",
 	}
+}
+
+// parseAllowTools splits a comma/space-separated tool allowlist into individual
+// tool-name tokens for Claude's --allowedTools (e.g. "mcp__botfam ToolSearch").
+func parseAllowTools(spec string) []string {
+	return strings.Fields(strings.ReplaceAll(spec, ",", " "))
+}
+
+// validateAllowTools rejects --allow-tools for harnesses that have no per-tool
+// CLI allowlist (only Claude's --allowedTools does). Fail loud rather than
+// silently ignore a security-relevant flag.
+func validateAllowTools(agent, allowTools string) error {
+	if strings.TrimSpace(allowTools) == "" {
+		return nil
+	}
+	if famconfig.CanonicalHarness(agent) != famconfig.HarnessClaudeCode {
+		return fmt.Errorf("--allow-tools is only supported for the claude harness (resolved agent %q); other harnesses have no per-tool CLI allowlist", agent)
+	}
+	return nil
 }
 
 // validatePermissionMode normalizes an empty mode to the conservative default
@@ -557,7 +587,7 @@ func harnessPermissionArgs(canonicalHarness, mode string) []string {
 	return nil
 }
 
-func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64, worktreeRoot, permissionMode string) harnessResult {
+func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64, worktreeRoot, permissionMode, allowTools string) harnessResult {
 	args := []string{
 		"-p",
 		prompt,
@@ -568,6 +598,12 @@ func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64, wo
 		"--include-partial-messages",
 	}
 	args = append(args, harnessPermissionArgs(famconfig.HarnessClaudeCode, permissionMode)...)
+	if tools := parseAllowTools(allowTools); len(tools) > 0 {
+		// Keep --allowedTools last: Claude treats it as variadic, so it must not
+		// swallow a following flag value.
+		args = append(args, "--allowedTools")
+		args = append(args, tools...)
+	}
 	result := runDirectHarnessCommand(ctx, "claude", args, issue, worktreeRoot)
 	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
 		result.Transcript = parsed
