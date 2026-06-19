@@ -622,10 +622,8 @@ func tokenUsageFromCodexTranscript(rows []map[string]any) map[string]any {
 				out[key] = n
 			}
 		}
-		input, _ := out["input_tokens"].(int64)
-		output, _ := out["output_tokens"].(int64)
-		if input > 0 || output > 0 {
-			out["total_tokens"] = input + output
+		if total, ok := sumTokensSpent(out); ok {
+			out["total_tokens"] = total
 		}
 		return out
 	}
@@ -660,10 +658,8 @@ func tokenUsageFromClaudeTranscript(rows []map[string]any) map[string]any {
 				out[m.dst] = n
 			}
 		}
-		input, _ := out["input_tokens"].(int64)
-		output, _ := out["output_tokens"].(int64)
-		if input > 0 || output > 0 {
-			out["total_tokens"] = input + output
+		if total, ok := sumTokensSpent(out); ok {
+			out["total_tokens"] = total
 		}
 		// Claude reports a running dollar cost directly; Codex does not.
 		if cost, ok := rows[i]["total_cost_usd"].(float64); ok {
@@ -672,6 +668,24 @@ func tokenUsageFromClaudeTranscript(rows []map[string]any) map[string]any {
 		return out
 	}
 	return nil
+}
+
+// sumTokensSpent totals the tokens actually spent against the model — input +
+// output + every cache counter — per the session-metric convention in
+// skills/botfam-session-retrospective/SKILL.md ("total input + output + cache
+// tokens spent"). It deliberately excludes reasoning_output_tokens, which
+// harnesses report as a subset of output_tokens (summing it would double-count).
+// Applied identically to both harness extractors so total_tokens is comparable.
+func sumTokensSpent(out map[string]any) (int64, bool) {
+	var total int64
+	present := false
+	for _, key := range []string{"input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens"} {
+		if n, ok := out[key].(int64); ok {
+			total += n
+			present = true
+		}
+	}
+	return total, present
 }
 
 func numericJSONValue(v any) (int64, bool) {

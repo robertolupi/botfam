@@ -699,6 +699,11 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
 	if got := env.TokenUsage["input_tokens"]; got != float64(100) {
 		t.Fatalf("input_tokens = %v, want 100: %#v", got, env.TokenUsage)
 	}
+	// total_tokens follows the session-metric convention: input+output+cache
+	// (100+7+40); reasoning_output_tokens is excluded as a subset of output.
+	if got := env.TokenUsage["total_tokens"]; got != float64(147) {
+		t.Fatalf("total_tokens = %v, want 147: %#v", got, env.TokenUsage)
+	}
 	final, err := os.ReadFile(filepath.Join(runDir, "final.md"))
 	if err != nil {
 		t.Fatalf("missing final.md: %v", err)
@@ -756,8 +761,8 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns"
 	for key, want := range map[string]float64{
 		"input_tokens":        100,
 		"output_tokens":       7,
-		"cached_input_tokens": 40, // mapped from Claude's cache_read_input_tokens
-		"total_tokens":        107,
+		"cached_input_tokens": 40,  // mapped from Claude's cache_read_input_tokens
+		"total_tokens":        167, // input+output+cache_read+cache_creation (100+7+40+20)
 	} {
 		if got := env.TokenUsage[key]; got != want {
 			t.Fatalf("TokenUsage[%q] = %v, want %v: %#v", key, got, want, env.TokenUsage)

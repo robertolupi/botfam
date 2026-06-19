@@ -76,7 +76,7 @@
         "output_tokens": {"type": "integer", "minimum": 0},
         "reasoning_output_tokens": {"type": "integer", "minimum": 0},
         "cache_creation_input_tokens": {"type": "integer", "minimum": 0},
-        "total_tokens": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": "integer", "minimum": 0, "description": "Total tokens spent against the model: input + output + cache (read + creation). Excludes reasoning_output_tokens, which is a subset of output_tokens."},
         "total_cost_usd": {"type": "number", "minimum": 0}
       },
       "additionalProperties": true
