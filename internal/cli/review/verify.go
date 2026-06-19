@@ -83,6 +83,14 @@ func runVerify(sha string, pkgs []string, race bool, out io.Writer) error {
 
 	fmt.Fprintf(out, "Verifying %s in ephemeral worktree %s\n", short(resolved), wtPath)
 
+	fmt.Fprintln(out, "==> git submodule update --init --recursive")
+	submoduleOut, submoduleErr := initSubmodules(wtPath)
+	writeGoOutput(out, submoduleOut)
+	if submoduleErr != nil {
+		fmt.Fprintf(out, "RESULT: FAIL — submodule setup failed for %s\n", short(resolved))
+		return fmt.Errorf("git submodule update failed: %w", submoduleErr)
+	}
+
 	// go build ./...
 	fmt.Fprintln(out, "==> go build ./...")
 	buildOut, buildErr := runGo(wtPath, "build", "./...")
@@ -114,6 +122,16 @@ func runVerify(sha string, pkgs []string, race bool, out io.Writer) error {
 // error. Output is captured (not streamed) so the caller controls reporting.
 func runGo(dir string, args ...string) (string, error) {
 	cmd := exec.Command("go", args...)
+	cmd.Dir = dir
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	err := cmd.Run()
+	return buf.String(), err
+}
+
+func initSubmodules(dir string) (string, error) {
+	cmd := exec.Command("git", "submodule", "update", "--init", "--recursive")
 	cmd.Dir = dir
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

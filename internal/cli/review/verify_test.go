@@ -193,3 +193,88 @@ func TestVerifyRaceFlag(t *testing.T) {
 		t.Errorf("expected go test -race in output, got:\n%s", out)
 	}
 }
+
+func TestVerifyInitializesSubmodules(t *testing.T) {
+	parent := t.TempDir()
+	libRepo := filepath.Join(parent, "lib")
+	if err := os.Mkdir(libRepo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initGoRepo(t, libRepo, `package lib
+
+func Value() string { return "submodule" }
+`, "")
+
+	dir := filepath.Join(parent, "app")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runCmd := func(name string, args ...string) {
+		t.Helper()
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("failed to run %s %v: %v\n%s", name, args, err, out)
+		}
+	}
+
+	runCmd("git", "init")
+	runCmd("git", "config", "user.name", "test")
+	runCmd("git", "config", "user.email", "test@example.com")
+	runCmd("git", "config", "protocol.file.allow", "always")
+	runCmd("git", "-c", "protocol.file.allow=always", "submodule", "add", libRepo, "third_party/lib")
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module verifyapp\n\ngo 1.21\n\nrequire example.com/lib v0.0.0\n\nreplace example.com/lib => ./third_party/lib\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+
+import (
+	"fmt"
+
+	"example.com/lib"
+)
+
+func main() { fmt.Println(lib.Value()) }
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte(`package main
+
+import (
+	"testing"
+
+	"example.com/lib"
+)
+
+func TestSubmodule(t *testing.T) {
+	if lib.Value() != "submodule" {
+		t.Fatal("bad submodule")
+	}
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runCmd("go", "fmt", "./...")
+	runCmd("git", "add", "-A")
+	runCmd("git", "commit", "-m", "submodule app")
+
+	head := exec.Command("git", "rev-parse", "HEAD")
+	head.Dir = dir
+	out, err := head.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	sha := strings.TrimSpace(string(out))
+
+	t.Setenv("GIT_ALLOW_PROTOCOL", "file:git:http:https:ssh")
+	verifyOut, err := runVerifyIn(t, dir, sha)
+	if err != nil {
+		t.Fatalf("verify should initialize submodules and pass, got error: %v\noutput:\n%s", err, verifyOut)
+	}
+	if !strings.Contains(verifyOut, "git submodule update --init --recursive") {
+		t.Errorf("expected submodule setup step in output, got:\n%s", verifyOut)
+	}
+	if !strings.Contains(verifyOut, "RESULT: PASS") {
+		t.Errorf("expected PASS in output, got:\n%s", verifyOut)
+	}
+}
