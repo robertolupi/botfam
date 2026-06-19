@@ -708,6 +708,70 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
 	}
 }
 
+func TestRunIssueClaudeHarnessCapturesTokenUsage(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   25,
+		Title:   "Claude usage",
+		Body:    "Emit usage.",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/25",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "claude")
+	// Claude Code's final result event carries an Anthropic-API-shaped usage
+	// object plus a running total_cost_usd.
+	fakeScript := []byte(`#!/bin/sh
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}],"model":"claude-opus-4"}}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns":2,"total_cost_usd":0.0123,"usage":{"input_tokens":100,"cache_creation_input_tokens":20,"cache_read_input_tokens":40,"output_tokens":7}}'
+`)
+	if err := os.WriteFile(fakeCmd, fakeScript, 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      25,
+		agent:      "claude",
+		agentSet:   true,
+		prompt:     "Summarize this issue",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if got := env.TokenUsage["source"]; got != "stream_event" {
+		t.Fatalf("TokenUsage source = %v, want stream_event: %#v", got, env.TokenUsage)
+	}
+	// Shared envelope keys — parity with the Codex extractor (numbers come back
+	// as float64 after the run.json round-trip).
+	for key, want := range map[string]float64{
+		"input_tokens":        100,
+		"output_tokens":       7,
+		"cached_input_tokens": 40, // mapped from Claude's cache_read_input_tokens
+		"total_tokens":        107,
+	} {
+		if got := env.TokenUsage[key]; got != want {
+			t.Fatalf("TokenUsage[%q] = %v, want %v: %#v", key, got, want, env.TokenUsage)
+		}
+	}
+	// Richer-than-Codex fields: cache-creation tokens and dollar cost.
+	if got := env.TokenUsage["cache_creation_input_tokens"]; got != float64(20) {
+		t.Fatalf("cache_creation_input_tokens = %v, want 20: %#v", got, env.TokenUsage)
+	}
+	if got := env.TokenUsage["total_cost_usd"]; got != float64(0.0123) {
+		t.Fatalf("total_cost_usd = %v, want 0.0123: %#v", got, env.TokenUsage)
+	}
+}
+
 func TestRunIssueCodexHarnessPassesOTELEndpoint(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)
