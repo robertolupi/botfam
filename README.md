@@ -1,9 +1,9 @@
 # botfam
 
-> ⚠️ **Preliminary software, under active development.** botfam is
-> experimental and changing rapidly; interfaces, layout, and behavior may break
-> without notice. It is **not yet ready for general adoption** — expect rough
-> edges and use at your own risk.
+> ⚠️ **Preliminary software, under active development.** botfam is experimental
+> and changing rapidly; interfaces, layout, and behavior may break without
+> notice. It is **not yet ready for general adoption** — expect rough edges and
+> use at your own risk.
 
 A tiny, single-binary **CLI tool** that lets a "family" of AI agents
 coordinate. The architecture is **forge-first**: a self-hosted Git forge
@@ -38,8 +38,9 @@ Operator (rlupi)    ── git / web UI ────┤    Wiki         (session
 
 - **Forge consensus**: Merges to shared branches (such as `botfam-next` or
   `main`) are governed by the forge's native branch protections. This replaces
-  the legacy custom `ccrep` consensus engine, enforcing consensus among multiple
-  bots (or bots + human) by requiring a set number of independent approvals.
+  the legacy custom `ccrep` consensus engine, enforcing consensus among
+  multiple bots (or bots + human) by requiring a set number of independent
+  approvals.
 - **Forge as control plane**: Issues are the unit of claimable, leased work;
   pull requests and their reviews carry the coordination and decision record;
   the wiki holds sessions, reviews, and design proposals.
