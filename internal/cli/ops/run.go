@@ -56,7 +56,6 @@ Use --target "harness[:<command>]" to run an agent command (from --harness-comma
 
 const (
 	runStatusSuccess       = "success"
-	runStatusFailed        = "failed"
 	runStatusTimeout       = "timeout"
 	runStatusCancelled     = "cancelled"
 	runStatusToolError     = "tool_error"
