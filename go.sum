@@ -1,5 +1,9 @@
 bitbucket.org/creachadair/stringset v0.0.11 h1:6Sv4CCv14Wm+OipW4f3tWOb0SQVpBDLW0knnJqUnmZ8=
 bitbucket.org/creachadair/stringset v0.0.11/go.mod h1:wh0BHewFe+j0HrzWz7KcGbSNpFzWwnpmgPRlB57U5jU=
+codeberg.org/TauCeti/mangle-go v0.5.1-0.20260413190942-4dcaa582c6d3 h1:710vu0DFGGqQZIBBkF0tjhml6v1Po7t98Xl+z5dzQ8s=
+codeberg.org/TauCeti/mangle-go v0.5.1-0.20260413190942-4dcaa582c6d3/go.mod h1:T463+FGmt4VuPGluIuw5DmbE6nkUaSa9wSrB9cULPUI=
+gitea.com/gitea/gitea-mcp v1.3.1-0.20260531221941-bbde7ee11063 h1:eM48RIxVk9NEVquTyNFmadQuohHNeAR5Yjg0XLzcu/o=
+gitea.com/gitea/gitea-mcp v1.3.1-0.20260531221941-bbde7ee11063/go.mod h1:+EQiKhYL/AgdHbbSH9mZSidizyJIbmmeZmYxQAjL+AI=
 gitea.dev/sdk v1.1.0 h1:wLlz03WkLEiXa2bQpO1JQBTlYf7tQI2neYtZK1kU+TE=
 gitea.dev/sdk v1.1.0/go.mod h1:Zfl+EZXdsGGCLkryDfsmvYrQo6GKMl4U3BJA8Beu+cs=
 github.com/42wim/httpsig v1.2.4 h1:mI5bH0nm4xn7K18fo1K3okNDRq8CCJ0KbBYWyA6r8lU=

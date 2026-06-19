@@ -27,8 +27,8 @@ require (
 )
 
 require (
-	codeberg.org/TauCeti/mangle-go v0.0.0-00010101000000-000000000000
-	gitea.com/gitea/gitea-mcp v0.0.0
+	codeberg.org/TauCeti/mangle-go v0.5.1-0.20260413190942-4dcaa582c6d3
+	gitea.com/gitea/gitea-mcp v1.3.1-0.20260531221941-bbde7ee11063
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -43,7 +43,3 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
-
-replace codeberg.org/TauCeti/mangle-go => ./third_party/mangle-go
-
-replace gitea.com/gitea/gitea-mcp => ./third_party/gitea-mcp
