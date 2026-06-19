@@ -27,16 +27,25 @@ import (
 // retired). Email defaults to the host git email plus-addressed with Name.
 // IsUser marks a `[user.<name>]` (human) entry — git identity only, no runtime.
 type AgentConfig struct {
-	Name      string `toml:"-"` // filled from the table key
-	Harness   string `toml:"harness,omitempty"`
-	ForgeUser string `toml:"forge_user,omitempty"`
-	Email     string `toml:"email,omitempty"`
-	IsUser    bool   `toml:"-"` // true for [user.<name>] entries
+	Name      string    `toml:"-"` // filled from the table key
+	Harness   string    `toml:"harness,omitempty"`
+	ForgeUser string    `toml:"forge_user,omitempty"`
+	Email     string    `toml:"email,omitempty"`
+	IsUser    bool      `toml:"-"` // true for [user.<name>] entries
+	Run       RunConfig `toml:"run,omitempty"`
 
 	// Flags are this agent's per-harness feature-flag overrides
 	// ([agent.<name>.flags] in fam.toml); they win over the fam-wide [flags]
 	// defaults key-by-key. See ResolveFlags.
 	Flags map[string]any `toml:"flags,omitempty"`
+}
+
+// RunConfig is the harness-generic default posture for `botfam run`. It records
+// operator intent; each harness translates AllowTools to its own permission
+// mechanism at launch time.
+type RunConfig struct {
+	PermissionMode string   `toml:"permission_mode,omitempty"`
+	AllowTools     []string `toml:"allow_tools,omitempty"`
 }
 
 // Registry is the merged, resolved configuration for one fam — the output of
@@ -81,6 +90,11 @@ type Registry struct {
 
 	// WikiProjections declares curated wiki indexes as "name:glob" entries (#120).
 	WikiProjections []string `toml:"wiki_projections,omitempty"`
+
+	// Run holds the resolved repo-wide defaults for `botfam run`; per-agent Run
+	// overrides live on AgentConfig and are applied by the command after it has
+	// resolved the effective actor/harness.
+	Run RunConfig `toml:"run,omitempty"`
 }
 
 type ActorRole string
