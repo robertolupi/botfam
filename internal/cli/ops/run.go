@@ -498,9 +498,7 @@ func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64, wo
 	result := runDirectHarnessCommand(ctx, "claude", args, issue, worktreeRoot)
 	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
 		result.Transcript = parsed
-		// Claude's stream-json usage payload differs from Codex's
-		// turn.completed shape. Leave token usage unavailable until a
-		// Claude-specific extractor can be validated.
+		result.TokenUsage = tokenUsageFromClaudeTranscript(parsed)
 	}
 	return result
 }
@@ -523,7 +521,7 @@ func runCodexHarnessCommand(ctx context.Context, prompt string, issue int64, wor
 	result := runDirectHarnessCommand(ctx, "codex", args, issue, worktreeRoot)
 	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
 		result.Transcript = parsed
-		result.TokenUsage = tokenUsageFromTranscript(parsed)
+		result.TokenUsage = tokenUsageFromCodexTranscript(parsed)
 	}
 	return result
 }
@@ -609,7 +607,7 @@ func readOTELTraceDelta(sourcePath string, offset int64, wait time.Duration) ([]
 	return io.ReadAll(f)
 }
 
-func tokenUsageFromTranscript(rows []map[string]any) map[string]any {
+func tokenUsageFromCodexTranscript(rows []map[string]any) map[string]any {
 	for i := len(rows) - 1; i >= 0; i-- {
 		if rows[i]["type"] != "turn.completed" {
 			continue
@@ -624,14 +622,70 @@ func tokenUsageFromTranscript(rows []map[string]any) map[string]any {
 				out[key] = n
 			}
 		}
-		input, _ := out["input_tokens"].(int64)
-		output, _ := out["output_tokens"].(int64)
-		if input > 0 || output > 0 {
-			out["total_tokens"] = input + output
+		if total, ok := sumTokensSpent(out); ok {
+			out["total_tokens"] = total
 		}
 		return out
 	}
 	return nil
+}
+
+// tokenUsageFromClaudeTranscript extracts token usage from Claude Code's
+// stream-json output. Claude emits a final {"type":"result", ..., "usage":{...},
+// "total_cost_usd":N} event whose usage object mirrors the Anthropic API shape
+// (input_tokens, output_tokens, cache_read_input_tokens,
+// cache_creation_input_tokens). Those are mapped onto the same envelope keys the
+// Codex extractor uses (cached_input_tokens <- cache_read_input_tokens) so the
+// two harnesses stay comparable, and it additionally records cache-creation
+// tokens and the reported dollar cost — neither of which Codex emits.
+func tokenUsageFromClaudeTranscript(rows []map[string]any) map[string]any {
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i]["type"] != "result" {
+			continue
+		}
+		usage, ok := rows[i]["usage"].(map[string]any)
+		if !ok {
+			continue
+		}
+		out := map[string]any{"source": "stream_event"}
+		for _, m := range []struct{ src, dst string }{
+			{"input_tokens", "input_tokens"},
+			{"output_tokens", "output_tokens"},
+			{"cache_read_input_tokens", "cached_input_tokens"},
+			{"cache_creation_input_tokens", "cache_creation_input_tokens"},
+		} {
+			if n, ok := numericJSONValue(usage[m.src]); ok {
+				out[m.dst] = n
+			}
+		}
+		if total, ok := sumTokensSpent(out); ok {
+			out["total_tokens"] = total
+		}
+		// Claude reports a running dollar cost directly; Codex does not.
+		if cost, ok := rows[i]["total_cost_usd"].(float64); ok {
+			out["total_cost_usd"] = cost
+		}
+		return out
+	}
+	return nil
+}
+
+// sumTokensSpent totals the tokens actually spent against the model — input +
+// output + every cache counter — per the session-metric convention in
+// skills/botfam-session-retrospective/SKILL.md ("total input + output + cache
+// tokens spent"). It deliberately excludes reasoning_output_tokens, which
+// harnesses report as a subset of output_tokens (summing it would double-count).
+// Applied identically to both harness extractors so total_tokens is comparable.
+func sumTokensSpent(out map[string]any) (int64, bool) {
+	var total int64
+	present := false
+	for _, key := range []string{"input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens"} {
+		if n, ok := out[key].(int64); ok {
+			total += n
+			present = true
+		}
+	}
+	return total, present
 }
 
 func numericJSONValue(v any) (int64, bool) {
