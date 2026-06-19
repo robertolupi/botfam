@@ -31,7 +31,7 @@ func NewCloneCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&dir, "dir", "", "fam directory to create (default: ./<repo-name>)")
-	c.Flags().StringVar(&forgeURL, "forge-url", "", "HTTP(S) forge API base, e.g. http://gitea.home.rlupi.com:3000/")
+	c.Flags().StringVar(&forgeURL, "forge-url", "", "HTTP(S) forge API base, e.g. https://gitea.example.com/")
 	c.Flags().StringVar(&agentsCSV, "agents", "claude=claude-code", "comma-separated name=harness (harness defaults to claude-code)")
 	c.Flags().StringVar(&slug, "slug", "", "fam slug (default: repo name); must be globally unique on the IRC server")
 	return c
@@ -48,7 +48,7 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 	// Validate everything that can be checked BEFORE any filesystem/git mutation,
 	// so a bad invocation never leaves a half-built fam dir (#200).
 	if strings.TrimSpace(opts.forgeURL) == "" {
-		return fmt.Errorf("--forge-url is required (e.g. http://gitea.home.rlupi.com:3000/); it cannot be reliably derived from an SSH remote (#184)")
+		return fmt.Errorf("--forge-url is required (e.g. https://gitea.example.com/); it cannot be reliably derived from an SSH remote (#184)")
 	}
 	name, repository := parseCloneURL(gitURL)
 	if name == "" {

@@ -75,7 +75,7 @@ func NewMintCmd() *cobra.Command {
 	}
 	c.Flags().StringVar(&harness, "harness", "", "harness name; token lands at ~/.botfam/token-<harness>")
 	c.Flags().StringVar(&user, "user", "", "forge username to mint the token for (e.g. claude-bot)")
-	c.Flags().StringVar(&forgeURL, "forge-url", "", "HTTP(S) forge API base, e.g. http://gitea.home.rlupi.com:3000/")
+	c.Flags().StringVar(&forgeURL, "forge-url", "", "HTTP(S) forge API base, e.g. https://gitea.example.com/")
 	c.Flags().StringVar(&scopesCSV, "scopes", defaultMintScopes, "comma-separated token scopes")
 	c.Flags().StringVar(&tokenFile, "token-file", "", "override the token output path (default ~/.botfam/token-<harness>)")
 	return c

@@ -155,7 +155,7 @@ Commit with **per-worktree identity** (the main/worktree config won't match you
 otherwise) and a trailer that closes the issue:
 
 ```bash
-git -c user.name=<actor> -c user.email=roberto.lupi+<actor>@gmail.com \
+git -c user.name=<actor> -c user.email=dev+<actor>@example.com \
   commit -m "fix(scope): one-line what+why (#<n>)
 
 Body: what was wrong, why it mattered, what changed. Note anything a
@@ -289,7 +289,7 @@ git merge --abort
   content.** If you `Read` a file, then switch branches, re-`Read` before
   editing — the file on disk changed under you.
 - **Commit identity must be set per-commit**
-  (`git -c user.name=… -c user.email=roberto.lupi+<actor>@gmail.com`); the
+  (`git -c user.name=… -c user.email=dev+<actor>@example.com`); the
   shared config matches no one in the main checkout and can override
   `includeIf` in worktrees.
 - **`main` is merge-only and unpushable** by agents; always target
