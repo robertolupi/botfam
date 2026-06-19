@@ -3,28 +3,11 @@ package setup
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
-func clientForHandler(handler http.Handler) *http.Client {
-	return &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			return rec.Result(), nil
-		}),
-	}
-}
 
 func TestMintToken(t *testing.T) {
 	var gotUser, gotPass, gotPath string

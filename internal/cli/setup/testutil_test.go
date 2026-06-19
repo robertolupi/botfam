@@ -1,6 +1,8 @@
 package setup
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +10,24 @@ import (
 
 	"github.com/robertolupi/botfam/internal/famconfig"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func clientForHandler(handler http.Handler) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			resp := rec.Result()
+			resp.Request = req
+			return resp, nil
+		}),
+	}
+}
 
 // initGitRepo creates a minimal git repository at dir with one committed commit.
 func initGitRepo(t *testing.T, dir string) {

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/robertolupi/botfam/internal/cli/cmdutil"
+	"github.com/robertolupi/botfam/internal/famconfig"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -25,7 +26,9 @@ func clientForHandler(handler http.Handler) *http.Client {
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
-			return rec.Result(), nil
+			resp := rec.Result()
+			resp.Request = req
+			return resp, nil
 		}),
 	}
 }
@@ -296,11 +299,23 @@ func TestExternalReviewWikiPageNotFound(t *testing.T) {
 // without depending on the repo file being reachable from the test cwd).
 func TestExternalReviewDesignFlag(t *testing.T) {
 	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOTFAM_CONFIG", filepath.Join(dir, "config.toml"))
+	if err := famconfig.WriteConfig(famconfig.Config{
+		Repos: map[string]famconfig.RepoConfig{
+			"test": {Path: wd, Slug: "test", Repository: "botfam/botfam"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	mat := filepath.Join(dir, "m.md")
 	if err := os.WriteFile(mat, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := cmdutil.RunCobra(NewExternalReviewCmd(), []string{"--design", "--lmstudio", "m", "--out", filepath.Join(dir, "o"), mat}, &bytes.Buffer{})
+	err = cmdutil.RunCobra(NewExternalReviewCmd(), []string{"--design", "--lmstudio", "m", "--out", filepath.Join(dir, "o"), mat}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), defaultDesignPrompt) {
 		t.Fatalf("expected --design to select %s, got err: %v", defaultDesignPrompt, err)
 	}

@@ -101,6 +101,9 @@ type externalReviewOpts struct {
 // selected by --design (vs the session-review default).
 const defaultDesignPrompt = "doc/review/DESIGN-REVIEW-PROMPT.md"
 
+// externalReviewHTTPClient is package-level so tests can replace the transport
+// without binding a localhost listener. Tests that mutate it must not run in
+// parallel with other runExternalReview tests.
 var externalReviewHTTPClient = &http.Client{Timeout: 300 * time.Second}
 
 // loadSecrets parses a dotenv-style KEY=VALUE file into a map. Blank lines and
