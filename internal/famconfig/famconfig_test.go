@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -180,6 +181,54 @@ func TestBuildRegistryMergesFlags(t *testing.T) {
 	}
 	if reg.Repository != "botfam/botfam" || reg.ForgeURL != "http://gitea:3000/" || reg.Slug != "botfam" {
 		t.Errorf("merged registry = %+v", reg)
+	}
+}
+
+func TestBuildRegistryMergesRunConfig(t *testing.T) {
+	famDir := t.TempDir()
+	cfg := Config{
+		Run: RunConfig{
+			PermissionMode: "default",
+			AllowTools:     []string{"mcp__botfam", "ToolSearch"},
+		},
+		Agents: map[string]AgentConfig{
+			"claude": {
+				Harness: "claude-code",
+				Run: RunConfig{
+					AllowTools: []string{"mcp__botfam__forge_pull_request_read"},
+				},
+			},
+		},
+		Repos: map[string]RepoConfig{
+			"botfam": {
+				Path: famDir,
+				Run: RunConfig{
+					PermissionMode: "auto",
+				},
+				Agents: map[string]AgentConfig{
+					"claude": {
+						Run: RunConfig{
+							PermissionMode: "bypass",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	reg := BuildRegistry(cfg, "botfam", cfg.Repos["botfam"], famDir)
+	if reg.Run.PermissionMode != "auto" {
+		t.Fatalf("repo Run.PermissionMode = %q, want auto", reg.Run.PermissionMode)
+	}
+	if strings.Join(reg.Run.AllowTools, "|") != "mcp__botfam|ToolSearch" {
+		t.Fatalf("repo Run.AllowTools = %#v", reg.Run.AllowTools)
+	}
+	agentRun := reg.Agents["claude"].Run
+	if agentRun.PermissionMode != "bypass" {
+		t.Fatalf("agent Run.PermissionMode = %q, want bypass", agentRun.PermissionMode)
+	}
+	if strings.Join(agentRun.AllowTools, "|") != "mcp__botfam__forge_pull_request_read" {
+		t.Fatalf("agent Run.AllowTools = %#v", agentRun.AllowTools)
 	}
 }
 

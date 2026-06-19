@@ -902,8 +902,40 @@ func TestValidateAllowTools(t *testing.T) {
 	if err := validateAllowTools("claude", "mcp__botfam"); err != nil {
 		t.Errorf("claude allow-tools should be accepted: %v", err)
 	}
-	if err := validateAllowTools("codex", "mcp__botfam"); err == nil {
-		t.Errorf("allow-tools on codex should be rejected")
+	if err := validateAllowTools("codex", "mcp__botfam"); err != nil {
+		t.Errorf("codex allow-tools should be accepted: %v", err)
+	}
+	if err := validateAllowTools("antigravity", "mcp__botfam"); err == nil {
+		t.Errorf("allow-tools on antigravity should be rejected")
+	}
+}
+
+func TestDefaultRunOptionsUsesConfigRunDefaults(t *testing.T) {
+	fctx := famctx.Context{
+		Registry: famconfig.Registry{
+			Run: famconfig.RunConfig{
+				PermissionMode: "auto",
+				AllowTools:     []string{"mcp__botfam", "ToolSearch"},
+			},
+		},
+		Agent: famconfig.AgentConfig{
+			Run: famconfig.RunConfig{
+				PermissionMode: "bypass",
+				AllowTools:     []string{"mcp__botfam__forge_pull_request_read"},
+			},
+		},
+	}
+	got := defaultRunOptions(runOptions{}, fctx)
+	if got.permissionMode != "bypass" {
+		t.Fatalf("permissionMode = %q, want bypass", got.permissionMode)
+	}
+	if got.allowTools != "mcp__botfam__forge_pull_request_read" {
+		t.Fatalf("allowTools = %q", got.allowTools)
+	}
+
+	explicit := defaultRunOptions(runOptions{permissionMode: "default", allowTools: "mcp__gopls"}, fctx)
+	if explicit.permissionMode != "default" || explicit.allowTools != "mcp__gopls" {
+		t.Fatalf("explicit options should win over config, got %+v", explicit)
 	}
 }
 
@@ -938,6 +970,102 @@ func TestRunIssueAllowToolsReachesHarnessCommand(t *testing.T) {
 	// Scoped allowlist must NOT escalate to full bypass.
 	if strings.Contains(env.HarnessCmd, "bypassPermissions") {
 		t.Fatalf("HarnessCmd = %q, allow-tools should not imply bypass", env.HarnessCmd)
+	}
+}
+
+func TestRunIssueAllowToolsFromConfigReachesClaudeCommand(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 28, Title: "Configured allow tools"}}
+	fctx := testRunContext(t, repoRoot)
+	fctx.Registry.Run = famconfig.RunConfig{
+		PermissionMode: "auto",
+		AllowTools:     []string{"mcp__botfam", "ToolSearch"},
+	}
+	ctx := famctx.NewContext(context.Background(), fctx)
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "claude"), []byte("#!/bin/sh\nprintf 'ok\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	outDir := t.TempDir()
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue: 28, agent: "claude", agentSet: true, target: "harness",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+	env := mustReadRunEnvelope(t, findRunDir(t, outDir))
+	for _, want := range []string{"--permission-mode", "acceptEdits", "--allowedTools", "mcp__botfam", "ToolSearch"} {
+		if !strings.Contains(env.HarnessCmd, want) {
+			t.Fatalf("HarnessCmd = %q, want to contain %q", env.HarnessCmd, want)
+		}
+	}
+}
+
+func TestCodexAllowToolsConfigArgs(t *testing.T) {
+	got := codexAllowToolsConfigArgs("ToolSearch mcp__botfam__forge_pull_request_read mcp__botfam__forge_issue_read mcp__gopls")
+	joined := strings.Join(got, " ")
+	for _, want := range []string{
+		`mcp_servers.botfam.default_tools_approval_mode="approve"`,
+		`mcp_servers.botfam.enabled_tools=["forge_issue_read","forge_pull_request_read"]`,
+		`mcp_servers.botfam.tools.forge_issue_read.approval_mode="approve"`,
+		`mcp_servers.botfam.tools.forge_pull_request_read.approval_mode="approve"`,
+		`mcp_servers.gopls.default_tools_approval_mode="approve"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("codex config args = %v, want %s", got, want)
+		}
+	}
+	if strings.Contains(joined, "ToolSearch") {
+		t.Fatalf("non-MCP tool should not be translated to Codex MCP config: %v", got)
+	}
+}
+
+func TestRunIssueCodexAllowToolsReachesConfigArgs(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 29, Title: "Codex allow tools"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "codex"), []byte("#!/bin/sh\nprintf '%s\\n' \"$*\"\n"), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	outDir := t.TempDir()
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue: 29, agent: "codex", agentSet: true, target: "harness",
+		allowTools: "mcp__botfam__forge_pull_request_read ToolSearch", captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+	runDir := findRunDir(t, outDir)
+	stdout, err := os.ReadFile(filepath.Join(runDir, "stdout.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(stdout)
+	for _, want := range []string{
+		"-c",
+		`mcp_servers.botfam.default_tools_approval_mode="approve"`,
+		`mcp_servers.botfam.enabled_tools=["forge_pull_request_read"]`,
+		`mcp_servers.botfam.tools.forge_pull_request_read.approval_mode="approve"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "ToolSearch") {
+		t.Fatalf("stdout = %q, non-MCP ToolSearch should not become Codex config", got)
 	}
 }
 

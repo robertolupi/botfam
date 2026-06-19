@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -189,16 +190,16 @@ func NewRunCmd() *cobra.Command {
 			if ro.harness != "" && ro.agent != "" && ro.harness != ro.agent {
 				return fmt.Errorf("--agent and --harness disagree; pass only one")
 			}
-			mode, err := validatePermissionMode(ro.permissionMode)
-			if err != nil {
-				return err
-			}
-			ro.permissionMode = mode
 			fctx, ok := famctx.FromContext(ctx)
 			if !ok {
 				return fmt.Errorf("run: missing family context")
 			}
 			ro = defaultRunOptions(ro, fctx)
+			mode, err := validatePermissionMode(ro.permissionMode)
+			if err != nil {
+				return err
+			}
+			ro.permissionMode = mode
 			if err := validateAllowTools(ro.agent, ro.allowTools); err != nil {
 				return err
 			}
@@ -237,6 +238,13 @@ func defaultRunOptions(opts runOptions, fctx famctx.Context) runOptions {
 	}
 	if opts.agent == "" {
 		opts.agent = runDefaultHarness
+	}
+	runCfg := mergeRunDefaults(fctx.Registry.Run, fctx.Agent.Run)
+	if opts.permissionMode == "" {
+		opts.permissionMode = runCfg.PermissionMode
+	}
+	if strings.TrimSpace(opts.allowTools) == "" && len(runCfg.AllowTools) > 0 {
+		opts.allowTools = strings.Join(runCfg.AllowTools, " ")
 	}
 	if opts.target == "" {
 		if opts.agentSet {
@@ -504,7 +512,7 @@ func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string,
 	canonical := famconfig.CanonicalHarness(harness)
 	switch canonical {
 	case famconfig.HarnessCodex:
-		return runCodexHarnessCommand(ctx, prompt, issue, worktreeRoot, runDir, otelEndpoint, permissionMode)
+		return runCodexHarnessCommand(ctx, prompt, issue, worktreeRoot, runDir, otelEndpoint, permissionMode, allowTools)
 	case famconfig.HarnessClaudeCode:
 		return runClaudeHarnessCommand(ctx, prompt, issue, worktreeRoot, permissionMode, allowTools)
 	case famconfig.HarnessAntigravity:
@@ -525,17 +533,19 @@ func parseAllowTools(spec string) []string {
 	return strings.Fields(strings.ReplaceAll(spec, ",", " "))
 }
 
-// validateAllowTools rejects --allow-tools for harnesses that have no per-tool
-// CLI allowlist (only Claude's --allowedTools does). Fail loud rather than
-// silently ignore a security-relevant flag.
+// validateAllowTools rejects --allow-tools for harnesses that have no supported
+// allowlist translation. The config/flag is harness-generic; the launch layer
+// maps it to Claude --allowedTools or Codex MCP approval config.
 func validateAllowTools(agent, allowTools string) error {
 	if strings.TrimSpace(allowTools) == "" {
 		return nil
 	}
-	if famconfig.CanonicalHarness(agent) != famconfig.HarnessClaudeCode {
-		return fmt.Errorf("--allow-tools is only supported for the claude harness (resolved agent %q); other harnesses have no per-tool CLI allowlist", agent)
+	switch famconfig.CanonicalHarness(agent) {
+	case famconfig.HarnessClaudeCode, famconfig.HarnessCodex:
+		return nil
+	default:
+		return fmt.Errorf("--allow-tools is not supported for harness %q; no scoped tool allowlist translator exists", agent)
 	}
-	return nil
 }
 
 // validatePermissionMode normalizes an empty mode to the conservative default
@@ -612,7 +622,7 @@ func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64, wo
 	return result
 }
 
-func runCodexHarnessCommand(ctx context.Context, prompt string, issue int64, worktreeRoot, runDir, otelEndpoint, permissionMode string) harnessResult {
+func runCodexHarnessCommand(ctx context.Context, prompt string, issue int64, worktreeRoot, runDir, otelEndpoint, permissionMode, allowTools string) harnessResult {
 	args := []string{"exec", "--json"}
 	if worktreeRoot != "" {
 		args = append(args, "-C", worktreeRoot)
@@ -627,6 +637,7 @@ func runCodexHarnessCommand(ctx context.Context, prompt string, issue int64, wor
 		)
 	}
 	args = append(args, harnessPermissionArgs(famconfig.HarnessCodex, permissionMode)...)
+	args = append(args, codexAllowToolsConfigArgs(allowTools)...)
 	args = append(args, prompt) // prompt must stay the final positional arg
 	result := runDirectHarnessCommand(ctx, "codex", args, issue, worktreeRoot)
 	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
@@ -634,6 +645,114 @@ func runCodexHarnessCommand(ctx context.Context, prompt string, issue int64, wor
 		result.TokenUsage = tokenUsageFromCodexTranscript(parsed)
 	}
 	return result
+}
+
+func mergeRunDefaults(base, override famconfig.RunConfig) famconfig.RunConfig {
+	out := base
+	if override.PermissionMode != "" {
+		out.PermissionMode = override.PermissionMode
+	}
+	if len(override.AllowTools) > 0 {
+		out.AllowTools = append([]string(nil), override.AllowTools...)
+	}
+	return out
+}
+
+func codexAllowToolsConfigArgs(allowTools string) []string {
+	type serverGrant struct {
+		all   bool
+		tools []string
+	}
+	grants := map[string]*serverGrant{}
+	for _, token := range parseAllowTools(allowTools) {
+		server, tool, ok := parseMCPAllowTool(token)
+		if !ok {
+			continue
+		}
+		grant := grants[server]
+		if grant == nil {
+			grant = &serverGrant{}
+			grants[server] = grant
+		}
+		if tool == "" {
+			grant.all = true
+			grant.tools = nil
+			continue
+		}
+		if !grant.all && !containsString(grant.tools, tool) {
+			grant.tools = append(grant.tools, tool)
+		}
+	}
+	if len(grants) == 0 {
+		return nil
+	}
+
+	servers := make([]string, 0, len(grants))
+	for server := range grants {
+		servers = append(servers, server)
+	}
+	sort.Strings(servers)
+
+	var args []string
+	for _, server := range servers {
+		grant := grants[server]
+		args = append(args, "-c", fmt.Sprintf("mcp_servers.%s.default_tools_approval_mode=\"approve\"", server))
+		if grant.all {
+			continue
+		}
+		sort.Strings(grant.tools)
+		args = append(args, "-c", fmt.Sprintf("mcp_servers.%s.enabled_tools=%s", server, tomlStringArray(grant.tools)))
+		for _, tool := range grant.tools {
+			args = append(args, "-c", fmt.Sprintf("mcp_servers.%s.tools.%s.approval_mode=\"approve\"", server, tool))
+		}
+	}
+	return args
+}
+
+func parseMCPAllowTool(token string) (server, tool string, ok bool) {
+	token = strings.TrimSpace(token)
+	if !strings.HasPrefix(token, "mcp__") {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(token, "mcp__")
+	if rest == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(rest, "__", 2)
+	server = parts[0]
+	if server == "" {
+		return "", "", false
+	}
+	if len(parts) == 2 {
+		tool = parts[1]
+		if tool == "" {
+			return "", "", false
+		}
+	}
+	return server, tool, true
+}
+
+func tomlStringArray(values []string) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, value := range values {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		encoded, _ := json.Marshal(value)
+		b.Write(encoded)
+	}
+	b.WriteByte(']')
+	return b.String()
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func codexOtelTraceExporterOverride(endpoint string) string {

@@ -23,6 +23,7 @@ type RepoConfig struct {
 	Repository      string                 `toml:"repository,omitempty"`
 	TargetBranch    string                 `toml:"target_branch,omitempty"`
 	ReleaseBranch   string                 `toml:"release_branch,omitempty"`
+	Run             RunConfig              `toml:"run,omitempty"`
 	Flags           map[string]any         `toml:"flags,omitempty"`
 	Agents          map[string]AgentConfig `toml:"agent,omitempty"`
 	Users           map[string]AgentConfig `toml:"user,omitempty"`
@@ -40,6 +41,7 @@ type Config struct {
 	ForgeURL      string                 `toml:"forge_url,omitempty"`
 	TargetBranch  string                 `toml:"target_branch,omitempty"`
 	ReleaseBranch string                 `toml:"release_branch,omitempty"`
+	Run           RunConfig              `toml:"run,omitempty"`
 	Flags         map[string]any         `toml:"flags,omitempty"`
 	Agents        map[string]AgentConfig `toml:"agent,omitempty"`
 	Users         map[string]AgentConfig `toml:"user,omitempty"`
@@ -184,6 +186,7 @@ func BuildRegistry(cfg Config, key string, rc RepoConfig, workDir string) Regist
 		IntegrationBranch: firstNonEmpty(rc.TargetBranch, cfg.TargetBranch),
 		ReleaseBranch:     firstNonEmpty(rc.ReleaseBranch, cfg.ReleaseBranch),
 		Repository:        rc.Repository,
+		Run:               mergeRunConfig(cfg.Run, rc.Run),
 		Flags:             mergeFlags(cfg.Flags, rc.Flags),
 		Agents:            mergeRoster(cfg.Agents, rc.Agents, false),
 		Users:             mergeRoster(cfg.Users, rc.Users, true),
@@ -379,7 +382,19 @@ func mergeAgent(base, ov AgentConfig) AgentConfig {
 	if ov.Email != "" {
 		out.Email = ov.Email
 	}
+	out.Run = mergeRunConfig(base.Run, ov.Run)
 	out.Flags = mergeFlags(base.Flags, ov.Flags)
+	return out
+}
+
+func mergeRunConfig(base, ov RunConfig) RunConfig {
+	out := base
+	if ov.PermissionMode != "" {
+		out.PermissionMode = ov.PermissionMode
+	}
+	if len(ov.AllowTools) > 0 {
+		out.AllowTools = append([]string(nil), ov.AllowTools...)
+	}
 	return out
 }
 
