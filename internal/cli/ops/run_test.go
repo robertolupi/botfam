@@ -777,6 +777,105 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns"
 	}
 }
 
+func TestValidatePermissionMode(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "default", false},
+		{"  ", "default", false},
+		{"default", "default", false},
+		{"auto", "auto", false},
+		{"bypass", "bypass", false},
+		{"Bypass", "", true},      // case-sensitive
+		{"yolo", "", true},        // unknown
+		{"acceptEdits", "", true}, // harness-native value is not a canonical mode
+	} {
+		got, err := validatePermissionMode(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("validatePermissionMode(%q) = %q, want error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("validatePermissionMode(%q) unexpected error: %v", tc.in, err)
+		}
+		if got != tc.want {
+			t.Errorf("validatePermissionMode(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestHarnessPermissionArgs(t *testing.T) {
+	for _, tc := range []struct {
+		harness string
+		mode    string
+		want    []string
+	}{
+		{famconfig.HarnessClaudeCode, "default", nil},
+		{famconfig.HarnessClaudeCode, "auto", []string{"--permission-mode", "acceptEdits"}},
+		{famconfig.HarnessClaudeCode, "bypass", []string{"--permission-mode", "bypassPermissions"}},
+		{famconfig.HarnessCodex, "default", nil},
+		{famconfig.HarnessCodex, "auto", []string{"--sandbox", "workspace-write"}},
+		{famconfig.HarnessCodex, "bypass", []string{"--dangerously-bypass-approvals-and-sandbox"}},
+		{famconfig.HarnessAntigravity, "default", nil},
+		{famconfig.HarnessAntigravity, "auto", []string{"--dangerously-skip-permissions"}},
+		{famconfig.HarnessAntigravity, "bypass", []string{"--dangerously-skip-permissions"}},
+	} {
+		got := harnessPermissionArgs(tc.harness, tc.mode)
+		if strings.Join(got, " ") != strings.Join(tc.want, " ") {
+			t.Errorf("harnessPermissionArgs(%s,%s) = %v, want %v", tc.harness, tc.mode, got, tc.want)
+		}
+	}
+}
+
+func TestRunIssuePermissionModeReachesHarnessCommand(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 26, Title: "Permission mode"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fakeBin, "claude"), []byte("#!/bin/sh\nprintf 'ok\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	t.Run("bypass adds the flag", func(t *testing.T) {
+		outDir := t.TempDir()
+		err := runIssue(ctx, client, fctx, runOptions{
+			issue: 26, agent: "claude", agentSet: true, target: "harness",
+			permissionMode: "bypass", captureDir: outDir,
+		})
+		if err != nil {
+			t.Fatalf("runIssue: %v", err)
+		}
+		env := mustReadRunEnvelope(t, findRunDir(t, outDir))
+		if !strings.Contains(env.HarnessCmd, "--permission-mode") || !strings.Contains(env.HarnessCmd, "bypassPermissions") {
+			t.Fatalf("HarnessCmd = %q, want --permission-mode bypassPermissions", env.HarnessCmd)
+		}
+	})
+
+	t.Run("default adds nothing", func(t *testing.T) {
+		outDir := t.TempDir()
+		err := runIssue(ctx, client, fctx, runOptions{
+			issue: 26, agent: "claude", agentSet: true, target: "harness",
+			permissionMode: "default", captureDir: outDir,
+		})
+		if err != nil {
+			t.Fatalf("runIssue: %v", err)
+		}
+		env := mustReadRunEnvelope(t, findRunDir(t, outDir))
+		if strings.Contains(env.HarnessCmd, "--permission-mode") {
+			t.Fatalf("HarnessCmd = %q, should not contain --permission-mode in default mode", env.HarnessCmd)
+		}
+	})
+}
+
 func TestRunIssueCodexHarnessPassesOTELEndpoint(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)
