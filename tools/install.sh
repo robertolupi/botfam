@@ -19,11 +19,7 @@ echo ""
 # 1. Ensure bin directory exists
 mkdir -p "$BIN_DIR"
 
-# 2. Update/initialize git submodules
-echo "Updating submodules..."
-git -C "$REPO_ROOT" submodule update --init --recursive
-
-# 3. Build botfam
+# 2. Build botfam
 echo "Building botfam..."
 version="dev"
 if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
