@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/robertolupi/botfam/internal/cli/cmdutil"
@@ -80,6 +81,7 @@ const (
 	runHarnessCmdEnvVar    = "BOTFAM_RUN_HARNESS_CMD"
 	runOTELEndpointEnvVar  = "BOTFAM_RUN_OTEL_ENDPOINT"
 	runOTELTracesEnvVar    = "BOTFAM_RUN_OTEL_TRACES_FILE"
+	runOTELTraceFlushWait  = time.Second
 )
 
 var (
@@ -97,6 +99,7 @@ type runFailureClass string
 type harnessResult struct {
 	Status      runFailureClass
 	ExitCode    int
+	Signal      string
 	CommandLine string
 	Stdout      string
 	Stderr      string
@@ -146,7 +149,7 @@ func NewRunCmd() *cobra.Command {
 	var opts runOptions
 	c := &cobra.Command{
 		Use:           "run",
-		Short:         "Run one issue through a harness (prototype)",
+		Short:         "Run a goal prompt through an agent harness (prototype)",
 		Long:          runCommandHelp,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -166,31 +169,11 @@ func NewRunCmd() *cobra.Command {
 			if ro.harness != "" && ro.agent != "" && ro.harness != ro.agent {
 				return fmt.Errorf("--agent and --harness disagree; pass only one")
 			}
-			ro.agentSet = ro.agent != "" || ro.harness != ""
-			if ro.agent == "" {
-				ro.agent = ro.harness
-			}
-			if ro.agent == "" {
-				fctx, ok := famctx.FromContext(ctx)
-				if ok && fctx.Harness != "" {
-					ro.agent = fctx.Harness
-				}
-			}
-			if ro.agent == "" {
-				ro.agent = runDefaultHarness
-			}
-			if ro.target == "" {
-				if ro.agentSet {
-					ro.target = runTargetHarnessPrefix
-				} else {
-					ro.target = runTargetSuccessPrefix
-				}
-			}
-
 			fctx, ok := famctx.FromContext(ctx)
 			if !ok {
 				return fmt.Errorf("run: missing family context")
 			}
+			ro = defaultRunOptions(ro, fctx)
 			client, err := forge.NewClient(ctx)
 			if err != nil {
 				return err
@@ -214,15 +197,8 @@ func NewRunCmd() *cobra.Command {
 	return c
 }
 
-func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts runOptions) error {
-	var issue *forge.Issue
-	if opts.issue > 0 {
-		var err error
-		issue, err = client.GetIssue(ctx, opts.issue)
-		if err != nil {
-			return fmt.Errorf("run: fetch issue %d: %w", opts.issue, err)
-		}
-	}
+func defaultRunOptions(opts runOptions, fctx famctx.Context) runOptions {
+	opts.agentSet = opts.agent != "" || opts.harness != ""
 	if opts.agent == "" {
 		opts.agent = opts.harness
 	}
@@ -239,7 +215,19 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 			opts.target = runTargetSuccessPrefix
 		}
 	}
+	return opts
+}
 
+func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts runOptions) error {
+	opts = defaultRunOptions(opts, fctx)
+	var issue *forge.Issue
+	if opts.issue > 0 {
+		var err error
+		issue, err = client.GetIssue(ctx, opts.issue)
+		if err != nil {
+			return fmt.Errorf("run: fetch issue %d: %w", opts.issue, err)
+		}
+	}
 	captureRoot := opts.captureDir
 	if captureRoot == "" {
 		captureRoot = filepath.Join(fctx.FamDir, "runs")
@@ -276,7 +264,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	harnessPrompt := buildHarnessPrompt(goal, issue, issueURL)
 	otelTracesFile := resolveOTELTracesFile(opts.otel, opts.otelTraces, fctx.WorktreeRoot)
 	otelTraceStart := traceFileOffset(otelTracesFile)
-	hResult := runFakeHarness(runCtx, opts.agent, opts.target, opts.harnessCmd, opts.issue, harnessPrompt, fctx.WorktreeRoot, runDir, opts.otel)
+	hResult := runHarnessTarget(runCtx, opts.agent, opts.target, opts.harnessCmd, opts.issue, harnessPrompt, fctx.WorktreeRoot, runDir, opts.otel)
 	end := time.Now().UTC()
 	status := hResult.Status
 	if status == runStatusSuccess && runCtx.Err() != nil {
@@ -302,6 +290,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 		Branch:       branch,
 		FailureClass: string(status),
 		ExitCode:     hResult.ExitCode,
+		Signal:       hResult.Signal,
 		ForgeArtifacts: map[string]any{
 			"comments":      []string{},
 			"issues":        []string{},
@@ -384,7 +373,7 @@ func runIssue(ctx context.Context, client issueClient, fctx famctx.Context, opts
 	return nil
 }
 
-func runFakeHarness(ctx context.Context, harness, target, harnessCommand string, issue int, harnessPrompt, worktreeRoot, runDir, otelEndpoint string) harnessResult {
+func runHarnessTarget(ctx context.Context, harness, target, harnessCommand string, issue int, harnessPrompt, worktreeRoot, runDir, otelEndpoint string) harnessResult {
 	cmd := fmt.Sprintf("fake-harness --harness=%s --target=%s --issue=%d", harness, target, issue)
 	target = strings.ToLower(strings.TrimSpace(target))
 	switch {
@@ -509,7 +498,9 @@ func runClaudeHarnessCommand(ctx context.Context, prompt string, issue int64, wo
 	result := runDirectHarnessCommand(ctx, "claude", args, issue, worktreeRoot)
 	if parsed := parseStreamJSONTranscript(result.Stdout); len(parsed) > 0 {
 		result.Transcript = parsed
-		result.TokenUsage = tokenUsageFromTranscript(parsed)
+		// Claude's stream-json usage payload differs from Codex's
+		// turn.completed shape. Leave token usage unavailable until a
+		// Claude-specific extractor can be validated.
 	}
 	return result
 }
@@ -563,7 +554,7 @@ func traceFileOffset(path string) int64 {
 }
 
 func copyOTELTraceDelta(destPath, sourcePath string, offset int64) error {
-	data, err := readOTELTraceDelta(sourcePath, offset, 3*time.Second)
+	data, err := readOTELTraceDelta(sourcePath, offset, runOTELTraceFlushWait)
 	if err != nil {
 		return err
 	}
@@ -704,25 +695,15 @@ func runDirectHarnessCommand(ctx context.Context, command string, args []string,
 
 	status := runFailureClass(runStatusSuccess)
 	exitCode := 0
+	signal := ""
 	if err != nil {
-		status = runFailureClass(runStatusToolError)
-		exitCode = 1
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			status = runFailureClass(runStatusTimeout)
-			exitCode = 124
-		}
-		if ctx.Err() == context.Canceled {
-			status = runFailureClass(runStatusCancelled)
-			exitCode = 124
-		}
+		status, exitCode, signal = harnessExitDetails(ctx, err)
 	}
 
 	return harnessResult{
 		Status:      status,
 		ExitCode:    exitCode,
+		Signal:      signal,
 		CommandLine: commandLineForArgs(command, args),
 		Stdout:      stdout.String(),
 		Stderr:      stderr.String(),
@@ -744,6 +725,31 @@ func commandLineForArgs(command string, args []string) string {
 		parts = append(parts, strconv.Quote(arg))
 	}
 	return strings.Join(parts, " ")
+}
+
+func harnessExitDetails(ctx context.Context, err error) (runFailureClass, int, string) {
+	if ctx.Err() == context.DeadlineExceeded {
+		return runFailureClass(runStatusTimeout), 124, ""
+	}
+	if ctx.Err() == context.Canceled {
+		return runFailureClass(runStatusCancelled), 124, ""
+	}
+
+	exitCode := 1
+	signal := ""
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		exitCode = exitErr.ExitCode()
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			signal = status.Signal().String()
+			// ExitCode reports -1 when the process did not exit normally.
+			// Persist the signal explicitly and use the conventional shell code.
+			exitCode = 128 + int(status.Signal())
+		}
+	}
+	if exitCode < 0 {
+		exitCode = 1
+	}
+	return runFailureClass(runStatusToolError), exitCode, signal
 }
 
 func runBashOllamaCommand(target string) string {
@@ -769,25 +775,15 @@ func runBashHarness(ctx context.Context, shellCommand, commandLine string, issue
 
 	status := runFailureClass(runStatusSuccess)
 	exitCode := 0
+	signal := ""
 	if err != nil {
-		status = runFailureClass(runStatusToolError)
-		exitCode = 1
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			status = runFailureClass(runStatusTimeout)
-			exitCode = 124
-		}
-		if ctx.Err() == context.Canceled {
-			status = runFailureClass(runStatusCancelled)
-			exitCode = 124
-		}
+		status, exitCode, signal = harnessExitDetails(ctx, err)
 	}
 
 	return harnessResult{
 		Status:      status,
 		ExitCode:    exitCode,
+		Signal:      signal,
 		CommandLine: commandLine,
 		Stdout:      stdout.String(),
 		Stderr:      stderr.String(),
@@ -861,11 +857,6 @@ func resolveIssueInfo(reg famconfig.Registry) (base, repo string) {
 		base = "http://localhost"
 	}
 	return base, repo
-}
-
-func makePrompt(issue *forge.Issue, primaryIssueURL string) string {
-	goal := fallbackRunGoal(runOptions{}, issue, primaryIssueURL, "")
-	return buildHarnessPrompt(goal, issue, primaryIssueURL)
 }
 
 func buildRunGoal(ctx context.Context, client issueClient, opts runOptions, issue *forge.Issue, primaryIssueURL, baseURL, repo string) (runGoal, error) {

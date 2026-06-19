@@ -197,6 +197,36 @@ func TestRunIssueShellCommand(t *testing.T) {
 	}
 }
 
+func TestRunIssueSignalFailureRecordsSignal(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{Index: 13, Title: "Signal command"}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      13,
+		target:     "shell:kill -TERM $$",
+		captureDir: outDir,
+	})
+	if err == nil {
+		t.Fatalf("runIssue succeeded unexpectedly")
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.FailureClass != runStatusToolError {
+		t.Fatalf("FailureClass = %q, want %q", env.FailureClass, runStatusToolError)
+	}
+	if env.Signal == "" {
+		t.Fatalf("Signal is empty, want recorded signal")
+	}
+	if env.ExitCode < 0 {
+		t.Fatalf("ExitCode = %d, want schema-valid non-negative code", env.ExitCode)
+	}
+}
+
 func TestRunIssuePrintsArtifactDirectory(t *testing.T) {
 	repoRoot := t.TempDir()
 	initGitRepo(t, repoRoot)
