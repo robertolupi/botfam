@@ -26,7 +26,7 @@ func TestParseCloneURL(t *testing.T) {
 		wantName string
 		wantRepo string
 	}{
-		{"ssh://git@gitea.home.rlupi.com:2222/deep-cuts/deep-cuts.git", "deep-cuts", "deep-cuts/deep-cuts"},
+		{"ssh://git@gitea.example.com:2222/deep-cuts/deep-cuts.git", "deep-cuts", "deep-cuts/deep-cuts"},
 		{"git@gitea:botfam/botfam.git", "botfam", "botfam/botfam"},
 		{"http://gitea:3000/botfam/botfam.git", "botfam", "botfam/botfam"},
 		{"deep-cuts/deep-cuts", "deep-cuts", "deep-cuts/deep-cuts"},
