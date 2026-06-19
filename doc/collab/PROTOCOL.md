@@ -1,10 +1,16 @@
-# botfam Coordination Protocol (IRC-First)
+# botfam Coordination Protocol (Forge-First)
 
 Canonical, single source of truth for how fam members coordinate. The harness
 entry files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are deliberately
 lightweight pointers here — put substantive rules in this file, never there.
 Day-to-day operational recipes for the IRC substrate (rejoin, account recovery,
 wake loop, log pipeline) live in [IRC-OPS.md](IRC-OPS.md).
+
+> **Coordination is forge-first.** Members coordinate through forge issues/PRs
+> (assignments, reviews, comments); `botfam wait` is the wake loop and runs
+> do-not-disturb by default (forge events wake you only when you're an assignee
+> or @-mentioned). IRC is opt-in — a forum for design sprints, not the
+> coordination or wake substrate.
 
 ______________________________________________________________________
 
@@ -27,14 +33,24 @@ In the `deep-cuts` repository:
 - `deep-cuts-agy` → `agy`
 - `wt-deep-cuts-claude` → `claude`
 
-Coordination runs over a local IRC server: **ergo v2.18.0** in the Docker
-compose project `botfam-irc-prod` (`docker/prod/compose.yaml`), host exposure
-`127.0.0.1:6667` only. ergo provides IRCv3 `CHATHISTORY`, so clients replay
-missed traffic on reconnect.
+Day-to-day coordination runs on the **forge** (issues/PRs — assignments,
+reviews, comments; see the wake loop below). A local IRC server — **ergo
+v2.18.0** in the Docker compose project `botfam-irc-prod`
+(`docker/prod/compose.yaml`), host exposure `127.0.0.1:6667` only — is the
+**design-sprint** substrate, not the coordination or wake plane. ergo provides
+IRCv3 `CHATHISTORY`, so clients replay missed sprint traffic on reconnect.
 
-- **Client Connection:** Agents run the Go-based client
-  (`botfam irc-client <nick> --pass-file <file>`) to manage connection
-  lifecycle; `botfam irc-wait` is the wake watcher.
+- **Wake loop:** `botfam wait` is the wake loop every member runs. It blocks on
+  the per-agent spool, which a read-only ingester fills with forge activity and
+  (when joined) IRC lines; the MCP server starts the ingester automatically
+  once identity resolves (no opt-out flag, and it does not mark forge
+  notifications read — forge stays canonical). **Do-not-disturb is the
+  default:** forge events wake you only when directed at you (assignee or
+  @-mention in the latest comment); `--all` surfaces everything; IRC lines are
+  always relayed.
+- **IRC client (sprints only):** join with
+  `botfam irc-client <nick> --pass-file <file>` when participating in a design
+  sprint; it is not required to be woken or to coordinate.
 - **Nicks:** Nicks are connection-bound, equal to the actor name (e.g.
   `claude`, `agy`), NickServ-registered with strict enforcement. ergo's limit
   is `nicklen: 32`. (Project-scoped nicks like `wt-claude` are under decision —
@@ -53,10 +69,12 @@ missed traffic on reconnect.
 
 ______________________________________________________________________
 
-## 2. Coordination & Durability
+## 2. Durability
 
-Because offline agents miss live IRC traffic during restarts, durable scribe
-logging is the primary source of truth:
+The **forge is the durable coordination record** — issues/PRs persist across
+restarts and `botfam wait` replays missed forge activity from the spool, so no
+coordination is lost to a restart. For the IRC **design-sprint** substrate
+(which is ephemeral), durable scribe logging is the source of truth:
 
 - **Scribe Logger:** The scribe bot joins the channels and appends all events
   in real-time as JSON lines to the shared `history.jsonl` (in production:
@@ -108,6 +126,25 @@ custom IRC bot scripts.
   dismisses their block.
 - **Spoof Resistance:** Gitea authentication (using secure tokens or SSH keys)
   prevents any spoofing of reviewer identities or pushes.
+
+### Plane Separation & Ownership Rules
+
+We enforce strict separation of roles and planes to optimize reasoning and
+avoid deadlocks:
+
+- **Plane Separation (Control vs. Data)**: Keep the control plane (the Gitea
+  forge: issues, PRs, reviews, assignments) distinct from the data plane (the
+  git repo: committed code). Process state (such as who is assigned, review
+  approval, or merge-readiness) lives exclusively on the forge. The repository
+  tip is mutated only by merges on the control plane.
+- **Decompose by Coupling & Single Owner**: Group issues by coupling (shared
+  design/contracts/data models). A coupled cluster must be assigned to a
+  **single owner** who claims all related issues end-to-end to avoid Concept
+  Fragmentation. The owner agent can fan out to subagents (hands) under its own
+  context for execution. Peer agents must not work concurrently on different
+  parts of a coupled cluster.
+- **Bounded WIP**: Default to **WIP=1** for coupled clusters. Juggling multiple
+  coupled tasks in one overfull context degrades reasoning and increases cost.
 
 ______________________________________________________________________
 
@@ -192,8 +229,7 @@ following interchangeable transport bindings:
     leverage `ergo`'s `CHATHISTORY` to replay missed events upon connection.
   - **Spoof Resistance**: NickServ nick authentication ensures that nicks
     cannot be impersonated on `#cross`.
-  - **Wake-on-Report**: Message arrival immediately triggers the standard
-    client log watcher (`irc-wait`), allowing real-time response.
+  - **Wake-on-Report**: Message arrival is relayed through the spool and wakes `botfam wait`.
   - **Payload**: The JSON payload is serialized and sent as a channel PRIVMSG.
 - **Binding B (Shared File-System Queue) [Fallback]**:
   - **Transport**: Used when the IRC server or clients are offline. JSON
@@ -223,13 +259,43 @@ for by a 2026-06-12 incident:
   own worktree.
 - **Executor merges carry executor identity.** The main checkout matches no
   one's `includeIf`, so merge with explicit identity:
-  `git -c user.name=<actor> -c user.email=roberto.lupi+<actor>@gmail.com merge --no-ff <sha>`.
+  `git -c user.name=<actor> -c user.email=dev+<actor>@example.com merge --no-ff <sha>`.
 - **Worktree identity is set per-worktree, not via includeIf alone.** A
   `user.*` entry in the shared `.git/config` silently overrides `includeIf` for
   every linked worktree. With `extensions.worktreeConfig` enabled (repo-wide
   since 2026-06-12), each actor sets `git config --worktree user.name <actor>`
   and the plus-addressed email in their own tree. Reviewers: check `%an` on
   every proposed commit.
+
+### Let It Crash & Warm Handover Protocol
+
+Because agents are transient and fragile actors that degrade as their context
+windows fill, we design for failure recovery rather than trying to recover
+in-place:
+
+- **Let It Crash**: Do not write complex, defensive error-recovery code inside
+  an agent. Similarly, for agent actions: if the botfam harness or tooling
+  itself fails to work, and you are not acting as a designated debugger (e.g.,
+  developing a feature or explicitly instructed by the operator), do not search
+  for or implement ad-hoc workarounds. Instead, let the execution fail, make
+  the problem visible by filing a Gitea issue, and wait for human instruction.
+  If context-fullness (computed out-of-band by the harness) approaches the
+  crash threshold, or if the agent stalls or loops, let it crash/exit
+  immediately.
+- **Handover Snapshot**: Before crashing (or at regular progress milestones),
+  the agent must write a compact **Handover Snapshot** to the control plane
+  (the Gitea forge issue or PR comment). The snapshot's distilled reasoning
+  state must contain:
+  1. The task **goal**.
+  2. The **decisions taken so far** and why.
+  3. A pointer to the **git branch/PR** (so the product state is referenced,
+     not copied).
+  4. The **current blocker**, if any.
+  5. The **next step** to be taken.
+- **Supervision & Warm Restart**: The harness acts as a stateless one-for-one
+  supervisor that detects the exit, spins up a fresh agent, and injects the
+  Handover Snapshot. The new agent resumes warm from the snapshot and branch,
+  avoiding the high onboarding tax of replaying history from genesis.
 
 ______________________________________________________________________
 

@@ -32,9 +32,9 @@ every "don't" below is annotated with the incident that created it.
   like).
 - Prefer standard markdown links: Settings → Files & Links → turn off "Use
   \[[Wikilinks]\]". Wikilink support is pending the doc-linter.
-- To pull the latest main into your worktree, run `tools/sync-worktree.sh`
-  (bind it to an Obsidian Shell-commands hotkey). It refuses to run in the main
-  checkout, refuses on a dirty tree, and merges — never rebases.
+- To pull the latest main into your worktree, run `botfam worktree sync` (bind
+  it to an Obsidian Shell-commands hotkey). It refuses to run in the main
+  checkout, stashes local changes if dirty, and merges — never rebases.
 - Ask on `#botfam` when you want something done to a shared tree: "claude: sync
   wt-rlupi to main" is the protocol working as designed.
 

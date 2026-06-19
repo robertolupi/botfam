@@ -1,16 +1,19 @@
 package forge
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"strings"
+	"time"
+
+	giteasdk "gitea.dev/sdk"
 )
 
-// Notification is one thread from the forge's per-user notifications feed
-// (review requested, comment, mention, or an issue/PR assigned to the user).
+// Notification is one thread from the forge's per-user notifications feed.
 type Notification struct {
-	ID      int64 `json:"id"`
-	Unread  bool  `json:"unread"`
+	ID      int64  `json:"id"`
+	Unread  bool   `json:"unread"`
+	Updated string `json:"updated_at"`
 	Subject struct {
 		Title   string `json:"title"`
 		URL     string `json:"url"`
@@ -23,52 +26,66 @@ type Notification struct {
 	} `json:"repository"`
 }
 
-// ListUnreadNotifications returns the agent's unread notification threads across
-// all repositories — every subject type, not just pull requests.
-func (c *Client) ListUnreadNotifications() ([]Notification, error) {
-	b, err := c.request("GET", "notifications?status-types=unread&page=1&limit=50", nil)
+// notificationsPageLimit is the per-page size for notification fetches.
+const notificationsPageLimit = 50
+
+// ListUnreadNotifications returns the first page of the agent's unread
+// notification threads across all repositories.
+func (c *Client) ListUnreadNotifications(ctx context.Context) ([]Notification, error) {
+	threads, _, err := c.sdk.Notifications.List(ctx, giteasdk.ListNotificationOptions{
+		ListOptions: giteasdk.ListOptions{Page: 1, PageSize: notificationsPageLimit},
+		Status:      []giteasdk.NotificationStatus{giteasdk.NotificationStatusUnread},
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list notifications: %w", err)
 	}
-	var ns []Notification
-	if err := json.Unmarshal(b, &ns); err != nil {
-		return nil, fmt.Errorf("decode notifications: %w", err)
-	}
-	return ns, nil
+	return sdkThreadsToLocal(threads), nil
 }
 
-// MarkNotificationRead marks a single notification thread read so it does not
-// wake the agent again. Requires the write:notification token scope.
-func (c *Client) MarkNotificationRead(id int64) error {
-	_, err := c.request("PATCH", fmt.Sprintf("notifications/threads/%d?to-status=read", id), nil)
+// ListUnreadRepoNotifications returns one page of unread notification threads
+// scoped to a single repo (owner/repo).
+func (c *Client) ListUnreadRepoNotifications(ctx context.Context, repo string) ([]Notification, error) {
+	owner, repoName, ok := strings.Cut(repo, "/")
+	if !ok {
+		owner, repoName = c.Owner, repo
+	}
+	threads, _, err := c.sdk.Notifications.ListByRepo(ctx, owner, repoName, giteasdk.ListNotificationOptions{
+		ListOptions: giteasdk.ListOptions{Page: 1, PageSize: notificationsPageLimit},
+		Status:      []giteasdk.NotificationStatus{giteasdk.NotificationStatusUnread},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list repo notifications: %w", err)
+	}
+	return sdkThreadsToLocal(threads), nil
+}
+
+// MarkNotificationRead marks a single notification thread read.
+func (c *Client) MarkNotificationRead(ctx context.Context, id int64) error {
+	_, _, err := c.sdk.Notifications.MarkReadByID(ctx, id, giteasdk.NotificationStatusRead)
 	return err
 }
 
-// SubjectContent is the fetched body of a notification's subject (issue or PR).
-type SubjectContent struct {
-	Title   string `json:"title"`
-	Body    string `json:"body"`
-	State   string `json:"state"`
-	HTMLURL string `json:"html_url"`
-}
-
-// GetSubject fetches the content behind a notification's subject API URL so the
-// caller can show it inline without a second round-trip. The subject URL is a
-// full API URL; we re-base its path onto this client's BaseURL (and token) so it
-// works regardless of the forge's configured ROOT_URL.
-func (c *Client) GetSubject(apiURL string) (*SubjectContent, error) {
-	const marker = "/api/v1/"
-	i := strings.Index(apiURL, marker)
-	if i < 0 {
-		return nil, fmt.Errorf("unexpected subject url %q", apiURL)
+func sdkThreadsToLocal(threads []*giteasdk.NotificationThread) []Notification {
+	out := make([]Notification, len(threads))
+	for i, t := range threads {
+		n := Notification{
+			ID:     t.ID,
+			Unread: t.Unread,
+		}
+		if !t.UpdatedAt.IsZero() {
+			n.Updated = t.UpdatedAt.UTC().Format(time.RFC3339)
+		}
+		if t.Subject != nil {
+			n.Subject.Title = t.Subject.Title
+			n.Subject.URL = t.Subject.URL
+			n.Subject.HTMLURL = t.Subject.HTMLURL
+			n.Subject.Type = string(t.Subject.Type)
+			n.Subject.State = string(t.Subject.State)
+		}
+		if t.Repository != nil {
+			n.Repository.FullName = t.Repository.FullName
+		}
+		out[i] = n
 	}
-	b, err := c.request("GET", apiURL[i+len(marker):], nil)
-	if err != nil {
-		return nil, err
-	}
-	var sc SubjectContent
-	if err := json.Unmarshal(b, &sc); err != nil {
-		return nil, fmt.Errorf("decode subject: %w", err)
-	}
-	return &sc, nil
+	return out
 }

@@ -9,13 +9,19 @@
 #   ACTOR / actor: worktree actor name
 #   TOKEN_FILE / token_file: path to the agent's token file
 derive_identity() {
-  # actor: explicit command-line or env, else this worktree's basename minus a wt-/botfam- prefix
+  # actor: explicit command-line or env, else resolved via botfam whoami, else fallback
   if [ -z "${ACTOR:-}" ]; then
-    ACTOR="${BOTFAM_ACTOR:-${COLLAB_ACTOR:-}}"
+    ACTOR="${BOTFAM_ACTOR:-}"
     if [ -z "$ACTOR" ]; then
-      ACTOR="$(basename "$PWD")"
-      ACTOR="${ACTOR#wt-}"
-      ACTOR="${ACTOR#botfam-}"
+      if command -v botfam >/dev/null 2>&1 && ACTOR="$(botfam whoami 2>/dev/null)" && [ -n "$ACTOR" ]; then
+        :
+      elif [ -x "./botfam" ] && ACTOR="$(./botfam whoami 2>/dev/null)" && [ -n "$ACTOR" ]; then
+        :
+      else
+        ACTOR="$(basename "$PWD")"
+        ACTOR="${ACTOR#wt-}"
+        ACTOR="${ACTOR#botfam-}"
+      fi
     fi
   fi
   actor="$ACTOR"

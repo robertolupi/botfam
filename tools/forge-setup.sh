@@ -4,7 +4,7 @@
 # steps it used to take to put an agent on the fam's forge:
 #
 #   1. mint a token            (tools/forge-login.sh → ~/.botfam/token-<fam>-<actor>)
-#   2. install the push helper (git-credential-botfam, scoped to the forge host)
+#   2. install the push helper (`botfam credential`, scoped to the forge host)
 #   3. register the forge MCP  (harness-aware; runs `claude mcp add` for Claude
 #                               Code, prints instructions for other harnesses)
 #
@@ -51,12 +51,9 @@ done
 [ -n "$HOST" ] || { echo "error: --host <url> is required" >&2; exit 2; }
 command -v curl >/dev/null || { echo "error: curl required" >&2; exit 2; }
 
-# Identity — same derivation as forge-login.sh / git-credential-botfam.
-if [ -z "$ACTOR" ]; then
-  ACTOR="$(basename "$PWD")"; ACTOR="${ACTOR#wt-}"; ACTOR="${ACTOR#botfam-}"
-fi
-[ -n "$FAM" ] || FAM="${BOTFAM_FAM:-$(basename "$(dirname "$PWD")")}"
-TOKEN_FILE="$HOME/.botfam/token-${FAM}-${ACTOR}"
+# Identity (sourced from lib-botfam.sh)
+source "$(dirname "$0")/lib-botfam.sh"
+derive_identity
 
 # Forge host (host[:port]) for git-config scoping, derived from --host.
 FORGE_HOSTPORT="${HOST#*://}"; FORGE_HOSTPORT="${FORGE_HOSTPORT%%/*}"
@@ -87,14 +84,23 @@ else
 fi
 
 # --- 2. credential helper -----------------------------------------------------
+# The helper is now the `botfam credential` subcommand (#212), not the retired
+# tools/git-credential-botfam shell script — it lives in the binary and no
+# longer depends on a path inside a particular (maybe to-be-retired) worktree.
+# Use an ABSOLUTE path to the botfam binary so git's `sh -c` finds it regardless
+# of the invoking PATH (the bare-command pitfall, #224).
 if [ -n "$SKIP_HELPER" ]; then
   echo "[2/4] helper: skipped (--skip-helper)"
 else
-  helper="$here/git-credential-botfam"
-  if [ ! -x "$helper" ]; then
-    echo "[2/4] helper: WARNING ${helper} not found/executable — skipping (see #4)" >&2
+  botfam_bin="$(command -v botfam || true)"
+  if [ -z "$botfam_bin" ]; then
+    echo "[2/4] helper: WARNING 'botfam' not on PATH — run tools/install.sh, then re-run; skipping" >&2
   else
+    if [ "$SCOPE" = "--local" ]; then
+      git config "$SCOPE" credential.helper ""
+    fi
     key="credential.${SCHEME}://${FORGE_HOSTPORT}.helper"
+    helper="!${botfam_bin} credential"
     git config "$SCOPE" "$key" "$helper"
     echo "[2/4] helper: git config ${SCOPE} ${key} -> ${helper}"
   fi

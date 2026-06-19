@@ -49,9 +49,9 @@ func TestNewfamCmdCreatesWorktreesAndHarnessConfig(t *testing.T) {
 			t.Fatalf("%s branch = %q, want %q", wt, got, "agent/"+agent)
 		}
 		assertFileContains(t, filepath.Join(wt, ".claude", "settings.json"), `"Bash(botfam:*)"`)
-		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "doc/collab/PROTOCOL.md")
-		assertFileContains(t, filepath.Join(wt, "CLAUDE.md"), "doc/collab/PROTOCOL.md")
-		assertFileContains(t, filepath.Join(wt, "GEMINI.md"), "doc/collab/PROTOCOL.md")
+		assertFileContains(t, filepath.Join(wt, "AGENTS.md"), "botfam:///docs/protocol")
+		assertFileContains(t, filepath.Join(wt, "CLAUDE.md"), "botfam:///docs/protocol")
+		assertFileContains(t, filepath.Join(wt, "GEMINI.md"), "botfam:///docs/protocol")
 		assertFileContains(t, filepath.Join(wt, "doc/collab/PROTOCOL.md"), "botfam Coordination Protocol")
 	}
 
@@ -202,6 +202,15 @@ func callBotfamTool(t *testing.T, home, workDir, bin, name string, args map[stri
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	// Guarantee the spawned `botfam serve` child is reaped even if the test
+	// fails or panics before the cmd.Wait() below — otherwise a t.Fatalf in
+	// the response-decoding path orphans the daemon (see issue #255).
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	})
 
 	writeJSONRPC(t, stdin, 1, "initialize", map[string]any{})
 	writeJSONRPC(t, stdin, 2, "tools/call", map[string]any{"name": name, "arguments": args})

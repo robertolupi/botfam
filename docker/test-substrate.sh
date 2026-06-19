@@ -26,7 +26,7 @@ last_probe = 0.0
 while time.time() < deadline:
     try:
         line = f.readline()
-    except TimeoutError:
+    except (TimeoutError, OSError):
         line = ""
     if line:
         line = line.strip()
@@ -38,12 +38,12 @@ while time.time() < deadline:
             send("JOIN #botfam")
         if len(p) > 1 and p[1] == "366":
             joined = True
-        if "PRIVMSG #botfam" in line and 'Proposal "smoke"' in line and ":scribe!" in line:
+        if "PRIVMSG #botfam" in line and "version:" in line and ":scribe!" in line:
             print("OK: scribe answered:", line.split(":", 2)[-1])
             send("QUIT"); sys.exit(0)
     # scribe may join after us; re-probe every 3s once we're in the channel
     if joined and time.time() - last_probe > 3:
-        send("PRIVMSG #botfam :!tally id=smoke")
+        send("PRIVMSG #botfam :!version")
         last_probe = time.time()
 print("FAIL: no scribe tally reply within deadline "
       f"(registered={registered}, joined={joined})")

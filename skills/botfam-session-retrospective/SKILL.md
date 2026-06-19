@@ -30,16 +30,14 @@ Use only evidence available from the current session or repo:
   - the scribe's machine-readable ledger (JSONL at `COLLAB_HISTORY`, one event
     per line with sender/type/target/body),
   - server-side history when available (ergo `CHATHISTORY`),
-- ccrep state from bang-verb lines in the ledger
-  (`!propose`/`!evaluate`/`!vote` and scribe `!tally` replies),
-- review comments and verdicts (sent as `!evaluate` lines),
+- Gitea PR reviews, comments, and verdicts,
 - tests run and failures,
 - human interventions (operator messages on the channel),
 - TODOs and unresolved questions.
 
 If evidence is missing, say so explicitly. Do not infer intent. When client
-logs and the scribe ledger disagree, quote both and flag the divergence — that
-is itself a finding.
+logs and Gitea timeline disagree, quote both and flag the divergence — that is
+itself a finding.
 
 ## Output Path
 
@@ -57,14 +55,14 @@ wiki/review-YYYY-MM-DD-ACTOR_N.md
 Where:
 
 - `YYYY-MM-DD` is the current local date.
-- `ACTOR` is the botfam actor name: the worktree basename with leading `wt-` or
-  `botfam-` stripped.
+- `ACTOR` is the botfam actor name: resolved by running `botfam whoami` (or the
+  worktree directory basename with prefixes stripped per PROTOCOL §1).
 - `N` is the next progressive integer for that date and actor.
 
 Before writing:
 
 1. Read `doc/collab/PROTOCOL.md`.
-2. Determine the actor from `basename "$PWD"` using the protocol rule.
+2. Determine the actor by running `botfam whoami` (or using the protocol rule).
 3. If `wiki/` is missing, clone it:
    `git clone "$(git remote get-url gitea | sed 's/\.git$//').wiki.git" wiki`.
 4. List existing matching files in `wiki/review-*`.
@@ -115,6 +113,16 @@ human_operator:
 session_goal:
 final_status: success | partial | failed | abandoned | unknown
 postmortem_author:
+
+# Cost and Value Metrics Vector (Value in Human-Touches & Instrument the Harness)
+# Crucial: Retrieve exact usage figures from the harness / observability store out-of-band.
+# Do NOT ask the agent to self-report or estimate tokens (Self-reported Telemetry is forbidden).
+metrics_vector:
+  token_usage: <total input + output + cache tokens spent>
+  financial_cost_usd: <estimated cost in USD>
+  wall_clock_minutes: <elapsed wall-clock time>
+  human_touches: <count of operator interventions: unblocks, corrections, re-prompts>
+  escaped_defects: <defects introduced or missed by this session>
 ```
 
 ## 2. Executive Summary
@@ -320,6 +328,15 @@ agent_limitations:
     -
 
 next_agent_handoff:
+  # Handover Snapshot (for let-it-crash recovery / warm restarts)
+  # Distill the current reasoning state so the next agent doesn't pay the onboarding tax.
+  handover_snapshot:
+    goal: <what needs to be achieved next>
+    decisions_so_far:
+      - <key choices and their rationales>
+    branch_or_pr_pointer: <e.g., origin/improve-skills-botfam-session-retrospective>
+    current_blocker: <what is holding the work back, if anything>
+    next_step: <the next safest action to take>
   first_checks:
     -
   avoid_repeating:
@@ -335,6 +352,11 @@ A good retrospective:
 
 - names exact artifacts, commits, files, tests, messages, or logs as evidence;
 - distinguishes facts from assumptions;
+- measures and reports the cost-and-value efficiency vector (tokens, $,
+  wall-clock, human-touches, escaped-defects) using harness telemetry instead
+  of self-reported guessing;
+- ensures any uncompleted or partial task is left with a valid, durable
+  Handover Snapshot;
 - produces action items with verification;
 - avoids blame and vague self-talk;
 - makes the next comparable session easier to run or review.
@@ -342,6 +364,8 @@ A good retrospective:
 A poor retrospective:
 
 - relies on memory without evidence;
+- uses self-reported token counts or guesses metrics in prose;
+- leaves incomplete tasks without a Handover Snapshot;
 - says "communicate better" or "be more careful";
 - creates action items with no owner, target artifact, or verification;
 - hides missing evidence;
