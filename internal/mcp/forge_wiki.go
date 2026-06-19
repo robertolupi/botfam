@@ -42,11 +42,20 @@ func wikiSlugFallback(h giteaToolHandler) giteaToolHandler {
 		// Retry once with the escaped slug; a fresh args map keeps the caller's
 		// request untouched.
 		retry := req
-		args := make(map[string]any, len(req.GetArguments()))
+		args := make(map[string]any, len(req.GetArguments())+1)
 		for k, v := range req.GetArguments() {
 			args[k] = v
 		}
 		args["pageName"] = pageName + wikiSlugSuffix
+		// wiki_write update defaults the new title to pageName when no title is
+		// given (upstream updateWikiPageFn). Without this, the escaped-slug retry
+		// would rename the page to "<name>.-". Pin the title to the logical name
+		// so the retry only changes the route, not the page title.
+		if method, _ := args["method"].(string); method == "update" {
+			if title, _ := args["title"].(string); title == "" {
+				args["title"] = pageName
+			}
+		}
 		retry.Params.Arguments = args
 		if res2, err2 := h(ctx, retry); err2 == nil {
 			return normalizeWikiResult(res2), nil

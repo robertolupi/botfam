@@ -56,6 +56,50 @@ func TestWikiSlugFallback_RetriesEscapedSlug(t *testing.T) {
 	}
 }
 
+func TestWikiSlugFallback_UpdateRetryPreservesLogicalTitle(t *testing.T) {
+	// On an update retry for an escaped slug, the title must stay the logical
+	// name — not the ".-" storage slug — or the page gets renamed. (#476 review)
+	var retryArgs map[string]any
+	h := func(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+		pn, _ := req.GetArguments()["pageName"].(string)
+		if pn == "Foo." {
+			return nil, errors.New("404")
+		}
+		retryArgs = req.GetArguments()
+		return mcplib.NewToolResultText(`{}`), nil
+	}
+	if _, err := wikiSlugFallback(h)(context.Background(), wikiReq(map[string]any{
+		"method": "update", "pageName": "Foo.", "content": "x", // no title
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if retryArgs["pageName"] != "Foo."+wikiSlugSuffix {
+		t.Fatalf("retry pageName = %v", retryArgs["pageName"])
+	}
+	if retryArgs["title"] != "Foo." {
+		t.Fatalf("retry title = %v, want logical %q (not the escaped slug)", retryArgs["title"], "Foo.")
+	}
+}
+
+func TestWikiSlugFallback_UpdateRetryKeepsExplicitTitle(t *testing.T) {
+	var retryArgs map[string]any
+	h := func(_ context.Context, req mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
+		if pn, _ := req.GetArguments()["pageName"].(string); pn == "Foo." {
+			return nil, errors.New("404")
+		}
+		retryArgs = req.GetArguments()
+		return mcplib.NewToolResultText(`{}`), nil
+	}
+	if _, err := wikiSlugFallback(h)(context.Background(), wikiReq(map[string]any{
+		"method": "update", "pageName": "Foo.", "content": "x", "title": "Renamed",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if retryArgs["title"] != "Renamed" {
+		t.Fatalf("retry title = %v, want caller's explicit %q", retryArgs["title"], "Renamed")
+	}
+}
+
 func TestWikiSlugFallback_NoRetryWhenSuccess(t *testing.T) {
 	calls := 0
 	h := func(_ context.Context, _ mcplib.CallToolRequest) (*mcplib.CallToolResult, error) {
