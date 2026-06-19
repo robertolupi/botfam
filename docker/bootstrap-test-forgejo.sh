@@ -6,6 +6,20 @@ note() {
   printf 'bootstrap-test-forgejo: %s\n' "$*" >&2
 }
 
+issue_token() {
+  local user=$1
+  docker compose -f compose.test.yaml exec -T -u git forgejo \
+    forgejo admin user generate-access-token --username "$user" --token-name "botfam-token-$user-$(date +%s)" --scopes all --raw
+}
+
+save_token() {
+  local user=$1
+  local token=$2
+
+  mkdir -p "$HOME/.botfam"
+  printf '%s' "$token" > "$HOME/.botfam/token-botfam-${user}-test"
+}
+
 # Wait for Forgejo to become healthy
 note "Waiting for Forgejo container to become healthy..."
 until docker compose -f compose.test.yaml exec -T forgejo sh -c 'nc -z 127.0.0.1 3000' >/dev/null 2>&1; do
@@ -44,33 +58,35 @@ curl -s -X POST -H "Authorization: token $ADMIN_TOKEN" -H "Content-Type: applica
   -d '{"name": "botfam"}' \
   http://localhost:13000/api/v1/orgs/botfam/repos >/dev/null || true
 
-# Create agy-bot and claude-bot users
+# Create bot users
 note "Creating bot users..."
-docker compose -f compose.test.yaml exec -T -u git forgejo \
-  forgejo admin user create --username agy-bot --password agybotpassword --email agy-bot@example.com --must-change-password=false || true
-
-docker compose -f compose.test.yaml exec -T -u git forgejo \
-  forgejo admin user create --username claude-bot --password claudebotpassword --email claude-bot@example.com --must-change-password=false || true
+for user in agy-bot claude-bot codex-bot; do
+  case "$user" in
+    agy-bot) password=agybotpassword; email=agy-bot@example.com ;;
+    claude-bot) password=claudebotpassword; email=claude-bot@example.com ;;
+    codex-bot) password=codexbotpassword; email=codex-bot@example.com ;;
+  esac
+  docker compose -f compose.test.yaml exec -T -u git forgejo \
+    forgejo admin user create --username "$user" --password "$password" --email "$email" --must-change-password=false >/dev/null 2>&1 || true
+done
 
 # Add bot users to the Owners team (ID 1)
 note "Adding bot users to Owners team..."
-curl -s -X PUT -H "Authorization: token $ADMIN_TOKEN" \
-  http://localhost:13000/api/v1/teams/1/members/agy-bot >/dev/null
-curl -s -X PUT -H "Authorization: token $ADMIN_TOKEN" \
-  http://localhost:13000/api/v1/teams/1/members/claude-bot >/dev/null
+for user in agy-bot claude-bot codex-bot; do
+  curl -s -X PUT -H "Authorization: token $ADMIN_TOKEN" \
+    "http://localhost:13000/api/v1/teams/1/members/$user" >/dev/null
+done
 
-# Generate tokens for bot users
 note "Generating access tokens for bot users..."
-AGY_TOKEN=$(docker compose -f compose.test.yaml exec -T -u git forgejo \
-  forgejo admin user generate-access-token --username agy-bot --token-name "botfam-token-agy-$(date +%s)" --scopes all --raw)
-
-CLAUDE_TOKEN=$(docker compose -f compose.test.yaml exec -T -u git forgejo \
-  forgejo admin user generate-access-token --username claude-bot --token-name "botfam-token-claude-$(date +%s)" --scopes all --raw)
+AGY_TOKEN="$(issue_token agy-bot)"
+CLAUDE_TOKEN="$(issue_token claude-bot)"
+CODEX_TOKEN="$(issue_token codex-bot)"
 
 # Save test tokens locally under ~/.botfam/
-mkdir -p "$HOME/.botfam"
-echo "$AGY_TOKEN" > "$HOME/.botfam/token-botfam-agy-test"
-echo "$CLAUDE_TOKEN" > "$HOME/.botfam/token-botfam-claude-test"
+save_token "agy" "$AGY_TOKEN"
+save_token "claude" "$CLAUDE_TOKEN"
+save_token "codex" "$CODEX_TOKEN"
+save_token "admin" "$ADMIN_TOKEN"
 
 note "Bootstrap complete."
-note "Saved tokens to ~/.botfam/token-botfam-agy-test and ~/.botfam/token-botfam-claude-test"
+note "Saved tokens to ~/.botfam/token-botfam-admin-test, ~/.botfam/token-botfam-agy-test, ~/.botfam/token-botfam-claude-test, ~/.botfam/token-botfam-codex-test"

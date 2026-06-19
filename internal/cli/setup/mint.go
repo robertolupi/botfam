@@ -21,6 +21,8 @@ import (
 // notifications. Override with --scopes for a narrower token.
 const defaultMintScopes = "write:repository,write:issue,read:organization,read:user,read:misc,read:notification,write:notification"
 
+var mintHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // NewMintCmd builds `botfam mint` — the Go port of tools/forge-login.sh.
 // It mints a forge access token for --user (password typed hidden, like passwd)
 // and stores it at the per-harness path ~/.botfam/token-<harness>.
@@ -95,7 +97,7 @@ func mintToken(forgeURL, user, password string, scopes []string) (string, error)
 	}
 	req.SetBasicAuth(user, password)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	resp, err := mintHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("token request to %s failed: %w", base, err)
 	}
