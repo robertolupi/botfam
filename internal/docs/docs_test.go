@@ -37,6 +37,7 @@ func TestEmbeddedCorpusIsGeneric(t *testing.T) {
 		"wt-rlupi",
 		"robertolupi",
 		"roberto.lupi",
+		"home.rlupi.com",
 		"go test",
 		"go build",
 		"gofmt",

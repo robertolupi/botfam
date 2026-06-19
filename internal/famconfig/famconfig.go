@@ -70,7 +70,7 @@ type Registry struct {
 	ObjectStores      []string `toml:"object_stores,omitempty"`
 	CreatedAt         string   `toml:"created_at,omitempty"`
 
-	// ForgeURL is the HTTP(S) forge API base (e.g. http://gitea.home.rlupi.com:3000/).
+	// ForgeURL is the HTTP(S) forge API base (e.g. https://gitea.example.com/).
 	// Repository is the org/repo on the forge. Both are explicit in fam.toml so
 	// nothing has to guess them from a (possibly SSH) git remote — see #184.
 	ForgeURL   string `toml:"forge_url,omitempty"`

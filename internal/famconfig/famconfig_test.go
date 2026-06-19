@@ -46,7 +46,7 @@ func famFixture(t *testing.T) (famDir string) {
 		famDir = eval
 	}
 	setConfig(t, Config{
-		ForgeURL: "http://gitea.home.rlupi.com:3000/",
+		ForgeURL: "http://gitea.example.com:3000/",
 		Agents:   map[string]AgentConfig{"claude": {Harness: "claude-code", ForgeUser: "claude-bot"}},
 		Users:    map[string]AgentConfig{"rlupi": {ForgeUser: "rlupi"}},
 		Repos:    map[string]RepoConfig{"dc": {Path: famDir, Slug: "dc", Repository: "deep-cuts/deep-cuts"}},
@@ -369,7 +369,7 @@ func TestResolveFam(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveFam(agent): %v", err)
 	}
-	if rf.Actor != "claude" || rf.Slug != "dc" || rf.ForgeURL != "http://gitea.home.rlupi.com:3000/" || rf.Repository != "deep-cuts/deep-cuts" {
+	if rf.Actor != "claude" || rf.Slug != "dc" || rf.ForgeURL != "http://gitea.example.com:3000/" || rf.Repository != "deep-cuts/deep-cuts" {
 		t.Errorf("ResolvedFam = %+v", rf)
 	}
 	home, _ := os.UserHomeDir()

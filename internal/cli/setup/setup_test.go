@@ -85,7 +85,7 @@ func TestRegisterMCPServerGlobally(t *testing.T) {
 	t.Setenv("HOME", tempDir)
 
 	var out bytes.Buffer
-	forgeURL := "http://gitea.home.rlupi.com:3000"
+	forgeURL := "http://gitea.example.com:3000"
 
 	err = RegisterMCPServerGlobally(forgeURL, "botfam", &out)
 	if err != nil {
