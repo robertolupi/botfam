@@ -96,11 +96,24 @@ func addForgeEntries(entries map[string]dispatchEntry) {
 // context that pkg/gitea.ClientFromContext reads, then invokes the original
 // handler. A missing token is left to surface as a forge auth error rather than
 // failing here, so the tool still reports a clear, actionable result.
+type bypassProxyKey struct{}
+
+func contextWithBypassProxy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, bypassProxyKey{}, true)
+}
+
+func shouldBypassProxy(ctx context.Context) bool {
+	v, ok := ctx.Value(bypassProxyKey{}).(bool)
+	return ok && v
+}
+
 func forgeHandler(toolName, origName string, h func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolResult, error), readOnly bool) toolHandler {
 	return func(ctx context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
 		if !readOnly {
-			if result, proxied, err := proxyForgeAction(ctx, rc, toolName, args); proxied || err != nil {
-				return result, err
+			if !shouldBypassProxy(ctx) {
+				if result, proxied, err := proxyForgeAction(ctx, rc, toolName, args); proxied || err != nil {
+					return result, err
+				}
 			}
 		}
 
@@ -279,7 +292,8 @@ func (e *ForgeExecutor) ExecuteForgeAction(ctx context.Context, toolName, argume
 		return "", fmt.Errorf("unsupported forge tool: %q", toolName)
 	}
 
-	res, err := entry.handler(ctx, e.rc, args)
+	// Pass goroutine-local bypass context to skip proxying loop inside the handler
+	res, err := entry.handler(contextWithBypassProxy(ctx), e.rc, args)
 	if err != nil {
 		return "", err
 	}

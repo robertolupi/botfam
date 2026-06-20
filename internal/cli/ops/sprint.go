@@ -185,12 +185,9 @@ func newSprintRunCmd() *cobra.Command {
 			socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("bf-%s.sock", id))
 			mux := http.NewServeMux()
 
-			fctx, err := famctx.Resolve(cmd.Context(), famctx.Inputs{
-				WorkDir: wd,
-				Mode:    famctx.ModeLocate,
-			})
+			fctx, err := famctx.ResolveAgentRuntime(wd)
 			if err != nil {
-				return fmt.Errorf("resolve fam context: %w", err)
+				return fmt.Errorf("resolve agent runtime context: %w", err)
 			}
 
 			executor := mcp.NewForgeExecutor(fctx)

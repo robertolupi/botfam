@@ -57,11 +57,48 @@ func TestSprintSupervisorLifecycle(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	gitDir := filepath.Join(tempDir, "botfam")
+	gitDir := filepath.Join(tempDir, "wt-agy-bot")
 	if err := os.Mkdir(gitDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	initGitRepo(t, gitDir)
+
+	// Create config.toml under the redirected home registering the mock git repository
+	dotBotfam := filepath.Join(tmpHome, ".botfam")
+	if err := os.MkdirAll(dotBotfam, 0755); err != nil {
+		t.Fatal(err)
+	}
+	evalGitDir := gitDir
+	if eval, err := filepath.EvalSymlinks(gitDir); err == nil {
+		evalGitDir = eval
+	}
+	configToml := fmt.Sprintf(`
+[repo.botfam]
+path = %q
+repository = "botfam/botfam"
+forge_url = "http://gitea:3000/"
+
+[agent.agy-bot]
+harness = "gemini"
+forge_user = "agy-bot"
+`, evalGitDir)
+	if err := os.WriteFile(filepath.Join(dotBotfam, "config.toml"), []byte(configToml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	famToml := `
+[repo.botfam]
+repository = "botfam/botfam"
+forge_url = "http://gitea:3000/"
+
+[agent.agy-bot]
+harness = "gemini"
+`
+	if err := os.WriteFile(filepath.Join(gitDir, "fam.toml"), []byte(famToml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, gitDir, "add", "fam.toml")
+	runGit(t, gitDir, "commit", "-m", "add fam.toml")
 
 	oldWd, err := os.Getwd()
 	if err != nil {
@@ -196,11 +233,48 @@ func TestSprintSupervisorTTLReaping(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	gitDir := filepath.Join(tempDir, "botfam")
+	gitDir := filepath.Join(tempDir, "wt-agy-bot")
 	if err := os.Mkdir(gitDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	initGitRepo(t, gitDir)
+
+	// Create config.toml under the redirected home registering the mock git repository
+	dotBotfam := filepath.Join(tmpHome, ".botfam")
+	if err := os.MkdirAll(dotBotfam, 0755); err != nil {
+		t.Fatal(err)
+	}
+	evalGitDir := gitDir
+	if eval, err := filepath.EvalSymlinks(gitDir); err == nil {
+		evalGitDir = eval
+	}
+	configToml := fmt.Sprintf(`
+[repo.botfam]
+path = %q
+repository = "botfam/botfam"
+forge_url = "http://gitea:3000/"
+
+[agent.agy-bot]
+harness = "gemini"
+forge_user = "agy-bot"
+`, evalGitDir)
+	if err := os.WriteFile(filepath.Join(dotBotfam, "config.toml"), []byte(configToml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	famToml := `
+[repo.botfam]
+repository = "botfam/botfam"
+forge_url = "http://gitea:3000/"
+
+[agent.agy-bot]
+harness = "gemini"
+`
+	if err := os.WriteFile(filepath.Join(gitDir, "fam.toml"), []byte(famToml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, gitDir, "add", "fam.toml")
+	runGit(t, gitDir, "commit", "-m", "add fam.toml")
 
 	oldWd, err := os.Getwd()
 	if err != nil {
