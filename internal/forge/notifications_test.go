@@ -30,6 +30,39 @@ func TestListUnreadNotifications(t *testing.T) {
 	}
 }
 
+func TestListAllUnreadNotificationsPaginates(t *testing.T) {
+	c := fakeForge(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/notifications" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "", "1":
+			// Signal a second page via the Link header rel="next".
+			w.Header().Set("Link", `</api/v1/notifications?page=2>; rel="next"`)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":1,"unread":true,"subject":{"title":"p1","type":"Issue","html_url":"http://h/botfam/botfam/issues/1"},"repository":{"full_name":"botfam/botfam"}}]`))
+		case "2":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[{"id":2,"unread":true,"subject":{"title":"p2","type":"Pull","html_url":"http://h/botfam/botfam/pulls/2"},"repository":{"full_name":"botfam/botfam"}}]`))
+		default:
+			t.Errorf("unexpected page: %s", r.URL.Query().Get("page"))
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`[]`))
+		}
+	})
+	ns, err := c.ListAllUnreadNotifications(context.Background())
+	if err != nil {
+		t.Fatalf("ListAllUnreadNotifications: %v", err)
+	}
+	if len(ns) != 2 {
+		t.Fatalf("expected 2 notifications across pages, got %d: %+v", len(ns), ns)
+	}
+	if ns[0].ID != 1 || ns[1].ID != 2 {
+		t.Errorf("unexpected paginated order: %+v", ns)
+	}
+}
+
 func TestListUnreadRepoNotifications(t *testing.T) {
 	c := fakeForge(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/botfam/botfam/notifications" {

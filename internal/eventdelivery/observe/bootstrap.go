@@ -29,7 +29,7 @@ var subjectNumberRe = regexp.MustCompile(`/(issues|pulls)/(\d+)`)
 // per-thread updated_at key lets a later poll mint a fresh observation when the
 // thread sees new activity.
 func (o *Observer) Bootstrap(ctx context.Context) ([]Observation, error) {
-	threads, err := o.q.ListUnreadNotifications(ctx)
+	threads, err := o.q.ListAllUnreadNotifications(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: list unread notifications: %w", err)
 	}

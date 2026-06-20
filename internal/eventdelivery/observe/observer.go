@@ -20,8 +20,10 @@ type Querier interface {
 	ListOpenIssuesAssignedTo(ctx context.Context, actor string) ([]*forge.Issue, error)
 	// ListOpenPulls returns all open pull requests (filtered in memory).
 	ListOpenPulls(ctx context.Context) ([]*forge.PullRequest, error)
-	// ListUnreadNotifications returns the actor's unread notification threads.
-	ListUnreadNotifications(ctx context.Context) ([]forge.Notification, error)
+	// ListAllUnreadNotifications returns ALL of the actor's unread notification
+	// threads (paginated), not just the first page — the bootstrap must not drop
+	// pokes past a page boundary.
+	ListAllUnreadNotifications(ctx context.Context) ([]forge.Notification, error)
 }
 
 // Observer composes the standing worklist and the unread bootstrap for one

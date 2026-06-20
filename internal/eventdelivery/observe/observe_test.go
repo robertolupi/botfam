@@ -38,7 +38,7 @@ func (f *fakeQuerier) ListOpenIssuesAssignedTo(_ context.Context, who string) ([
 func (f *fakeQuerier) ListOpenPulls(context.Context) ([]*forge.PullRequest, error) {
 	return f.pulls, nil
 }
-func (f *fakeQuerier) ListUnreadNotifications(context.Context) ([]forge.Notification, error) {
+func (f *fakeQuerier) ListAllUnreadNotifications(context.Context) ([]forge.Notification, error) {
 	return f.notifications, nil
 }
 
