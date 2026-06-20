@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -178,9 +179,29 @@ INSERT INTO relation_predicates (id, relation, source_query, stable_key_template
 	},
 }
 
+var observeStoreEvent = func(string) {}
+
 type OutboxResult struct {
 	ID      string
 	Deduped bool
+}
+
+type CommandRunner interface {
+	Run(ctx context.Context, dir, name string, args ...string) ([]byte, error)
+}
+
+type ExecRunner struct{}
+
+func (ExecRunner) Run(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}
+
+type SessionRepoOptions struct {
+	Dir       string
+	RunNumber int
+	Runner    CommandRunner
 }
 
 func Open(path string) (*sql.DB, error) {
@@ -224,6 +245,7 @@ func applyMigration(ctx context.Context, db *sql.DB, migration Migration) error 
 	if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
 		return fmt.Errorf("migration %d %s: %w", migration.Version, migration.Name, err)
 	}
+	observeStoreEvent(fmt.Sprintf("migration %d", migration.Version))
 	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, name) VALUES (?, ?)`, migration.Version, migration.Name); err != nil {
 		return err
 	}
@@ -255,7 +277,11 @@ VALUES (?, ?, ?, ?, ?, ?)`, id, workItemID, actionKey, toolName, argumentsJSON, 
 }
 
 func Dump(path string) ([]byte, error) {
-	return exec.Command("sqlite3", path, ".dump").Output()
+	out, err := exec.Command("sqlite3", path, ".dump").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("dump sqlite database %s: %w: %s", path, err, string(out))
+	}
+	return out, nil
 }
 
 func Restore(path string, dump []byte) error {
@@ -268,4 +294,102 @@ func Restore(path string, dump []byte) error {
 		return fmt.Errorf("restore sqlite dump: %w: %s", err, string(out))
 	}
 	return nil
+}
+
+func OpenSessionRepo(ctx context.Context, opts SessionRepoOptions) (*sql.DB, error) {
+	if opts.Dir == "" {
+		return nil, errors.New("session repo dir is required")
+	}
+	runner := opts.Runner
+	if runner == nil {
+		runner = ExecRunner{}
+	}
+	if err := os.MkdirAll(filepath.Join(opts.Dir, "artifacts"), 0o755); err != nil {
+		return nil, fmt.Errorf("create artifacts dir: %w", err)
+	}
+	if err := EnsureSessionGitignore(opts.Dir); err != nil {
+		return nil, err
+	}
+	if err := CaptureCrashedRun(ctx, opts.Dir, opts.RunNumber, runner); err != nil {
+		return nil, err
+	}
+	db, err := Open(filepath.Join(opts.Dir, "session.db"))
+	if err != nil {
+		return nil, err
+	}
+	if err := ApplyMigrations(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func CaptureCrashedRun(ctx context.Context, dir string, runNumber int, runner CommandRunner) error {
+	if runner == nil {
+		runner = ExecRunner{}
+	}
+	dbPath := filepath.Join(dir, "session.db")
+	if _, err := os.Stat(dbPath); err == nil {
+		if err := DumpToFile(dbPath, filepath.Join(dir, "session.sql")); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	out, err := runner.Run(ctx, dir, "git", "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("inspect crashed-run dirty state: %w: %s", err, string(out))
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return nil
+	}
+	if out, err := runner.Run(ctx, dir, "git", "add", ".gitignore", "session.sql", "artifacts"); err != nil {
+		return fmt.Errorf("stage crashed-run state: %w: %s", err, string(out))
+	}
+	message := fmt.Sprintf("crashed-run: run %d auto-captured state", runNumber)
+	if out, err := runner.Run(ctx, dir, "git", "commit", "-m", message); err != nil {
+		return fmt.Errorf("commit crashed-run state: %w: %s", err, string(out))
+	}
+	return nil
+}
+
+func DumpToFile(dbPath, dumpPath string) error {
+	dump, err := Dump(dbPath)
+	if err != nil {
+		return err
+	}
+	tmp := dumpPath + ".tmp"
+	if err := os.WriteFile(tmp, dump, 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, dumpPath); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	observeStoreEvent("dump session.sql")
+	return fsyncDir(filepath.Dir(dumpPath))
+}
+
+func EnsureSessionGitignore(dir string) error {
+	contents := strings.Join([]string{
+		"session.db",
+		"session.db-wal",
+		"session.db-shm",
+		"*." + "s" + "ock",
+		"*." + "s" + "ocket",
+		"*." + "p" + "id",
+		"*.lock",
+		"*." + "f" + "lock",
+		"",
+	}, "\n")
+	path := filepath.Join(dir, ".gitignore")
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == contents {
+		return nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return WriteCompleteFile(path, []byte(contents), 0o644)
 }
