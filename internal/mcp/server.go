@@ -150,6 +150,9 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	if err != nil {
 		return
 	}
+	if os.Getenv("BOTFAM_WORKER_CHANNEL_SOCKET") != "" || firstNonEmptyEnv("BOTFAM_SESSION_RESOLVER_SOCKET", "BOTFAM_EVENTDELIVERY_RESOLVER_SOCKET") != "" {
+		return
+	}
 	if on, _ := rf.FlagEnabled("legacy_ingest", false); !on {
 		return
 	}

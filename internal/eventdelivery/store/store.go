@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
 
@@ -177,13 +179,32 @@ INSERT INTO relation_predicates (id, relation, source_query, stable_key_template
   ('mention_out_of_scope_artifact', 'Mention of actor on out-of-scope artifact', 'GET /notifications?status-types=unread filtered by subject/mention', 'artifact:{number}:mention:{message_id}', 'noise', 0);
 `,
 	},
+	{
+		Version: 3,
+		Name:    "event_delivery_v2_outbox_responses_and_telemetry",
+		SQL: `
+ALTER TABLE forge_action_outbox ADD COLUMN response_json TEXT NOT NULL DEFAULT '{}';
+
+CREATE TABLE telemetry_spans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trace_id TEXT NOT NULL,
+  span_id TEXT NOT NULL,
+  component TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+`,
+	},
 }
 
 var observeStoreEvent = func(string) {}
 
 type OutboxResult struct {
-	ID      string
-	Deduped bool
+	ID           string
+	Deduped      bool
+	Committed    bool
+	ResponseJSON string
 }
 
 type CommandRunner interface {
@@ -195,8 +216,15 @@ type ExecRunner struct{}
 func (ExecRunner) Run(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	return cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
+	logGitSubprocess(ctx, name, args, err)
+	return out, err
 }
+
+const (
+	GitActionLogDBEnv = "BOTFAM_GIT_ACTION_LOG_DB"
+	SeamTokenEnv      = "BOTFAM_SEAM_TOKEN"
+)
 
 type SessionRepoOptions struct {
 	Dir               string
@@ -279,13 +307,135 @@ VALUES (?, ?, ?, ?, ?, ?)`, id, workItemID, actionKey, toolName, argumentsJSON, 
 		return OutboxResult{}, err
 	}
 	if rows == 1 {
-		return OutboxResult{ID: id}, nil
+		return OutboxResult{ID: id, ResponseJSON: "{}"}, nil
 	}
-	var existingID string
-	if err := db.QueryRowContext(ctx, `SELECT id FROM forge_action_outbox WHERE work_item_id = ? AND action_key = ?`, workItemID, actionKey).Scan(&existingID); err != nil {
+	var existing OutboxResult
+	var state string
+	if err := db.QueryRowContext(ctx, `SELECT id, state, response_json FROM forge_action_outbox WHERE work_item_id = ? AND action_key = ?`, workItemID, actionKey).Scan(&existing.ID, &state, &existing.ResponseJSON); err != nil {
 		return OutboxResult{}, err
 	}
-	return OutboxResult{ID: existingID, Deduped: true}, nil
+	existing.Deduped = true
+	existing.Committed = state == "committed"
+	return existing, nil
+}
+
+func RecordForgeActionAttempt(ctx context.Context, db *sql.DB, outboxID string, fencingToken uint64, result, responseJSON string) error {
+	if strings.TrimSpace(outboxID) == "" {
+		return errors.New("outbox id is required")
+	}
+	if strings.TrimSpace(result) == "" {
+		return errors.New("attempt result is required")
+	}
+	if strings.TrimSpace(responseJSON) == "" {
+		responseJSON = "{}"
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO action_attempts (outbox_id, fencing_token, result, response_json) VALUES (?, ?, ?, ?)`, outboxID, fencingToken, result, responseJSON); err != nil {
+		return err
+	}
+	if result == "committed" {
+		if _, err := tx.ExecContext(ctx, `UPDATE forge_action_outbox SET state = 'committed', committed_at = COALESCE(committed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), response_json = ? WHERE id = ?`, responseJSON, outboxID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func PendingWorkItems(ctx context.Context, db *sql.DB, limit int) ([]WorkItem, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := db.QueryContext(ctx, `SELECT id, kind, source_id, title, body, scope_generation FROM work_items WHERE state = 'pending' ORDER BY created_at, id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkItem
+	for rows.Next() {
+		var item WorkItem
+		if err := rows.Scan(&item.ID, &item.Kind, &item.SourceID, &item.Title, &item.Body, &item.ScopeGeneration); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func RecordArtifact(ctx context.Context, db *sql.DB, id, workItemID, kind, uri, sha256 string) error {
+	if strings.TrimSpace(id) == "" {
+		id = uuid.NewString()
+	}
+	if strings.TrimSpace(workItemID) == "" || strings.TrimSpace(kind) == "" || strings.TrimSpace(uri) == "" {
+		return errors.New("work item id, kind, and uri are required")
+	}
+	_, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO artifacts (id, work_item_id, kind, uri, sha256) VALUES (?, ?, ?, ?, ?)`, id, workItemID, kind, uri, sha256)
+	return err
+}
+
+func RecordTelemetrySpan(ctx context.Context, db *sql.DB, traceID, spanID, component, eventType, payloadJSON, timestamp string) error {
+	if strings.TrimSpace(payloadJSON) == "" {
+		payloadJSON = "{}"
+	}
+	if strings.TrimSpace(timestamp) == "" {
+		_, err := db.ExecContext(ctx, `INSERT INTO telemetry_spans (trace_id, span_id, component, event_type, payload_json) VALUES (?, ?, ?, ?, ?)`, traceID, spanID, component, eventType, payloadJSON)
+		return err
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO telemetry_spans (trace_id, span_id, component, event_type, payload_json, timestamp) VALUES (?, ?, ?, ?, ?, ?)`, traceID, spanID, component, eventType, payloadJSON, timestamp)
+	return err
+}
+
+func LogGitAction(ctx context.Context, db *sql.DB, id, runID, action, traceID, spanID, payloadJSON string) error {
+	if strings.TrimSpace(id) == "" {
+		id = uuid.NewString()
+	}
+	if strings.TrimSpace(action) == "" {
+		return errors.New("git action is required")
+	}
+	if strings.TrimSpace(payloadJSON) == "" {
+		payloadJSON = "{}"
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO git_action_log (id, run_id, action, trace_id, span_id, payload_json) VALUES (?, NULLIF(?, ''), ?, ?, ?, ?)`, id, runID, action, traceID, spanID, payloadJSON)
+	return err
+}
+
+func logGitSubprocess(ctx context.Context, name string, args []string, runErr error) {
+	if name != "git" {
+		return
+	}
+	dbPath := os.Getenv(GitActionLogDBEnv)
+	if dbPath == "" {
+		return
+	}
+	db, err := Open(dbPath)
+	if err != nil {
+		return
+	}
+	defer db.Close()
+	payload := map[string]any{
+		"argv":       append([]string{name}, args...),
+		"seam_token": os.Getenv(SeamTokenEnv),
+	}
+	if runErr != nil {
+		payload["error"] = runErr.Error()
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	_ = LogGitAction(ctx, db, "", "", strings.Join(append([]string{name}, args...), " "), "", "", string(payloadJSON))
+}
+
+type WorkItem struct {
+	ID              string
+	Kind            string
+	SourceID        string
+	Title           string
+	Body            string
+	ScopeGeneration uint64
 }
 
 func Dump(path string) ([]byte, error) {

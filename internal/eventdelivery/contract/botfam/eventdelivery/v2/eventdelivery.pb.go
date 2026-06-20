@@ -745,6 +745,7 @@ type ActionAck struct {
 	Committed     bool                   `protobuf:"varint,1,opt,name=committed,proto3" json:"committed,omitempty"`
 	Deduped       bool                   `protobuf:"varint,2,opt,name=deduped,proto3" json:"deduped,omitempty"`
 	OutboxId      string                 `protobuf:"bytes,3,opt,name=outbox_id,json=outboxId,proto3" json:"outbox_id,omitempty"`
+	ResponseJson  string                 `protobuf:"bytes,4,opt,name=response_json,json=responseJson,proto3" json:"response_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -796,6 +797,13 @@ func (x *ActionAck) GetDeduped() bool {
 func (x *ActionAck) GetOutboxId() string {
 	if x != nil {
 		return x.OutboxId
+	}
+	return ""
+}
+
+func (x *ActionAck) GetResponseJson() string {
+	if x != nil {
+		return x.ResponseJson
 	}
 	return ""
 }
@@ -1366,11 +1374,12 @@ const file_botfam_eventdelivery_v2_eventdelivery_proto_rawDesc = "" +
 	"\n" +
 	"action_key\x18\x02 \x01(\tR\tactionKey\x12\x1b\n" +
 	"\ttool_name\x18\x03 \x01(\tR\btoolName\x12%\n" +
-	"\x0earguments_json\x18\x04 \x01(\tR\rargumentsJson\"`\n" +
+	"\x0earguments_json\x18\x04 \x01(\tR\rargumentsJson\"\x85\x01\n" +
 	"\tActionAck\x12\x1c\n" +
 	"\tcommitted\x18\x01 \x01(\bR\tcommitted\x12\x18\n" +
 	"\adeduped\x18\x02 \x01(\bR\adeduped\x12\x1b\n" +
-	"\toutbox_id\x18\x03 \x01(\tR\boutboxId\"q\n" +
+	"\toutbox_id\x18\x03 \x01(\tR\boutboxId\x12#\n" +
+	"\rresponse_json\x18\x04 \x01(\tR\fresponseJson\"q\n" +
 	"\x0eObserveRequest\x124\n" +
 	"\x05scope\x18\x01 \x01(\v2\x1e.botfam.eventdelivery.v2.ScopeR\x05scope\x12)\n" +
 	"\x10scope_generation\x18\x02 \x01(\x04R\x0fscopeGeneration\"\xd9\x02\n" +

@@ -78,6 +78,36 @@ func TestForgeActionOutboxDedupsWithoutFencingToken(t *testing.T) {
 	}
 }
 
+func TestForgeActionOutboxCachesCommittedResponse(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, ctx)
+	defer db.Close()
+
+	insertWorkItem(t, ctx, db)
+	first, err := EnqueueForgeAction(ctx, db, "outbox-1", "work-1", "close-issue", "forge_issue_write", `{"state":"closed"}`, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordForgeActionAttempt(ctx, db, first.ID, 7, "committed", `{"ok":true}`); err != nil {
+		t.Fatal(err)
+	}
+	second, err := EnqueueForgeAction(ctx, db, "outbox-2", "work-1", "close-issue", "forge_issue_write", `{"state":"closed"}`, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Deduped || !second.Committed || second.ResponseJSON != `{"ok":true}` {
+		t.Fatalf("deduped result = %+v, want committed cached response", second)
+	}
+
+	var attempts int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_attempts WHERE outbox_id = 'outbox-1'`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
+
 func TestDumpRoundTripIncludesWALCommittedTransaction(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -125,6 +155,40 @@ func TestDumpRoundTripIncludesWALCommittedTransaction(t *testing.T) {
 	}
 	if toolName != "forge_issue_write" {
 		t.Fatalf("tool name = %q, want forge_issue_write", toolName)
+	}
+}
+
+func TestExecRunnerLogsGitActionsWithSeamToken(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "session.db")
+	diskDB, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyMigrations(ctx, diskDB); err != nil {
+		t.Fatal(err)
+	}
+	diskDB.Close()
+
+	repo := t.TempDir()
+	runGit(t, repo, "init")
+	t.Setenv(GitActionLogDBEnv, dbPath)
+	t.Setenv(SeamTokenEnv, "seam-123")
+	if _, err := (ExecRunner{}).Run(ctx, repo, "git", "status", "--porcelain"); err != nil {
+		t.Fatal(err)
+	}
+
+	logDB, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logDB.Close()
+	var action, payload string
+	if err := logDB.QueryRowContext(ctx, `SELECT action, payload_json FROM git_action_log ORDER BY created_at DESC LIMIT 1`).Scan(&action, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if action != "git status --porcelain" || !strings.Contains(payload, `"seam_token":"seam-123"`) {
+		t.Fatalf("git log action=%q payload=%s", action, payload)
 	}
 }
 
