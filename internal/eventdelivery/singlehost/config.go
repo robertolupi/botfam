@@ -55,7 +55,16 @@ func isProcessLive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	comm := strings.TrimSpace(string(out))
+	outStr := string(out)
+	var comm string
+	for _, line := range strings.Split(outStr, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.ToUpper(line) == "COMMAND" {
+			continue
+		}
+		comm = line
+		break
+	}
 	baseComm := filepath.Base(comm)
 
 	execPath, err := os.Executable()
