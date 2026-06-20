@@ -5,7 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	pb "github.com/robertolupi/botfam/internal/eventdelivery/contract/botfam/eventdelivery/v2"
@@ -106,6 +110,89 @@ func TestProposeForgeActionRetriesDedupedUncommittedAction(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want error attempt plus retry commit", attempts)
+	}
+}
+
+func TestProposeForgeActionDoesNotDoubleExecuteConcurrentPendingAction(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, ctx)
+	defer db.Close()
+	insertWorkItem(t, ctx, db)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	var calls atomic.Int32
+	svc := Service{
+		DB: db,
+		Executor: ForgeExecutorFunc(func(context.Context, string, string) (string, error) {
+			if calls.Add(1) > 1 {
+				return "", errors.New("duplicate execution")
+			}
+			startedOnce.Do(func() { close(started) })
+			<-release
+			return `{"committed":true}`, nil
+		}),
+	}
+	msg := &pb.ForgeAction{
+		WorkItemId:    "work-1",
+		ActionKey:     "close-issue",
+		ToolName:      "forge_issue_write",
+		ArgumentsJson: `{"state":"closed"}`,
+	}
+
+	firstDone := make(chan *pb.ActionAck, 1)
+	firstErr := make(chan error, 1)
+	go func() {
+		req := connect.NewRequest(msg)
+		req.Header().Set(FencingTokenHeader, "7")
+		resp, err := svc.ProposeForgeAction(ctx, req)
+		if err != nil {
+			firstErr <- err
+			return
+		}
+		firstDone <- resp.Msg
+	}()
+
+	select {
+	case <-started:
+	case err := <-firstErr:
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first forge action to start")
+	}
+	req := connect.NewRequest(msg)
+	req.Header().Set(FencingTokenHeader, "8")
+	if _, err := svc.ProposeForgeAction(ctx, req); err == nil || !strings.Contains(err.Error(), "already in progress") {
+		t.Fatalf("concurrent ProposeForgeAction error = %v, want already in progress", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("executor calls after concurrent duplicate = %d, want 1", got)
+	}
+
+	close(release)
+	select {
+	case err := <-firstErr:
+		t.Fatal(err)
+	case ack := <-firstDone:
+		if !ack.GetCommitted() || ack.GetDeduped() || ack.GetResponseJson() != `{"committed":true}` {
+			t.Fatalf("first ack = %+v, want committed non-deduped response", ack)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first forge action to finish")
+	}
+
+	req = connect.NewRequest(msg)
+	req.Header().Set(FencingTokenHeader, "9")
+	resp, err := svc.ProposeForgeAction(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Msg.GetCommitted() || !resp.Msg.GetDeduped() || resp.Msg.GetResponseJson() != `{"committed":true}` {
+		t.Fatalf("deduped ack = %+v, want committed cached response", resp.Msg)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("executor calls after committed dedupe = %d, want 1", got)
 	}
 }
 

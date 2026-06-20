@@ -319,6 +319,21 @@ VALUES (?, ?, ?, ?, ?, ?)`, id, workItemID, actionKey, toolName, argumentsJSON, 
 	return existing, nil
 }
 
+func ClaimForgeAction(ctx context.Context, db *sql.DB, outboxID string) (bool, error) {
+	if strings.TrimSpace(outboxID) == "" {
+		return false, errors.New("outbox id is required")
+	}
+	res, err := db.ExecContext(ctx, `UPDATE forge_action_outbox SET state = 'in_progress' WHERE id = ? AND state = 'pending'`, outboxID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows == 1, nil
+}
+
 func RecordForgeActionAttempt(ctx context.Context, db *sql.DB, outboxID string, fencingToken uint64, result, responseJSON string) error {
 	if strings.TrimSpace(outboxID) == "" {
 		return errors.New("outbox id is required")
@@ -339,6 +354,10 @@ func RecordForgeActionAttempt(ctx context.Context, db *sql.DB, outboxID string, 
 	}
 	if result == "committed" {
 		if _, err := tx.ExecContext(ctx, `UPDATE forge_action_outbox SET state = 'committed', committed_at = COALESCE(committed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')), response_json = ? WHERE id = ?`, responseJSON, outboxID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `UPDATE forge_action_outbox SET state = 'pending' WHERE id = ? AND state = 'in_progress'`, outboxID); err != nil {
 			return err
 		}
 	}

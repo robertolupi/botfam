@@ -109,6 +109,13 @@ func (s Service) ProposeForgeAction(ctx context.Context, req *connect.Request[pb
 		return connect.NewResponse(&pb.ActionAck{Committed: res.Committed, Deduped: true, OutboxId: res.ID, ResponseJson: defaultJSON(res.ResponseJSON)}), nil
 	}
 	deduped := res.Deduped
+	claimed, err := store.ClaimForgeAction(ctx, s.DB, res.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !claimed {
+		return nil, fmt.Errorf("workerchannel: forge action %s is already in progress", res.ID)
+	}
 	if s.Executor == nil {
 		errJSON := `{"error":"workerchannel: forge executor is required"}`
 		_ = store.RecordForgeActionAttempt(ctx, s.DB, res.ID, fencingToken, "error", errJSON)
