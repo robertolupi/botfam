@@ -105,9 +105,10 @@ func (s Service) ProposeForgeAction(ctx context.Context, req *connect.Request[pb
 	if err != nil {
 		return nil, err
 	}
-	if res.Deduped {
+	if res.Deduped && res.Committed {
 		return connect.NewResponse(&pb.ActionAck{Committed: res.Committed, Deduped: true, OutboxId: res.ID, ResponseJson: defaultJSON(res.ResponseJSON)}), nil
 	}
+	deduped := res.Deduped
 	if s.Executor == nil {
 		errJSON := `{"error":"workerchannel: forge executor is required"}`
 		_ = store.RecordForgeActionAttempt(ctx, s.DB, res.ID, fencingToken, "error", errJSON)
@@ -123,7 +124,7 @@ func (s Service) ProposeForgeAction(ctx context.Context, req *connect.Request[pb
 	if err := store.RecordForgeActionAttempt(ctx, s.DB, res.ID, fencingToken, "committed", responseJSON); err != nil {
 		return nil, err
 	}
-	return connect.NewResponse(&pb.ActionAck{Committed: true, OutboxId: res.ID, ResponseJson: responseJSON}), nil
+	return connect.NewResponse(&pb.ActionAck{Committed: true, Deduped: deduped, OutboxId: res.ID, ResponseJson: responseJSON}), nil
 }
 
 func parseFencingToken(h http.Header) (uint64, error) {

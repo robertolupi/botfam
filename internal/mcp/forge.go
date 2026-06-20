@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -161,7 +162,17 @@ func proxyForgeAction(ctx context.Context, rc *resolvedCtx, toolName string, arg
 	if err != nil {
 		return nil, true, err
 	}
-	return mcplib.NewToolResultText(resp.Msg.GetResponseJson()), true, nil
+	return forgeActionToolResult(resp.Msg)
+}
+
+func forgeActionToolResult(ack *pb.ActionAck) (*mcplib.CallToolResult, bool, error) {
+	if ack == nil {
+		return nil, true, errors.New("worker channel returned empty forge action ack")
+	}
+	if !ack.GetCommitted() {
+		return nil, true, fmt.Errorf("worker channel did not commit forge action outbox_id=%q deduped=%t", ack.GetOutboxId(), ack.GetDeduped())
+	}
+	return mcplib.NewToolResultText(ack.GetResponseJson()), true, nil
 }
 
 type workerEndpoint struct {

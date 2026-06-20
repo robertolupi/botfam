@@ -3,6 +3,7 @@ package workerchannel
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -57,6 +58,54 @@ func TestProposeForgeActionDedupesCommittedResponse(t *testing.T) {
 	}
 	if storedToken != 7 {
 		t.Fatalf("attempt fencing token = %d, want 7", storedToken)
+	}
+}
+
+func TestProposeForgeActionRetriesDedupedUncommittedAction(t *testing.T) {
+	ctx := context.Background()
+	db := openMigrated(t, ctx)
+	defer db.Close()
+	insertWorkItem(t, ctx, db)
+
+	calls := 0
+	svc := Service{
+		DB: db,
+		Executor: ForgeExecutorFunc(func(context.Context, string, string) (string, error) {
+			calls++
+			if calls == 1 {
+				return "", errors.New("temporary forge failure")
+			}
+			return `{"retry":true}`, nil
+		}),
+	}
+	req := connect.NewRequest(&pb.ForgeAction{
+		WorkItemId:    "work-1",
+		ActionKey:     "close-issue",
+		ToolName:      "forge_issue_write",
+		ArgumentsJson: `{"state":"closed"}`,
+	})
+	req.Header().Set(FencingTokenHeader, "7")
+	if _, err := svc.ProposeForgeAction(ctx, req); err == nil {
+		t.Fatal("first ProposeForgeAction succeeded, want transient error")
+	}
+	req = connect.NewRequest(req.Msg)
+	req.Header().Set(FencingTokenHeader, "8")
+	second, err := svc.ProposeForgeAction(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("executor calls = %d, want retry call", calls)
+	}
+	if !second.Msg.GetCommitted() || !second.Msg.GetDeduped() || second.Msg.GetResponseJson() != `{"retry":true}` {
+		t.Fatalf("retry ack = %+v, want committed deduped cached response", second.Msg)
+	}
+	var attempts int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM action_attempts WHERE outbox_id = ?`, second.Msg.GetOutboxId()).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want error attempt plus retry commit", attempts)
 	}
 }
 
