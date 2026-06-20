@@ -334,6 +334,14 @@ func ClaimForgeAction(ctx context.Context, db *sql.DB, outboxID string) (bool, e
 	return rows == 1, nil
 }
 
+func ReleaseOrphanedForgeActionClaims(ctx context.Context, db *sql.DB) (int64, error) {
+	res, err := db.ExecContext(ctx, `UPDATE forge_action_outbox SET state = 'pending' WHERE state = 'in_progress'`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func RecordForgeActionAttempt(ctx context.Context, db *sql.DB, outboxID string, fencingToken uint64, result, responseJSON string) error {
 	if strings.TrimSpace(outboxID) == "" {
 		return errors.New("outbox id is required")
@@ -499,6 +507,10 @@ func OpenSessionRepo(ctx context.Context, opts SessionRepoOptions) (*sql.DB, err
 		return nil, err
 	}
 	if err := ApplyMigrations(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if _, err := ReleaseOrphanedForgeActionClaims(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
