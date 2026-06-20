@@ -253,6 +253,17 @@ func applyMigration(ctx context.Context, db *sql.DB, migration Migration) error 
 	return tx.Commit()
 }
 
+// StartRun inserts a row for a new supervisor run. raw_observations reference a
+// run, so a run must exist before observations are ingested. It is idempotent on
+// the run id (INSERT OR IGNORE) so re-entrant boots do not fail.
+func StartRun(ctx context.Context, db *sql.DB, id, sessionID string) error {
+	if strings.TrimSpace(id) == "" || strings.TrimSpace(sessionID) == "" {
+		return errors.New("run id and session id are required")
+	}
+	_, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO runs (id, session_id) VALUES (?, ?)`, id, sessionID)
+	return err
+}
+
 func EnqueueForgeAction(ctx context.Context, db *sql.DB, id, workItemID, actionKey, toolName, argumentsJSON string, fencingToken uint64) (OutboxResult, error) {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(workItemID) == "" || strings.TrimSpace(actionKey) == "" {
 		return OutboxResult{}, errors.New("id, work item id, and action key are required")
