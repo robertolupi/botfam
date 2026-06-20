@@ -95,6 +95,7 @@ message ActionAck {
   bool committed = 1;
   bool deduped = 2;
   string outbox_id = 3;
+  string response_json = 4;
 }
 
 service WorkerChannel {

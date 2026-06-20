@@ -30,6 +30,10 @@ func TestProtoContractSurface(t *testing.T) {
 			t.Fatalf("ForgeAction.%s missing", field)
 		}
 	}
+	actionAck := pb.File_botfam_eventdelivery_v2_eventdelivery_proto.Messages().ByName("ActionAck")
+	if actionAck.Fields().ByName("response_json") == nil {
+		t.Fatal("ActionAck.response_json missing")
+	}
 
 	lease := services.ByName(protoreflect.Name("Lease"))
 	for _, method := range []string{"Acquire", "Renew", "Release"} {
