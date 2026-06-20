@@ -65,8 +65,32 @@ func TestConnectHandlerServesOverUnixSocket(t *testing.T) {
 	}
 }
 
+func TestSessionRepoGitignorePatternsOwnSingleHostTransients(t *testing.T) {
+	got := singlehost.SessionRepoGitignorePatterns()
+	for _, pattern := range []string{
+		"*.sock",
+		"*.socket",
+		"*.pid",
+		"*.lock",
+		"*.flock",
+	} {
+		if !containsString(got, pattern) {
+			t.Fatalf("singlehost ignore patterns missing %q: %v", pattern, got)
+		}
+	}
+}
+
 type resolver struct{}
 
 func (resolver) Resolve(context.Context, *connect.Request[pb.Scope]) (*connect.Response[pb.SessionEndpoint], error) {
 	return connect.NewResponse(&pb.SessionEndpoint{Found: true, SessionId: "session-1"}), nil
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

@@ -185,7 +185,7 @@ func TestOpenSessionRepoCapturesCrashBeforeMigrations(t *testing.T) {
 	}
 }
 
-func TestEnsureSessionGitignoreIgnoresTransientSessionFiles(t *testing.T) {
+func TestEnsureSessionGitignoreIgnoresSQLiteSessionFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := EnsureSessionGitignore(dir); err != nil {
 		t.Fatal(err)
@@ -198,11 +198,23 @@ func TestEnsureSessionGitignoreIgnoresTransientSessionFiles(t *testing.T) {
 		"session.db",
 		"session.db-wal",
 		"session.db-shm",
-		"*.sock",
-		"*.pid",
-		"*.lock",
-		"*.flock",
 	} {
+		if !strings.Contains(string(got), pattern+"\n") {
+			t.Fatalf(".gitignore missing %q:\n%s", pattern, got)
+		}
+	}
+}
+
+func TestEnsureSessionGitignoreAppendsBindingPatterns(t *testing.T) {
+	dir := t.TempDir()
+	if err := EnsureSessionGitignore(dir, "*.binding-a", "*.binding-b"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pattern := range []string{"session.db", "*.binding-a", "*.binding-b"} {
 		if !strings.Contains(string(got), pattern+"\n") {
 			t.Fatalf(".gitignore missing %q:\n%s", pattern, got)
 		}

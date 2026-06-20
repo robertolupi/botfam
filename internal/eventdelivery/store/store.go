@@ -199,9 +199,10 @@ func (ExecRunner) Run(ctx context.Context, dir, name string, args ...string) ([]
 }
 
 type SessionRepoOptions struct {
-	Dir       string
-	RunNumber int
-	Runner    CommandRunner
+	Dir               string
+	RunNumber         int
+	Runner            CommandRunner
+	GitignorePatterns []string
 }
 
 func Open(path string) (*sql.DB, error) {
@@ -307,7 +308,7 @@ func OpenSessionRepo(ctx context.Context, opts SessionRepoOptions) (*sql.DB, err
 	if err := os.MkdirAll(filepath.Join(opts.Dir, "artifacts"), 0o755); err != nil {
 		return nil, fmt.Errorf("create artifacts dir: %w", err)
 	}
-	if err := EnsureSessionGitignore(opts.Dir); err != nil {
+	if err := EnsureSessionGitignore(opts.Dir, opts.GitignorePatterns...); err != nil {
 		return nil, err
 	}
 	if err := CaptureCrashedRun(ctx, opts.Dir, opts.RunNumber, runner); err != nil {
@@ -371,18 +372,19 @@ func DumpToFile(dbPath, dumpPath string) error {
 	return fsyncDir(filepath.Dir(dumpPath))
 }
 
-func EnsureSessionGitignore(dir string) error {
-	contents := strings.Join([]string{
+func EnsureSessionGitignore(dir string, extraPatterns ...string) error {
+	patterns := []string{
 		"session.db",
 		"session.db-wal",
 		"session.db-shm",
-		"*." + "s" + "ock",
-		"*." + "s" + "ocket",
-		"*." + "p" + "id",
-		"*.lock",
-		"*." + "f" + "lock",
-		"",
-	}, "\n")
+	}
+	for _, pattern := range extraPatterns {
+		if pattern = strings.TrimSpace(pattern); pattern != "" {
+			patterns = append(patterns, pattern)
+		}
+	}
+	patterns = append(patterns, "")
+	contents := strings.Join(patterns, "\n")
 	path := filepath.Join(dir, ".gitignore")
 	current, err := os.ReadFile(path)
 	if err == nil && string(current) == contents {
