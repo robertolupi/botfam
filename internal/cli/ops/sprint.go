@@ -3,7 +3,6 @@ package ops
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,9 +22,11 @@ import (
 	contractconnect "github.com/robertolupi/botfam/internal/eventdelivery/contract/connect"
 	"github.com/robertolupi/botfam/internal/eventdelivery/singlehost"
 	"github.com/robertolupi/botfam/internal/eventdelivery/store"
+	"github.com/robertolupi/botfam/internal/eventdelivery/workerchannel"
 	"github.com/robertolupi/botfam/internal/famconfig"
+	"github.com/robertolupi/botfam/internal/famctx"
+	"github.com/robertolupi/botfam/internal/mcp"
 	"github.com/spf13/cobra"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // NewSprintCmd builds the `botfam sprint` Cobra command and its subcommands.
@@ -184,8 +185,20 @@ func newSprintRunCmd() *cobra.Command {
 			socketPath := filepath.Join(os.TempDir(), fmt.Sprintf("bf-%s.sock", id))
 			mux := http.NewServeMux()
 
-			wcHandler := &supervisorWorkerChannel{db: db}
-			wcPath, wcMux := contractconnect.NewWorkerChannelHandler(wcHandler)
+			fctx, err := famctx.Resolve(cmd.Context(), famctx.Inputs{
+				WorkDir: wd,
+				Mode:    famctx.ModeLocate,
+			})
+			if err != nil {
+				return fmt.Errorf("resolve fam context: %w", err)
+			}
+
+			executor := mcp.NewForgeExecutor(fctx)
+			wcHandler := workerchannel.Service{
+				DB:       db,
+				Executor: executor,
+			}
+			wcPath, wcMux := wcHandler.Handler()
 			mux.Handle(wcPath, wcMux)
 
 			sessionToken := uuid.New().String()
@@ -428,55 +441,7 @@ func getOrGenerateTraceparent() (traceID string, spanID string, traceparentVal s
 	return traceID, childSpanID, fmt.Sprintf("00-%s-%s-01", traceID, childSpanID)
 }
 
-type supervisorWorkerChannel struct {
-	db *sql.DB
-}
 
-func (s *supervisorWorkerChannel) DispatchWork(ctx context.Context, req *connect.Request[pb.WorkerStream], stream *connect.ServerStream[pb.WorkItem]) error {
-	return nil
-}
-
-func (s *supervisorWorkerChannel) RecordArtifact(ctx context.Context, req *connect.Request[pb.Artifact]) (*connect.Response[emptypb.Empty], error) {
-	art := req.Msg
-	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO artifacts (id, work_item_id, kind, uri, sha256) VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(kind, uri, sha256) DO NOTHING`,
-		uuid.New().String(), art.GetWorkItemId(), art.GetKind(), art.GetUri(), art.GetSha256())
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	return connect.NewResponse(&emptypb.Empty{}), nil
-}
-
-func (s *supervisorWorkerChannel) SubmitTelemetry(ctx context.Context, stream *connect.ClientStream[pb.Span]) (*connect.Response[emptypb.Empty], error) {
-	for stream.Receive() {
-		span := stream.Msg()
-		_, err := s.db.ExecContext(ctx,
-			`INSERT INTO git_action_log (id, run_id, action, trace_id, span_id, payload_json)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			uuid.New().String(), "", span.GetEventType(), span.GetTraceId(), span.GetSpanId(), span.GetPayloadJson())
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-	}
-	if err := stream.Err(); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	return connect.NewResponse(&emptypb.Empty{}), nil
-}
-
-func (s *supervisorWorkerChannel) ProposeForgeAction(ctx context.Context, req *connect.Request[pb.ForgeAction]) (*connect.Response[pb.ActionAck], error) {
-	action := req.Msg
-	res, err := store.EnqueueForgeAction(ctx, s.db, uuid.New().String(), action.GetWorkItemId(), action.GetActionKey(), action.GetToolName(), action.GetArgumentsJson(), 0)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	return connect.NewResponse(&pb.ActionAck{
-		Committed: true,
-		Deduped:   res.Deduped,
-		OutboxId:  res.ID,
-	}), nil
-}
 
 type supervisorSessionResolver struct {
 	sessionID    string
