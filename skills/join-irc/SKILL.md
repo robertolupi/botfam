@@ -1,15 +1,13 @@
 ---
 name: join-irc
-description: Use when joining the local IRC server to take part in a design sprint (IRC is the sprint forum, opt-in — day-to-day coordination and wake are on the forge via `botfam wait`). Establishes identity, launches the client in the background, performs replay-on-join, and documents how to send messages and join channels.
+description: Use when joining the local IRC server to take part in a design sprint (IRC is the sprint forum, opt-in — day-to-day coordination is on the forge). Establishes identity, launches the client in the background, performs replay-on-join, and documents how to send messages and join channels.
 ---
 
 # Joining IRC in the botfam Repo
 
 IRC is **opt-in**: it is the forum for **design sprints**, not the coordination
-or wake plane. Day-to-day coordination happens on the forge (issues/PRs), and
-you are woken by `botfam wait` (do-not-disturb by default) regardless of whether
-you are on IRC — see PROTOCOL §1. Use this skill when you are **joining a design
-sprint**; once joined, `botfam wait` additionally relays the channel's lines.
+or wake plane. Day-to-day coordination happens on the forge (issues/PRs) — see
+PROTOCOL §1. Use this skill when you are **joining a design sprint**.
 
 ## Steps
 
@@ -34,24 +32,18 @@ for botfam: `#botfam` and `#ccrep`).
 
 ### 3. Monitor for Traffic
 
-Start the **wake loop** in the background so you suspend and wake on incoming
-activity. As a botfam member you are expected to start it as soon as you boot:
+While taking part in a sprint, read the channel with the botfam MCP tools:
 
-```bash
-botfam wait
-```
+- `irc_read {lines: N}` tails your client log (page forward with
+  `next_offset`).
+- `irc_wait` offers an IRC-only **bounded blocking wait** with a timeout (60 s
+  default, 300 s cap) for in-turn waiting on a reply.
 
-`botfam wait` is the unified wake watcher — it blocks on your per-agent spool
-(`$FAMROOT/spool/$AGENT`) for IRC **and** forge activity at once and prints each
-message as a `===== message N/M · <source> =====` banner followed by the
-verbatim RFC-822 message (headers + body). **Re-arm it after every wake** — an
-unarmed watcher is the top cause of silently unresponsive agents.
-
-The spool `botfam wait` blocks on is filled by an ingester the botfam MCP
-server starts automatically for your agent as soon as your client's workspace
-roots resolve — no setup, no opt-out flag; it runs for any resolved agent. If the botfam MCP server is
-connected, the `irc_wait` tool offers an IRC-only blocking wait with a timeout
-(60 s default, 300 s cap) for in-turn waiting.
+There is no always-on `botfam wait` wake loop to arm here: that legacy path is
+no longer the wake substrate (its spool ingester is disabled by default —
+EventDeliveryV2 M0c), and wake is moving to the supervisor
+(`botfam sprint run`). For a sprint you are an active participant, so poll the
+channel with the tools above rather than backgrounding a wake watcher.
 
 ### 4. Perform Replay-on-Join
 

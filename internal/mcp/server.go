@@ -124,19 +124,33 @@ func Serve(in io.Reader, out io.Writer, errout io.Writer) error {
 }
 
 // maybeStartIngest lazily launches the per-agent spool ingest goroutine the
-// first time a real (actor, workDir) resolves. It is the Maildir wake path
-// (#229/#342): the ingester is the single writer that tails IRC + drains forge
-// into the spool that `botfam wait` reads. It runs for **any** resolved agent —
-// the previous delivery system has been removed, so ingestion is not behind an
-// opt-in flag (the part to be flag-gated is the M4 notification nudge, #337, not
-// ingestion). The goroutine runs for the server's lifetime and holds an advisory
-// flock, so across multiple harnesses of one agent exactly one instance writes
-// the spool while the rest stand by.
+// first time a real (actor, workDir) resolves. It is the legacy Maildir wake
+// path (#229/#342): the ingester is the single writer that tails IRC + drains
+// forge into the spool that `botfam wait` reads.
+//
+// EventDeliveryV2 M0c (#484): this ingester is **disabled by default**. With the
+// legacy `botfam wait` drain demoted from the unified wake loop, leaving the
+// ingester running would let stdio children keep filling a spool with no drain
+// and multiple writers — the "many consumers, one cursor" race this redesign
+// targets. Opt back in per-fam/agent with the `legacy_ingest` flag while still
+// on the old binary; the replacement is the supervisor (`botfam sprint run`).
+// The goroutine, when enabled, runs for the server's lifetime and holds an
+// advisory flock, so across multiple harnesses of one agent exactly one instance
+// writes the spool while the rest stand by.
 func (s *server) maybeStartIngest(workDir, actor string) {
 	// s.ctx is set only once the server is actually serving (Serve); the
 	// ingester needs that lifetime context to stop cleanly, and gating on it
 	// keeps direct-callTool unit tests from spawning a polling goroutine.
 	if actor == "" || s.ctx == nil {
+		return
+	}
+	// M0c: legacy ingestion is opt-in. Without a resolvable fam we cannot read
+	// the flag, so we stay disabled (the safe default — no orphaned writer).
+	rf, err := famconfig.ResolveFam(workDir)
+	if err != nil {
+		return
+	}
+	if on, _ := rf.FlagEnabled("legacy_ingest", false); !on {
 		return
 	}
 	spoolDir, ircLog, matchNick, err := ingest.IngestParams(workDir)
