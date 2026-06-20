@@ -209,3 +209,34 @@ func (l *Lease) Release(ctx context.Context, req *connect.Request[pb.ReleaseRequ
 
 	return connect.NewResponse(&emptypb.Empty{}), nil
 }
+
+// SetEndpoint updates the flocked session file with the actual listening address and token.
+func (l *Lease) SetEndpoint(addr string, token string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.file == nil {
+		return errors.New("lease not held")
+	}
+
+	sf := SessionFile{
+		LeaseID:      l.leaseID,
+		FencingToken: l.fencingToken,
+		PID:          os.Getpid(),
+		Addr:         addr,
+		Token:        token,
+	}
+
+	if _, err := l.file.Seek(0, 0); err != nil {
+		return err
+	}
+	if err := l.file.Truncate(0); err != nil {
+		return err
+	}
+	encoder := toml.NewEncoder(l.file)
+	if err := encoder.Encode(sf); err != nil {
+		return err
+	}
+	return l.file.Sync()
+}
+

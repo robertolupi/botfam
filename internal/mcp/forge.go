@@ -18,6 +18,7 @@ import (
 	contractconnect "github.com/robertolupi/botfam/internal/eventdelivery/contract/connect"
 	"github.com/robertolupi/botfam/internal/eventdelivery/singlehost"
 	"github.com/robertolupi/botfam/internal/eventdelivery/workerchannel"
+	"github.com/robertolupi/botfam/internal/famctx"
 
 	"gitea.com/gitea/gitea-mcp/operation/actions"
 	"gitea.com/gitea/gitea-mcp/operation/issue"
@@ -95,11 +96,24 @@ func addForgeEntries(entries map[string]dispatchEntry) {
 // context that pkg/gitea.ClientFromContext reads, then invokes the original
 // handler. A missing token is left to surface as a forge auth error rather than
 // failing here, so the tool still reports a clear, actionable result.
+type bypassProxyKey struct{}
+
+func contextWithBypassProxy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, bypassProxyKey{}, true)
+}
+
+func shouldBypassProxy(ctx context.Context) bool {
+	v, ok := ctx.Value(bypassProxyKey{}).(bool)
+	return ok && v
+}
+
 func forgeHandler(toolName, origName string, h func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolResult, error), readOnly bool) toolHandler {
 	return func(ctx context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
 		if !readOnly {
-			if result, proxied, err := proxyForgeAction(ctx, rc, toolName, args); proxied || err != nil {
-				return result, err
+			if !shouldBypassProxy(ctx) {
+				if result, proxied, err := proxyForgeAction(ctx, rc, toolName, args); proxied || err != nil {
+					return result, err
+				}
 			}
 		}
 
@@ -243,3 +257,55 @@ func firstNonEmptyEnv(names ...string) string {
 	}
 	return ""
 }
+
+// ForgeExecutor implements workerchannel.ForgeExecutor using the Gitea MCP tool
+// handlers registered in this package.
+type ForgeExecutor struct {
+	rc *resolvedCtx
+}
+
+func NewForgeExecutor(fctx famctx.Context) *ForgeExecutor {
+	actor := fctx.Slug
+	if actor == "" {
+		actor = "supervisor"
+	}
+	return &ForgeExecutor{
+		rc: &resolvedCtx{
+			workDir: fctx.WorkDir,
+			actor:   actor,
+			c:       fctx,
+		},
+	}
+}
+
+func (e *ForgeExecutor) ExecuteForgeAction(ctx context.Context, toolName, argumentsJSON string) (string, error) {
+	var args map[string]any
+	if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+		return "", fmt.Errorf("unmarshal arguments: %w", err)
+	}
+
+	entries := make(map[string]dispatchEntry)
+	addForgeEntries(entries)
+
+	entry, ok := entries[toolName]
+	if !ok {
+		return "", fmt.Errorf("unsupported forge tool: %q", toolName)
+	}
+
+	// Pass goroutine-local bypass context to skip proxying loop inside the handler
+	res, err := entry.handler(contextWithBypassProxy(ctx), e.rc, args)
+	if err != nil {
+		return "", err
+	}
+
+	var sb strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(mcplib.TextContent); ok {
+			sb.WriteString(tc.Text)
+		}
+	}
+	return sb.String(), nil
+}
+
+var _ workerchannel.ForgeExecutor = (*ForgeExecutor)(nil)
+
