@@ -53,7 +53,9 @@ func isProcessLive(pid int) bool {
 	cmd := exec.Command("ps", "-p", fmt.Sprintf("%d", pid), "-o", "comm=")
 	out, err := cmd.Output()
 	if err != nil {
-		return false
+		// If ps fails (e.g. not found, BusyBox on Alpine/Docker, etc.),
+		// fallback to the Signal(0) success.
+		return true
 	}
 	outStr := string(out)
 	var comm string
@@ -71,6 +73,11 @@ func isProcessLive(pid int) bool {
 	var execBase string
 	if err == nil {
 		execBase = filepath.Base(execPath)
+	} else {
+		execBase = filepath.Base(os.Args[0])
+	}
+	if execBase == "" {
+		execBase = filepath.Base(os.Args[0])
 	}
 
 	if strings.Contains(baseComm, "botfam") || (execBase != "" && strings.Contains(execBase, "botfam")) {
