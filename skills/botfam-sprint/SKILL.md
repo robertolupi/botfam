@@ -10,11 +10,11 @@ self-hosted forge without the operator hand-feeding it tasks. It composes two
 narrower skills — lean on them rather than duplicating their detail:
 
 - **`forge-autonomy`** — how to review a PR correctly (read the diff at the
-  *actual tip*, build + test, never approve on assumption) and how
-  `botfam wait` wakes you on directed forge activity (do-not-disturb by
-  default).
+  *actual tip*, build + test, never approve on assumption) and how to notice
+  work by querying the forge (the legacy `botfam wait` loop is being replaced
+  by a supervisor; in the gap the operator runs you by hand).
 - **`join-irc`** — optional: how to join an IRC design sprint. IRC is not the
-  coordination or wake plane; the forge + `botfam wait` are.
+  coordination or wake plane; the forge is.
 
 Coordination consensus is Gitea PR reviews + native branch protection (PROTOCOL
 §3), not the deleted ccrep bang-verbs. The integration branch is
@@ -62,25 +62,26 @@ Resolve your own identity and the forge's before touching anything:
 
 - **Actor name**: `botfam whoami` (falls back to the worktree basename per
   PROTOCOL §1). Everything keys off this.
-- **Forge identity**: `forge_get_me` returns your bot login (e.g.
-  `claude` → `claude-bot`). You assign issues and author reviews as that login.
-  The forge tools are botfam subtools (`mcp__botfam__forge_*`), served in-process
-  — there is no separate forge MCP server or token file to configure.
+- **Forge identity**: `forge_get_me` returns your bot login (e.g. `claude` →
+  `claude-bot`). You assign issues and author reviews as that login. The forge
+  tools are botfam subtools (`mcp__botfam__forge_*`), served in-process — there
+  is no separate forge MCP server or token file to configure.
 - **Repo**: `botfam/botfam` on the `gitea` remote (`git remote -v`).
 - **Token** (for raw API calls the MCP doesn't cover):
   `~/.botfam/token-botfam-<actor>`.
-- **Arm the wake loop**: start `botfam wait` (do-not-disturb by default — forge
-  events wake you when you are assigned or @-mentioned). The forge is your
-  coordination plane for claims, hand-offs, and merge nudges; join IRC
-  (`join-irc`) only if a design sprint is running.
+- **Survey the forge for your work**: there is no automatic wake loop — the
+  supervised path (`botfam sprint run`) hasn't landed, so the operator runs you
+  by hand (`forge-autonomy` §1). Query your unread notifications and assigned
+  issues directly. The forge is your coordination plane for claims, hand-offs,
+  and merge nudges; join IRC (`join-irc`) only if a design sprint is running.
 
 Then survey the board: `forge_list_issues {state: open}` and
 `forge_list_pull_requests {state: open}`.
 
 ## 1. Pick an issue (Coupling Triage)
 
-Survey the board (`forge_list_issues {state: open}`). Before picking, determine the
-coupling of the backlog:
+Survey the board (`forge_list_issues {state: open}`). Before picking, determine
+the coupling of the backlog:
 
 - **Check Labels**: Inspect the labels on the forge issue (e.g. `coupled` or
   `decoupled`). If the triage has not occurred yet, run **Coupling Triage**
@@ -106,8 +107,8 @@ Pick an issue that:
 3. Doesn't touch code your own open PRs are changing (see
    [Avoiding self-collision](#avoiding-self-collision)).
 
-> ⚠️ `forge_list_issues` does **not** return assignees. Check them explicitly before
-> claiming, or you'll grab something already in flight:
+> ⚠️ `forge_list_issues` does **not** return assignees. Check them explicitly
+> before claiming, or you'll grab something already in flight:
 >
 > ```bash
 > TOK=$(cat ~/.botfam/token-botfam-<actor>)
@@ -226,9 +227,9 @@ Before approving a doc change, confirm any new links/paths resolve.
 ## 6. Address comments on your own PRs
 
 Each iteration, check your open PRs
-(`forge_pull_request_read {method: "get_reviews"}` and the issue comments endpoint).
-On a `REQUEST_CHANGES` or a substantive comment: make the fix, push, and
-re-request review on the PR. Approvals **dismiss on a new commit** (branch
+(`forge_pull_request_read {method: "get_reviews"}` and the issue comments
+endpoint). On a `REQUEST_CHANGES` or a substantive comment: make the fix, push,
+and re-request review on the PR. Approvals **dismiss on a new commit** (branch
 protection), so expect to re-request review after any push. Empty or approving
 reviews need no action.
 
@@ -284,14 +285,15 @@ git merge --abort
 
 ## Gotchas (quick reference)
 
-- **`forge_list_issues` omits assignees** — always check via the API before claiming.
+- **`forge_list_issues` omits assignees** — always check via the API before
+  claiming.
 - **A branch checkout reverts your working-tree edits to that branch's
   content.** If you `Read` a file, then switch branches, re-`Read` before
   editing — the file on disk changed under you.
 - **Commit identity must be set per-commit**
-  (`git -c user.name=… -c user.email=dev+<actor>@example.com`); the
-  shared config matches no one in the main checkout and can override
-  `includeIf` in worktrees.
+  (`git -c user.name=… -c user.email=dev+<actor>@example.com`); the shared
+  config matches no one in the main checkout and can override `includeIf` in
+  worktrees.
 - **`main` is merge-only and unpushable** by agents; always target
   `botfam-next`.
 - **Rebuilt `botfam` binaries need codesigning** on macOS:
