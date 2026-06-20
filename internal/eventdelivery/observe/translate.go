@@ -171,10 +171,10 @@ func decideEmit(first bool, ev derivedEvent, baseline time.Time) bool {
 	return ev.firstEligible && ev.at.After(baseline)
 }
 
-// deriveEvents expands a thread's detail into candidate events. Comments and
-// reviews are stable-id and dispatchable on first contact (timestamp-gated);
-// state and label changes are synthetic-id, diffed by value, and never
-// dispatched on first contact (we cannot tell pre-existing from new).
+// deriveEvents expands a thread's detail into the append-only, stable-id events:
+// comments and reviews. They are dispatchable on first contact (timestamp-gated
+// against the baseline). Mutable state and label changes are not derived here —
+// Translate diffs them by value via observeScalarChange.
 func deriveEvents(d ThreadDetail) []derivedEvent {
 	var out []derivedEvent
 	for _, c := range d.Comments {
