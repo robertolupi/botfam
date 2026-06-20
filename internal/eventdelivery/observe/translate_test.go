@@ -81,9 +81,10 @@ func TestTranslateFirstContactSeedsBaseline(t *testing.T) {
 	if len(res.Emitted) != 1 || res.Emitted[0].EventID != "forge:botfam/botfam:pull:476:comment:3" {
 		t.Fatalf("want only comment:3 dispatched, got %+v", res.Emitted)
 	}
-	// comments 1,2 + label 7 seeded as seen, not dispatched.
-	if res.SeededSeen != 3 {
-		t.Fatalf("SeededSeen = %d, want 3", res.SeededSeen)
+	// comments 1,2 seeded as seen, not dispatched (the label and state are
+	// seeded separately as scalars, not counted here).
+	if res.SeededSeen != 2 {
+		t.Fatalf("SeededSeen = %d, want 2", res.SeededSeen)
 	}
 	if got := countRows(t, db, `SELECT COUNT(*) FROM work_items`); got != 1 {
 		t.Fatalf("work_items = %d, want 1 (no history flood)", got)
@@ -146,5 +147,107 @@ func TestTranslateDiffSurvivesRestartAndSiblings(t *testing.T) {
 	}
 	if got := countRows(t, db, `SELECT COUNT(*) FROM work_items`); got != 3 {
 		t.Fatalf("work_items total = %d, want 3", got)
+	}
+}
+
+// TestTranslateStateChangeDiffsByValueNotTimestamp proves state transitions are
+// keyed by the state value, not the thread's updated_at: an unrelated update on
+// an open or already-closed thread does not mint a spurious close/merge refresh.
+func TestTranslateStateChangeDiffsByValueNotTimestamp(t *testing.T) {
+	ctx := context.Background()
+	db := openStore(t)
+	baseline := time.Date(2026, 6, 20, 12, 0, 0, 0, time.UTC)
+	q := newFakeDetail()
+	tr := observe.NewTranslator(q, observe.NewSessionWatermark(baseline))
+	ref := observe.ThreadRef{Kind: observe.KindIssue, Number: 469}
+
+	set := func(state string, upd time.Time, comments []observe.CommentRef) {
+		q.detail[469] = observe.ThreadDetail{State: state, UpdatedAt: upd, Comments: comments}
+	}
+
+	// First contact, open → state seeded, nothing dispatched.
+	set("open", baseline.Add(-time.Hour), nil)
+	if _, err := tr.Translate(ctx, db, "run-1", 1, ref); err != nil {
+		t.Fatal(err)
+	}
+	// Unrelated update advances updated_at but state is still open → no refresh.
+	set("open", baseline.Add(time.Hour), nil)
+	res, err := tr.Translate(ctx, db, "run-1", 1, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Emitted) != 0 {
+		t.Fatalf("unrelated update on open issue emitted %+v, want none", res.Emitted)
+	}
+	// Genuine close → one refresh.
+	set("closed", baseline.Add(2*time.Hour), nil)
+	res, err = tr.Translate(ctx, db, "run-1", 1, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Emitted) != 1 {
+		t.Fatalf("close transition emitted %d, want 1 refresh", len(res.Emitted))
+	}
+	// Comment on the already-closed issue advances updated_at again: the comment
+	// dispatches, but the close must NOT re-fire.
+	set("closed", baseline.Add(4*time.Hour), []observe.CommentRef{{ID: 90, UpdatedAt: baseline.Add(3 * time.Hour)}})
+	if _, err := tr.Translate(ctx, db, "run-1", 1, ref); err != nil {
+		t.Fatal(err)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM work_items WHERE kind = ?`, observe.WorkRefreshScope); got != 1 {
+		t.Fatalf("refresh_scope work items = %d, want 1 (no spurious re-close)", got)
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM work_items WHERE kind = ?`, observe.WorkInspectNewComment); got != 1 {
+		t.Fatalf("comment work items = %d, want 1", got)
+	}
+}
+
+// TestTranslateLabelSetAddAndRemove proves label changes are diffed as a set:
+// both additions and removals trigger a refresh (not just additions).
+func TestTranslateLabelSetAddAndRemove(t *testing.T) {
+	ctx := context.Background()
+	db := openStore(t)
+	q := newFakeDetail()
+	tr := observe.NewTranslator(q, observe.NewSessionWatermark(time.Now()))
+	ref := observe.ThreadRef{Kind: observe.KindPull, Number: 476}
+
+	set := func(ids ...int64) {
+		labels := make([]observe.LabelRef, 0, len(ids))
+		for _, id := range ids {
+			labels = append(labels, observe.LabelRef{ID: id})
+		}
+		q.detail[476] = observe.ThreadDetail{State: "open", Labels: labels}
+	}
+
+	set(1, 2) // first contact → seeded, no refresh
+	if _, err := tr.Translate(ctx, db, "run-1", 1, ref); err != nil {
+		t.Fatal(err)
+	}
+	set(1, 2) // unchanged → no refresh
+	res, err := tr.Translate(ctx, db, "run-1", 1, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Emitted) != 0 {
+		t.Fatalf("unchanged label set emitted %+v, want none", res.Emitted)
+	}
+	set(1, 2, 3) // addition → refresh
+	res, err = tr.Translate(ctx, db, "run-1", 1, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Emitted) != 1 {
+		t.Fatalf("label addition emitted %d, want 1", len(res.Emitted))
+	}
+	set(2, 3) // removal of #1 → refresh (the bug: removals were previously missed)
+	res, err = tr.Translate(ctx, db, "run-1", 1, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Emitted) != 1 {
+		t.Fatalf("label removal emitted %d, want 1", len(res.Emitted))
+	}
+	if got := countRows(t, db, `SELECT COUNT(*) FROM work_items WHERE kind = ?`, observe.WorkRefreshScope); got != 2 {
+		t.Fatalf("refresh_scope work items = %d, want 2 (one add, one remove)", got)
 	}
 }

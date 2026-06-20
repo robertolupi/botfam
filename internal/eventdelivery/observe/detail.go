@@ -11,12 +11,16 @@ import (
 // reviews carry immutable forge ids (stable-id); state/label changes are
 // synthetic-id (advisory, deduped by value).
 const (
-	EventComment    = "comment"
-	EventReview     = "review"
-	EventClosed     = "closed"
-	EventMerged     = "merged"
-	EventLabelAdded = "label_added"
-	EventStatus     = "status_changed"
+	EventComment = "comment"
+	EventReview  = "review"
+	// EventStateChanged / EventLabelSet are mutable scalars diffed by value (the
+	// current state, the current label set) rather than by the thread's general
+	// updated_at, so an unrelated update on an already-closed thread is not
+	// mistaken for a fresh close and label removals — not just additions —
+	// trigger a refresh.
+	EventStateChanged = "state_changed"
+	EventLabelSet     = "label_set"
+	EventStatus       = "status_changed"
 )
 
 // Work-item kinds the translator/gap-poller emit (the supervisor generators).

@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -46,10 +48,12 @@ type EmittedWorkItem struct {
 	EventID  string
 }
 
-// translationKinds are the event kinds that count as "this thread has been
-// translated before" for first-observation detection (push/status/notification
-// are gap/bootstrap kinds and do not).
-var translationKinds = []string{EventComment, EventReview, EventClosed, EventMerged, EventLabelAdded}
+// translationKinds are the append-only event kinds that count as "this thread's
+// comment/review history has been recorded before" for first-observation
+// detection. State and label changes are mutable scalars handled by their own
+// per-value seeding (see observeScalarChange); push/status/notification are
+// gap/bootstrap kinds.
+var translationKinds = []string{EventComment, EventReview}
 
 type derivedEvent struct {
 	obs           Observation
@@ -109,7 +113,55 @@ func (t *Translator) Translate(ctx context.Context, db *sql.DB, runID string, sc
 			EventID:  eventID,
 		})
 	}
+
+	// State transitions and label-set changes are mutable: diff them by value
+	// (the current state, the current label set), not by the thread's general
+	// updated_at. Keying on updated_at would re-fire a close/merge whenever any
+	// unrelated activity advanced the thread; keying label additions by id would
+	// never see removals. Each is seeded on first contact and emits a single
+	// refresh_scope only when the value actually changes.
+	curState := currentState(detail)
+	if emitted, eventID, err := t.observeScalarChange(ctx, db, runID, detail.Kind, detail.Number,
+		EventStateChanged, curState, ClassSyntheticID, WorkRefreshScope,
+		fmt.Sprintf("%s #%d state changed to %s", detail.Kind, detail.Number, curState), scopeGen); err != nil {
+		return res, err
+	} else if emitted {
+		res.Emitted = append(res.Emitted, EmittedWorkItem{ID: workItemID(eventID), Kind: WorkRefreshScope, SourceID: eventID, EventID: eventID})
+	}
+
+	labelSet := labelSetKey(detail.Labels)
+	if emitted, eventID, err := t.observeScalarChange(ctx, db, runID, detail.Kind, detail.Number,
+		EventLabelSet, labelSet, ClassSyntheticID, WorkRefreshScope,
+		fmt.Sprintf("%s #%d label set changed", detail.Kind, detail.Number), scopeGen); err != nil {
+		return res, err
+	} else if emitted {
+		res.Emitted = append(res.Emitted, EmittedWorkItem{ID: workItemID(eventID), Kind: WorkRefreshScope, SourceID: eventID, EventID: eventID})
+	}
+
 	return res, nil
+}
+
+// currentState collapses an issue/PR thread to its diffable state value.
+func currentState(d ThreadDetail) string {
+	switch {
+	case d.Merged:
+		return "merged"
+	case d.State == "closed":
+		return "closed"
+	default:
+		return "open"
+	}
+}
+
+// labelSetKey is the order-independent key for a label set, so additions and
+// removals both change it (and a re-observed identical set does not).
+func labelSetKey(labels []LabelRef) string {
+	ids := make([]string, 0, len(labels))
+	for _, l := range labels {
+		ids = append(ids, strconv.FormatInt(l.ID, 10))
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
 }
 
 func decideEmit(first bool, ev derivedEvent, baseline time.Time) bool {
@@ -143,31 +195,9 @@ func deriveEvents(d ThreadDetail) []derivedEvent {
 			title:         fmt.Sprintf("New review on %s #%d", d.Kind, d.Number),
 		})
 	}
-	updatedKey := d.UpdatedAt.UTC().Format(time.RFC3339)
-	switch {
-	case d.Merged:
-		out = append(out, derivedEvent{
-			obs:      newObservation(d, EventMerged, updatedKey, ClassSyntheticID),
-			at:       d.UpdatedAt,
-			workKind: WorkRefreshScope,
-			title:    fmt.Sprintf("%s #%d merged", d.Kind, d.Number),
-		})
-	case d.State == "closed":
-		out = append(out, derivedEvent{
-			obs:      newObservation(d, EventClosed, updatedKey, ClassSyntheticID),
-			at:       d.UpdatedAt,
-			workKind: WorkRefreshScope,
-			title:    fmt.Sprintf("%s #%d closed", d.Kind, d.Number),
-		})
-	}
-	for _, l := range d.Labels {
-		out = append(out, derivedEvent{
-			obs:      newObservation(d, EventLabelAdded, strconv.FormatInt(l.ID, 10), ClassSyntheticID),
-			at:       d.UpdatedAt,
-			workKind: WorkRefreshScope,
-			title:    fmt.Sprintf("Label %q on %s #%d", l.Name, d.Kind, d.Number),
-		})
-	}
+	// State and label changes are NOT derived here: they are mutable scalars
+	// diffed by value in Translate (see observeScalarChange), not append-only
+	// stable-id events.
 	return out
 }
 
@@ -191,11 +221,13 @@ func workItemID(eventID string) string { return "wi:" + eventID }
 // observations recorded (the common case at boot, when the unread bootstrap has
 // imported the thread but it has not yet been diffed).
 func isFirstContact(ctx context.Context, db *sql.DB, repo, kind string, number int64) (bool, error) {
-	query := `SELECT COUNT(*) FROM raw_observations WHERE source = ? AND repo = ? AND artifact_kind = ? AND artifact_number = ? AND event_kind IN (?, ?, ?, ?, ?)`
+	placeholders := make([]string, len(translationKinds))
 	args := []any{Source, repo, kind, number}
-	for _, k := range translationKinds {
+	for i, k := range translationKinds {
+		placeholders[i] = "?"
 		args = append(args, k)
 	}
+	query := `SELECT COUNT(*) FROM raw_observations WHERE source = ? AND repo = ? AND artifact_kind = ? AND artifact_number = ? AND event_kind IN (` + strings.Join(placeholders, ", ") + `)`
 	var n int
 	if err := db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
 		return false, fmt.Errorf("first-contact check: %w", err)

@@ -19,8 +19,9 @@ func (t *Translator) PollHeadSHA(ctx context.Context, db *sql.DB, runID string, 
 	if headSHA == "" {
 		return false, nil
 	}
-	return t.observeScalarChange(ctx, db, runID, KindPull, number, EventPush, headSHA, ClassStableID, WorkRebuildPR,
+	emitted, _, err := t.observeScalarChange(ctx, db, runID, KindPull, number, EventPush, headSHA, ClassStableID, WorkRebuildPR,
 		fmt.Sprintf("Head SHA changed on pull #%d", number), scopeGen)
+	return emitted, err
 }
 
 // PollCommitStatus fetches the combined CI status for a PR's head SHA and emits
@@ -38,18 +39,19 @@ func (t *Translator) PollCommitStatus(ctx context.Context, db *sql.DB, runID str
 		return false, nil
 	}
 	value := headSHA + ":" + state
-	return t.observeScalarChange(ctx, db, runID, KindPull, number, EventStatus, value, ClassQueryOnly, WorkCheckFailedRun,
+	emitted, _, err := t.observeScalarChange(ctx, db, runID, KindPull, number, EventStatus, value, ClassQueryOnly, WorkCheckFailedRun,
 		fmt.Sprintf("CI status %q on pull #%d", state, number), scopeGen)
+	return emitted, err
 }
 
 // observeScalarChange records a scalar observation (head SHA, CI status) keyed by
 // value, dispatching a work item only when the value changes — never for the
 // first value observed for that (thread, event-kind).
-func (t *Translator) observeScalarChange(ctx context.Context, db *sql.DB, runID, kind string, number int64, eventKind, value, class, workKind, title string, scopeGen int64) (bool, error) {
+func (t *Translator) observeScalarChange(ctx context.Context, db *sql.DB, runID, kind string, number int64, eventKind, value, class, workKind, title string, scopeGen int64) (bool, string, error) {
 	repo := t.q.RepoSlug()
 	first, err := isFirstScalar(ctx, db, repo, kind, number, eventKind)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	obs := Observation{
 		Source:         Source,
@@ -64,17 +66,17 @@ func (t *Translator) observeScalarChange(ctx context.Context, db *sql.DB, runID,
 	}
 	inserted, err := recordObservation(ctx, db, runID, obs)
 	if err != nil {
-		return false, err
+		return false, "", err
 	}
 	if first || !inserted {
 		// First value for this thread is the baseline; an unchanged value is a
 		// no-op. Either way, no work item.
-		return false, nil
+		return false, obs.EventID(), nil
 	}
 	if err := createWorkItem(ctx, db, scopeGen, obs.EventID(), workKind, title); err != nil {
-		return false, err
+		return false, "", err
 	}
-	return true, nil
+	return true, obs.EventID(), nil
 }
 
 // isFirstScalar reports whether no value has yet been recorded for this
