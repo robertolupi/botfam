@@ -34,6 +34,8 @@ func TestHelperProcess(t *testing.T) {
 	fmt.Printf("TRACEPARENT=%s\n", os.Getenv("TRACEPARENT"))
 	fmt.Printf("BOTFAM_WORKER_ID=%s\n", os.Getenv("BOTFAM_WORKER_ID"))
 	fmt.Printf("BOTFAM_WORK_ITEM_ID=%s\n", os.Getenv("BOTFAM_WORK_ITEM_ID"))
+	fmt.Printf("BOTFAM_WORKER_CHANNEL_SOCKET=%s\n", os.Getenv("BOTFAM_WORKER_CHANNEL_SOCKET"))
+	fmt.Printf("BOTFAM_FENCING_TOKEN=%s\n", os.Getenv("BOTFAM_FENCING_TOKEN"))
 }
 
 func TestSprintSupervisorLifecycle(t *testing.T) {
@@ -133,9 +135,21 @@ func TestSprintSupervisorLifecycle(t *testing.T) {
 	<-runFinished
 
 	if runErr != nil {
-		t.Logf("Supervisor exited with error: %v", runErr)
+		errStr := runErr.Error()
+		if strings.Contains(errStr, "operation not permitted") || strings.Contains(errStr, "permission denied") {
+			t.Skipf("sandbox does not permit unix socket bind: %v", runErr)
+		}
+		t.Fatalf("Supervisor exited with error: %v. Output: %s", runErr, out.String())
 	}
-	t.Logf("Supervisor Output: %s", out.String())
+	output := out.String()
+	t.Logf("Supervisor Output: %s", output)
+
+	if !strings.Contains(output, "BOTFAM_WORKER_CHANNEL_SOCKET=") || strings.Contains(output, "BOTFAM_WORKER_CHANNEL_SOCKET=\n") {
+		t.Error("expected worker env to contain non-empty BOTFAM_WORKER_CHANNEL_SOCKET")
+	}
+	if !strings.Contains(output, "BOTFAM_FENCING_TOKEN=") || strings.Contains(output, "BOTFAM_FENCING_TOKEN=\n") {
+		t.Error("expected worker env to contain non-empty BOTFAM_FENCING_TOKEN")
+	}
 
 	// Verify that run-2 was created and incremented, and the work item was completed/failed
 	db, err = store.Open(dbPath)
@@ -251,7 +265,11 @@ func TestSprintSupervisorTTLReaping(t *testing.T) {
 	<-runFinished
 
 	if runErr != nil {
-		t.Logf("Supervisor exited with error: %v", runErr)
+		errStr := runErr.Error()
+		if strings.Contains(errStr, "operation not permitted") || strings.Contains(errStr, "permission denied") {
+			t.Skipf("sandbox does not permit unix socket bind: %v", runErr)
+		}
+		t.Fatalf("Supervisor exited with error: %v. Output: %s", runErr, out.String())
 	}
 	t.Logf("Supervisor Output: %s", out.String())
 

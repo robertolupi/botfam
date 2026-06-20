@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -140,6 +141,22 @@ func newSprintRunCmd() *cobra.Command {
 					},
 				})
 				return nil
+			}
+
+			// Initialize session repo as git repository if it isn't one already
+			if _, err := os.Stat(filepath.Join(sessionDir, ".git")); os.IsNotExist(err) {
+				initCmd := exec.CommandContext(cmd.Context(), "git", "init")
+				initCmd.Dir = sessionDir
+				if out, err := initCmd.CombinedOutput(); err != nil {
+					return fmt.Errorf("failed to git init session directory: %w: %s", err, string(out))
+				}
+				// Configure dummy user/email locally to prevent crash-recovery commit failures
+				configUserCmd := exec.CommandContext(cmd.Context(), "git", "config", "user.name", "botfam-supervisor")
+				configUserCmd.Dir = sessionDir
+				_ = configUserCmd.Run()
+				configEmailCmd := exec.CommandContext(cmd.Context(), "git", "config", "user.email", "supervisor@botfam.invalid")
+				configEmailCmd.Dir = sessionDir
+				_ = configEmailCmd.Run()
 			}
 
 			// Open session repo
@@ -285,12 +302,16 @@ func newSprintRunCmd() *cobra.Command {
 								parts := strings.Fields(workerCommand)
 								wCmd := exec.CommandContext(cmd.Context(), parts[0], parts[1:]...)
 								wCmd.Dir = wd
+								wCmd.Stdout = cmd.OutOrStdout()
+								wCmd.Stderr = cmd.OutOrStderr()
 
 								_, _, traceparentVal := getOrGenerateTraceparent()
 								wCmd.Env = append(os.Environ(),
 									"TRACEPARENT="+traceparentVal,
 									"BOTFAM_WORKER_ID="+workerID,
 									"BOTFAM_WORK_ITEM_ID="+wi.id,
+									"BOTFAM_WORKER_CHANNEL_SOCKET="+socketPath,
+									"BOTFAM_FENCING_TOKEN="+strconv.FormatUint(grant.Msg.GetFencingToken(), 10),
 								)
 
 
