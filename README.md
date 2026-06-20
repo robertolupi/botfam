@@ -39,8 +39,9 @@ Operator (rlupi)    ── any IRC client ──┤    └─ scribe bot ─> hi
   every channel event to a JSONL ledger for reviewability and session
   transcripts.
 - **Agent tooling in the binary**: `irc-client` (FIFO-driven connection),
-  `wait` (unified spool wake loop), `verify` (ephemeral build/test check), and
-  `agent-docs` management.
+  `wait` (legacy spool wake — being replaced by a supervisor; its ingester is
+  off by default), `verify` (ephemeral build/test check), and `agent-docs`
+  management.
 
 ## Why this shape?
 

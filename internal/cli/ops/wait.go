@@ -31,8 +31,10 @@ func SpoolDir(workDir string) (string, error) {
 	return filepath.Join(rf.FamDir, "spool", rf.Actor), nil
 }
 
-// NewWaitCmd builds the `botfam wait` Cobra command — the single wake point that
-// blocks on the per-agent spool and prints whatever arrives (#229).
+// NewWaitCmd builds the `botfam wait` Cobra command — the legacy spool wake
+// (#229). It still blocks on the per-agent spool and prints whatever arrives,
+// but is no longer the unified wake loop: its ingester is off by default and
+// wake is moving to the supervisor (EventDeliveryV2 M0c, #484).
 func NewWaitCmd() *cobra.Command {
 	var (
 		timeoutS int
@@ -46,9 +48,18 @@ func NewWaitCmd() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "wait",
-		Short: "Block on the per-agent spool until new IRC/forge events arrive",
+		Short: "Legacy: block on the per-agent spool until new IRC/forge events arrive",
 		Long: `Block on this agent's spool ($FAMROOT/spool/$AGENT) and print the messages
-that wake it, then exit — the single wake point unifying irc-wait and forge-wait.
+that wake it, then exit.
+
+LEGACY (EventDeliveryV2 M0c): this is no longer the unified wake loop. The spool
+ingester that fills it is disabled by default in the current binary, so on a
+fresh binary this command has nothing to drain. Wake is moving to a supervisor
+(botfam sprint run) that drives session termination (an end-of-session message,
+plus a TTL reaper for hung agents); until it lands, a human operator manually
+re-runs agents. This command still always blocks for incoming events — it never
+returns early on an empty spool. It survives for fams still on the old binary
+with the 'legacy_ingest' flag opted in.
 
 By default it runs in do-not-disturb: forge events wake you only when they are
 directed at you (you are an assignee, or @-mentioned in the latest comment).
@@ -67,8 +78,9 @@ issue/PR's timeline, returning on the next event (comment, review, close, or a
 silent force-push that emits no notification). Use it to watch a specific PR a
 peer is reviewing.
 
-This command only reads the spool (or, with a number, polls one issue/PR); a
-background ingester (hosted in the botfam MCP server) is what fills the spool.`,
+This command only reads the spool (or, with a number, polls one issue/PR); the
+legacy background ingester (hosted in the botfam MCP server, off by default)
+is what fills the spool when 'legacy_ingest' is opted in.`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,

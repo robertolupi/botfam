@@ -1,6 +1,6 @@
 ---
 name: forge-autonomy
-description: Use when operating as a botfam agent on the self-hosted forge — getting woken on queued work via `botfam wait`, and reviewing/approving pull requests correctly (read the diff at the actual tip, build+test, never approve on assumption). Also covers delegating a PR review to a subagent.
+description: Use when operating as a botfam agent on the self-hosted forge — noticing queued work by querying the forge (the supervised wake path is landing; `botfam wait` is legacy), and reviewing/approving pull requests correctly (read the diff at the actual tip, build+test, never approve on assumption). Also covers delegating a PR review to a subagent.
 ---
 
 # Operating autonomously on the forge
@@ -8,60 +8,51 @@ description: Use when operating as a botfam agent on the self-hosted forge — g
 botfam coordination runs on a self-hosted Gitea/Forgejo: proposals are pull
 requests, votes are PR reviews, and the merge gate is **native branch
 protection** (Required Approvals; lint it with `tools/forge-gate.sh`, see the
-wiki's `archived-forge-backing` page). This skill is how an agent notices work and
-reviews it without the operator nudging it.
+wiki's `archived-forge-backing` page). This skill is how an agent notices work
+and reviews it without the operator nudging it.
 
-## 1. The wake loop — `botfam wait`
+## 1. Noticing work — query the forge (wake is in transition)
 
-`botfam wait` is the unified wake watcher: it blocks on your per-agent spool
-(`$FAMROOT/spool/$AGENT`) until new **forge** or **IRC** activity arrives, then
-prints each message — a `===== message N/M · <source> =====` banner followed by
-the **verbatim RFC-822 message** (headers + body) — and exits. Forge events are
-repo-scoped to your fam — a review requested, a comment, a mention, or a **new
-issue/PR assigned to you** (all subject types, not just PRs).
+Wake is migrating from the legacy `botfam wait` loop to a **supervisor**
+(`botfam sprint run`, EventDeliveryV2). The supervisor will own session
+lifetime and re-run agents on queued work. **It has not landed yet, so a human
+operator is the manual supervisor** — there is no always-on wake loop to start.
+(The legacy `botfam wait` spool ingester is **disabled by default**, so on a
+current binary it has nothing to surface; don't build on it.)
 
-As a botfam member you are expected to **start `botfam wait` as soon as you
-boot**, and to **act autonomously** on what it surfaces: work an issue the
-operator assigns you, and review a PR another bot requests from you — without
-waiting for a further nudge.
+So the forge itself is your work queue. **At boot, query it directly** with the
+forge MCP tools rather than blocking on a spool:
 
-Run it as a background watcher and loop:
+- **Notifications:** `forge_notification_read` (`method=list`, `status=unread`,
+  repo-scoped) — reviews requested, comments, mentions, and **new issues/PRs
+  assigned to you** (all subject types).
+- **Assigned issues / review requests:** `forge_search_issues` /
+  `forge_list_issues` filtered to your assignee, and the PRs awaiting your
+  review.
+
+Act **autonomously** on what you find: work an issue the operator assigns you,
+review a PR another bot requests from you. Then follow the manual-supervisor
+operating pattern:
 
 1. **Trace Propagation & Wait Instrumentation**: Ensure `TRACEPARENT`
    environment variables (W3C trace context) are correctly propagated to Bash
-   subprocesses to stitch the distributed trace together. When waiting for a
+   subprocesses to stitch the distributed trace together. When you depend on a
    peer review or a merge, emit a trace span or log entry with structured
    wait-target attributes: e.g., `waiting_for_review=agent-B` or
    `waiting_for=pr-123` (**Trace as Hazard Detector**). Do not rely on loose
    chat; wait-for graphs must be built from these attributes.
-2. Start `botfam wait` in the background. When it returns, the harness wakes
-   you. There is no cursor to pass back — surfacing a message moves it from
-   `new/` to `cur/` (the ack), so the next `botfam wait` only shows what's new.
-   To re-read recently-handled messages for gap recovery, use
-   `botfam wait --replay [--since <dur>]` (reads `cur/`, never acks).
-3. **Act** on each surfaced event (review the PR, work the assigned issue, …).
-4. **Re-arm**: start `botfam wait` again. Always re-arm, or you stop getting
-   woken.
+2. **Finish the task** in front of you and write a handover snapshot to the
+   forge (the durable record).
+3. **Yield** — do not spin on a wake loop.
+4. **Notify the operator in plain text** that you are done and what is next,
+   then **wait to be run again by hand.**
 
-There is **no manual mark-read step.** With the ingester running, forge
-notifications are drained into your spool and **marked read automatically**
-(deliver-to-spool first, then ack upstream — at-least-once, so a crash
-re-surfaces a thread rather than losing it). The spool is the durable record;
-you consume from it by letting `botfam wait` drain `new/`→`cur/`, not by
-clearing the forge notification list yourself. A thread that gets new activity
-later re-appears and wakes you again.
-
-The spool is filled by an ingester the botfam MCP server starts automatically
-for your agent as soon as your client's workspace roots resolve — no setup, no
-opt-out flag; it runs for any resolved agent. Requirements / gotchas:
-
-- The token must carry the `notification` (read+write) **and**
-  `write:repository`/`write:issue` scopes. Mint with `tools/forge-login.sh`
-  (its defaults include these); a read-only token 403s on notifications and
-  can't open PRs / review / merge.
-- Your own review actions generate notifications, so the loop can wake on
-  echoes of your own work — the ingester's auto-mark-read clears them as it
-  drains; always re-arm `botfam wait` after handling.
+The forge is canonical and durable — **mark a notification read only when you
+have actually handled it** (`forge_notification_write`), so a crash mid-task
+leaves the thread unread and the next boot re-discovers it. Your token must
+carry the `notification` (read+write) **and** `write:repository`/`write:issue`
+scopes (mint with `tools/forge-login.sh`); a read-only token 403s on
+notifications and can't open PRs / review / merge.
 
 ## 2. Reviewing a pull request — the protocol
 
@@ -116,24 +107,21 @@ reviews. For anything beyond a small diff, spawn a **review subagent**:
 - The subagent must follow the same protocol — read the tip, build/test, no
   assumptions.
 
-## 4. Escalation — forge request, then IRC
+## 4. Escalation — forge request, then operator
 
-A forge review-request only reaches an agent that is actually running the wake
-loop (`botfam wait`) with a notification-scoped token. Until every agent is reliably on the loop, don't
-assume a request was seen:
+A forge review-request only reaches a peer the next time that agent is run and
+queries the forge. In the manual-supervisor gap there is no automatic wake, so
+**don't assume a request was seen**:
 
 1. Request the review on the forge (PR reviewer request / assignment).
-2. If the reviewer doesn't respond within **~2 minutes**, **ping them on IRC**
-   (`#botfam` / `#ccrep`) with the PR link — IRC is the reliable fallback
-   channel (see `skills/join-irc`).
-
-`botfam wait` already wakes you on IRC, but you still need a running IRC client
-(see `skills/join-irc`) to *send* these pings and receive them.
+2. If the reviewer doesn't respond, **tell the operator in plain text** that
+   the PR is blocked on a peer review and name the PR — the operator runs the
+   reviewer. (For an active design sprint you may also ping them on IRC; see
+   `skills/join-irc`.)
 
 ## Don't
 
 - Don't approve without reading the tip and building/testing it.
 - Don't merge without the operator's explicit go-ahead.
-- Don't let the wake loop spin on your own echoes — the ingester auto-marks
-  forge notifications read as it drains; always re-arm `botfam wait` after
-  handling.
+- Don't treat `botfam wait` as a wake loop — its spool ingester is disabled by
+  default; query the forge at boot and yield when done.
