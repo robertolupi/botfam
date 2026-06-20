@@ -1,0 +1,167 @@
+syntax = "proto3";
+
+package botfam.eventdelivery.v2;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/robertolupi/botfam/internal/eventdelivery/contract/eventdeliveryv2";
+
+message Scope {
+  string repo_owner = 1;
+  string repo_name = 2;
+  int64 milestone_id = 3;
+  repeated string labels = 4;
+}
+
+message SessionEndpoint {
+  bool found = 1;
+  string address = 2;
+  string token = 3;
+  string session_id = 4;
+  uint64 fencing_token = 5;
+}
+
+service SessionResolver {
+  rpc Resolve(Scope) returns (SessionEndpoint);
+}
+
+message AcquireRequest {
+  Scope scope = 1;
+  string holder_identity = 2;
+  google.protobuf.Duration ttl = 3;
+}
+
+message RenewRequest {
+  string lease_id = 1;
+}
+
+message ReleaseRequest {
+  string lease_id = 1;
+}
+
+message Grant {
+  bool granted = 1;
+  string lease_id = 2;
+  uint64 fencing_token = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
+
+service Lease {
+  rpc Acquire(AcquireRequest) returns (Grant);
+  rpc Renew(RenewRequest) returns (Grant);
+  rpc Release(ReleaseRequest) returns (google.protobuf.Empty);
+}
+
+message WorkerStream {
+  string worker_id = 1;
+  Scope scope = 2;
+}
+
+message WorkItem {
+  string id = 1;
+  string kind = 2;
+  string source_id = 3;
+  string title = 4;
+  string body = 5;
+  uint64 scope_generation = 6;
+}
+
+message Artifact {
+  string work_item_id = 1;
+  string kind = 2;
+  string uri = 3;
+  string sha256 = 4;
+}
+
+message Span {
+  string trace_id = 1;
+  string span_id = 2;
+  string component = 3;
+  string event_type = 4;
+  string payload_json = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message ForgeAction {
+  string work_item_id = 1;
+  string action_key = 2;
+  string tool_name = 3;
+  string arguments_json = 4;
+}
+
+message ActionAck {
+  bool committed = 1;
+  bool deduped = 2;
+  string outbox_id = 3;
+}
+
+service WorkerChannel {
+  rpc DispatchWork(WorkerStream) returns (stream WorkItem);
+  rpc RecordArtifact(Artifact) returns (google.protobuf.Empty);
+  rpc SubmitTelemetry(stream Span) returns (google.protobuf.Empty);
+  rpc ProposeForgeAction(ForgeAction) returns (ActionAck);
+}
+
+message ObserveRequest {
+  Scope scope = 1;
+  uint64 scope_generation = 2;
+}
+
+message RawObservation {
+  string id = 1;
+  string source = 2;
+  string repo = 3;
+  string artifact_kind = 4;
+  int64 artifact_number = 5;
+  string event_kind = 6;
+  string event_key = 7;
+  string source_query = 8;
+  string payload_json = 9;
+  google.protobuf.Timestamp observed_at = 10;
+}
+
+message ProcessedMark {
+  string raw_observation_id = 1;
+  string translation_batch = 2;
+}
+
+service ObservationPipeline {
+  rpc Observe(ObserveRequest) returns (stream RawObservation);
+  rpc Translate(RawObservation) returns (stream WorkItem);
+  rpc RecordProcessed(ProcessedMark) returns (google.protobuf.Empty);
+}
+
+message Run {
+  string id = 1;
+  string session_id = 2;
+  google.protobuf.Timestamp started_at = 3;
+  google.protobuf.Timestamp completed_at = 4;
+}
+
+message SessionDescriptor {
+  string session_id = 1;
+  SessionEndpoint endpoint = 2;
+  Scope scope = 3;
+  string scope_hash = 4;
+  uint64 scope_generation = 5;
+  string status = 6;
+}
+
+message PutSessionDescriptorRequest {
+  SessionDescriptor descriptor = 1;
+}
+
+message ListSessionDescriptorsRequest {
+  Scope scope = 1;
+}
+
+message ListSessionDescriptorsResponse {
+  repeated SessionDescriptor descriptors = 1;
+}
+
+service SessionStore {
+  rpc PutSessionDescriptor(PutSessionDescriptorRequest) returns (google.protobuf.Empty);
+  rpc ListSessionDescriptors(ListSessionDescriptorsRequest) returns (ListSessionDescriptorsResponse);
+}

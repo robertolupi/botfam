@@ -3,12 +3,15 @@ module github.com/robertolupi/botfam
 go 1.26.0
 
 require (
+	connectrpc.com/connect v1.20.0
 	gitea.dev/sdk v1.1.0
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/openai/openai-go/v2 v2.7.1
 	github.com/pelletier/go-toml/v2 v2.3.1
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/term v0.44.0
+	google.golang.org/protobuf v1.36.11
+	modernc.org/sqlite v1.52.0
 )
 
 require (
@@ -17,13 +20,20 @@ require (
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/davidmz/go-pageant v1.0.2 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
+	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.1 // indirect
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20240707233637-46b078467d37 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+	modernc.org/libc v1.72.3 // indirect
+	modernc.org/mathutil v1.7.1 // indirect
+	modernc.org/memory v1.11.0 // indirect
 )
 
 require (
