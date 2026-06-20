@@ -59,10 +59,19 @@ func isProcessLive(pid int) bool {
 	baseComm := filepath.Base(comm)
 
 	execPath, err := os.Executable()
-	if err != nil {
-		return strings.Contains(comm, "botfam")
+	var execBase string
+	if err == nil {
+		execBase = filepath.Base(execPath)
 	}
-	execBase := filepath.Base(execPath)
 
-	return strings.Contains(baseComm, "botfam") || baseComm == execBase || strings.Contains(baseComm, execBase)
+	if strings.Contains(baseComm, "botfam") || (execBase != "" && strings.Contains(execBase, "botfam")) {
+		return true
+	}
+	if len(baseComm) >= 3 && execBase != "" && strings.Contains(execBase, baseComm) {
+		return true
+	}
+	if execBase != "" && len(execBase) >= 3 && strings.Contains(baseComm, execBase) {
+		return true
+	}
+	return false
 }
