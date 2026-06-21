@@ -22,7 +22,11 @@ save_token() {
 
 # Wait for Forgejo to become healthy
 note "Waiting for Forgejo container to become healthy..."
-until [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:13000/)" = "200" ]; do
+while true; do
+  code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:13000/ || echo "000")
+  if [ "$code" = "200" ]; then
+    break
+  fi
   sleep 1
 done
 
