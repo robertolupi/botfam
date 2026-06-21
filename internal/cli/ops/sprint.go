@@ -316,7 +316,18 @@ func commitSessionSnapshot(ctx context.Context, dir, message string) error {
 	if err := store.DumpToFile(filepath.Join(dir, "session.db"), filepath.Join(dir, "session.sql")); err != nil {
 		return fmt.Errorf("dump session: %w", err)
 	}
-	if out, err := runner.Run(ctx, dir, "git", "add", ".gitignore", "session.sql", "artifacts"); err != nil {
+	// Stage only the paths that exist — a freshly-created session may not have an
+	// artifacts dir or .gitignore yet (same class as the CaptureCrashedRun fix).
+	add := []string{"add"}
+	for _, f := range []string{".gitignore", "session.sql", "artifacts"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			add = append(add, f)
+		}
+	}
+	if len(add) == 1 {
+		return nil // nothing to stage
+	}
+	if out, err := runner.Run(ctx, dir, "git", add...); err != nil {
 		return fmt.Errorf("stage session snapshot: %w: %s", err, string(out))
 	}
 	if out, err := runner.Run(ctx, dir, "git", "commit", "-m", message); err != nil {
@@ -469,8 +480,8 @@ func newSprintRunCmd() *cobra.Command {
 			}
 			defer server.HTTPServer.Close()
 
-			// Set the actual endpoint and token in lease session file
-			if err := lease.SetEndpoint(socketPath, sessionToken); err != nil {
+			// Set the actual endpoint, token, and session id in the lease session file.
+			if err := lease.SetEndpoint(socketPath, sessionToken, id); err != nil {
 				return fmt.Errorf("failed to update lease session file: %w", err)
 			}
 
@@ -754,16 +765,28 @@ func recordRunCaptureArtifact(ctx context.Context, db *sql.DB, workItemID, captu
 }
 
 func newSprintEndCmd() *cobra.Command {
-	return &cobra.Command{
+	var timeout time.Duration
+	cmd := &cobra.Command{
 		Use:   "end $ID",
-		Short: "End a sprint session",
+		Short: "End a sprint session: stop a live supervisor and mark it ended",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
-			fmt.Fprintf(cmd.OutOrStdout(), "Sprint end placeholder: ID=%s\n", id)
-			return nil
+			dir, err := sprintSessionDir(id)
+			if err != nil {
+				return err
+			}
+			if _, err := os.Stat(filepath.Join(dir, "session.db")); err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("sprint end: session %q not found", id)
+				}
+				return err
+			}
+			return runSprintEnd(cmd.Context(), cmd.OutOrStdout(), dir, id, timeout)
 		},
 	}
+	cmd.Flags().DurationVar(&timeout, "timeout", 30*time.Second, "max time to wait for a live supervisor to stop")
+	return cmd
 }
 
 func newSprintLsCmd() *cobra.Command {

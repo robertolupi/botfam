@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"connectrpc.com/connect"
 	pb "github.com/robertolupi/botfam/internal/eventdelivery/contract/botfam/eventdelivery/v2"
@@ -74,10 +76,14 @@ type sessionSummary struct {
 	counts     map[string]int // work_item state -> count
 }
 
-// deriveSessionState maps the latest run status + repo lease liveness onto a
-// session state. NB liveness is repo-level (the single-host lease is per repo),
-// so the running/crashed split assumes v0's one-live-session-per-repo model.
-func deriveSessionState(lastRunStatus string, repoLive bool) string {
+// deriveSessionState maps the latest run status + repo lease liveness (+ an
+// explicit operator `ended` marker) onto a session state. NB liveness is
+// repo-level (the single-host lease is per repo), so the running/crashed split
+// assumes v0's one-live-session-per-repo model.
+func deriveSessionState(lastRunStatus string, repoLive, ended bool) string {
+	if ended {
+		return "ended" // operator-closed via `sprint end`
+	}
 	switch lastRunStatus {
 	case "":
 		return "new" // started, never run
@@ -115,8 +121,77 @@ func loadSessionSummary(ctx context.Context, sessionDir, id string, live repoLiv
 		rows.Close()
 	}
 
-	s.state = deriveSessionState(s.lastStatus, live(ctx, s.repo))
+	// session_meta may be absent on pre-v4 session dbs; ignore the error.
+	var endedAt string
+	_ = db.QueryRowContext(ctx, `SELECT value FROM session_meta WHERE key = 'ended_at'`).Scan(&endedAt)
+
+	s.state = deriveSessionState(s.lastStatus, live(ctx, s.repo), endedAt != "")
 	return s, nil
+}
+
+// ownLiveSupervisor reports whether the repo's live supervisor is running this
+// session — the only case in which `sprint end <id>` may signal it. The lease is
+// repo-level, so a live supervisor for the same repo but a *different* (or
+// unproven/empty) session id must never be signaled. targetID is the session
+// being ended; liveID is the stamped session id from the live session file.
+func ownLiveSupervisor(targetID, liveID string, live bool) bool {
+	return live && liveID != "" && liveID == targetID
+}
+
+// runSprintEnd stops a live supervisor for the session (if any) and records a
+// durable `ended` marker so ls/show reflect it. This is also the seam where
+// post-session analytics will eventually run (#531).
+func runSprintEnd(ctx context.Context, w io.Writer, sessionDir, id string, timeout time.Duration) error {
+	db, err := store.Open(filepath.Join(sessionDir, "session.db"))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	// Ensure session_meta exists even on an older session db.
+	if err := store.ApplyMigrations(ctx, db); err != nil {
+		return fmt.Errorf("apply migrations: %w", err)
+	}
+
+	var repo string
+	_ = db.QueryRowContext(ctx, `SELECT repo FROM scope_generations ORDER BY id DESC LIMIT 1`).Scan(&repo)
+
+	if repo != "" {
+		pid, liveID, ok := singlehost.LiveSupervisorPID(repo)
+		switch {
+		case ownLiveSupervisor(id, liveID, ok):
+			// The live supervisor for this repo is running *this* session — stop it.
+			fmt.Fprintf(w, "Stopping live supervisor (pid %d)…\n", pid)
+			if proc, perr := os.FindProcess(pid); perr == nil {
+				_ = proc.Signal(syscall.SIGTERM)
+			}
+			deadline := time.Now().Add(timeout)
+			for {
+				_, gone, live := singlehost.LiveSupervisorPID(repo)
+				if !ownLiveSupervisor(id, gone, live) {
+					break // our target supervisor has exited (or the lease moved on)
+				}
+				if time.Now().After(deadline) {
+					return fmt.Errorf("sprint end: supervisor (pid %d) did not stop within %s", pid, timeout)
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+		case ok:
+			// A live supervisor holds this repo's lease but for a *different*
+			// session (or an unproven one). Never signal it — only mark our own
+			// session ended. (Repo-level lease; the live session is identified by
+			// the stamped session id.)
+			fmt.Fprintf(w, "note: repo %q has a live supervisor for a different session (%q); not signaling it\n", repo, liveID)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT OR REPLACE INTO session_meta (key, value) VALUES ('ended_at', strftime('%Y-%m-%dT%H:%M:%fZ','now'))`); err != nil {
+		return fmt.Errorf("mark session ended: %w", err)
+	}
+	if err := commitSessionSnapshot(ctx, sessionDir, fmt.Sprintf("sprint end %s", id)); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "Sprint %s ended.\n", id)
+	return nil
 }
 
 // runSprintLs lists every session under root, read-only (WAL-safe: SELECT only,
@@ -176,6 +251,11 @@ func runSprintShow(ctx context.Context, w io.Writer, sessionDir, id string) erro
 	var repo, scope string
 	_ = db.QueryRowContext(ctx, `SELECT repo, source_query FROM scope_generations ORDER BY id DESC LIMIT 1`).Scan(&repo, &scope)
 	fmt.Fprintf(w, "Session: %s\nDir:     %s\nRepo:    %s\nScope:   %s\n", id, sessionDir, repo, scope)
+	var endedAt string
+	_ = db.QueryRowContext(ctx, `SELECT value FROM session_meta WHERE key = 'ended_at'`).Scan(&endedAt)
+	if endedAt != "" {
+		fmt.Fprintf(w, "Ended:   %s\n", endedAt)
+	}
 
 	renderQuery(ctx, w, db, "Runs",
 		`SELECT id, status, started_at, COALESCE(completed_at,'-') FROM runs ORDER BY started_at, id`,

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/robertolupi/botfam/internal/eventdelivery/store"
 )
@@ -42,17 +44,92 @@ func TestDeriveSessionState(t *testing.T) {
 	for _, tc := range []struct {
 		lastStatus string
 		live       bool
+		ended      bool
 		want       string
 	}{
-		{"", false, "new"},
-		{"running", true, "running"},
-		{"running", false, "crashed"},
-		{"completed", false, "completed"},
-		{"completed", true, "completed"},
+		{"", false, false, "new"},
+		{"running", true, false, "running"},
+		{"running", false, false, "crashed"},
+		{"completed", false, false, "completed"},
+		{"completed", true, false, "completed"},
+		{"completed", false, true, "ended"}, // ended overrides
+		{"running", true, true, "ended"},    // ended overrides even a live run
 	} {
-		if got := deriveSessionState(tc.lastStatus, tc.live); got != tc.want {
-			t.Errorf("deriveSessionState(%q, %v) = %q, want %q", tc.lastStatus, tc.live, got, tc.want)
+		if got := deriveSessionState(tc.lastStatus, tc.live, tc.ended); got != tc.want {
+			t.Errorf("deriveSessionState(%q, %v, %v) = %q, want %q", tc.lastStatus, tc.live, tc.ended, got, tc.want)
 		}
+	}
+}
+
+func TestOwnLiveSupervisor(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		targetID string
+		liveID   string
+		live     bool
+		want     bool
+	}{
+		{"this session", "s1", "s1", true, true},
+		{"different session same repo", "s1", "s2", true, false}, // must NOT signal
+		{"unproven (empty id)", "s1", "", true, false},
+		{"not live", "s1", "s1", false, false},
+	} {
+		if got := ownLiveSupervisor(tc.targetID, tc.liveID, tc.live); got != tc.want {
+			t.Errorf("%s: ownLiveSupervisor(%q,%q,%v) = %v, want %v", tc.name, tc.targetID, tc.liveID, tc.live, got, tc.want)
+		}
+	}
+}
+
+func TestRunSprintEnd(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "s-end")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// `end` commits a snapshot, so the session dir must be a git repo.
+	for _, args := range [][]string{{"init"}, {"config", "user.name", "t"}, {"config", "user.email", "t@t.invalid"}} {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	seedInspectSession(t, dir, "completed", "repoA") // no live supervisor for repoA
+
+	var buf bytes.Buffer
+	if err := runSprintEnd(context.Background(), &buf, dir, "s-end", 2*time.Second); err != nil {
+		t.Fatalf("runSprintEnd: %v", err)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("ended")) {
+		t.Errorf("end output missing 'ended': %s", buf.String())
+	}
+
+	db, err := store.Open(filepath.Join(dir, "session.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var endedAt string
+	if err := db.QueryRow(`SELECT value FROM session_meta WHERE key = 'ended_at'`).Scan(&endedAt); err != nil {
+		t.Fatalf("ended_at not recorded: %v", err)
+	}
+	if endedAt == "" {
+		t.Error("ended_at is empty")
+	}
+
+	// ls + show now reflect the ended state.
+	var lsBuf bytes.Buffer
+	if err := runSprintLs(context.Background(), &lsBuf, filepath.Dir(dir), func(context.Context, string) bool { return false }); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(lsBuf.Bytes(), []byte("ended")) {
+		t.Errorf("ls missing ended state:\n%s", lsBuf.String())
+	}
+	var showBuf bytes.Buffer
+	if err := runSprintShow(context.Background(), &showBuf, dir, "s-end"); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(showBuf.Bytes(), []byte("Ended:")) {
+		t.Errorf("show missing Ended line:\n%s", showBuf.String())
 	}
 }
 
