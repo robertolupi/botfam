@@ -13,8 +13,6 @@ narrower skills — lean on them rather than duplicating their detail:
   *actual tip*, build + test, never approve on assumption) and how to notice
   work by querying the forge (the legacy `botfam wait` loop is being replaced
   by a supervisor; in the gap the operator runs you by hand).
-- **`join-irc`** — optional: how to join an IRC design sprint. IRC is not the
-  coordination or wake plane; the forge is.
 
 Coordination consensus is Gitea PR reviews + native branch protection (PROTOCOL
 §3), not the deleted ccrep bang-verbs. The integration branch is
@@ -73,7 +71,7 @@ Resolve your own identity and the forge's before touching anything:
   supervised path (`botfam sprint run`) hasn't landed, so the operator runs you
   by hand (`forge-autonomy` §1). Query your unread notifications and assigned
   issues directly. The forge is your coordination plane for claims, hand-offs,
-  and merge nudges; join IRC (`join-irc`) only if a design sprint is running.
+  and merge nudges.
 
 Then survey the board: `forge_list_issues {state: open}` and
 `forge_list_pull_requests {state: open}`.
@@ -270,8 +268,6 @@ The forge is the coordination plane. Use it to:
   PRs;
 - hand off when you're blocked or out of non-conflicting work (a Handover
   Snapshot on the issue/PR).
-
-IRC is opt-in and only for design sprints — not for backlog coordination.
 
 When you think a PR conflicts, **verify before crying wolf** — a Gitea
 `mergeable: false` can be a transient recompute after the base moved. Confirm

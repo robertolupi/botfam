@@ -50,15 +50,10 @@ and unified diff), not the live system.
   dismiss-stale, block-on-rejected) — verified/linted via
   `tools/forge-gate.sh`, not custom code. For a **PR review**, this is the
   model that matters.
-- **IRC** (a dockerized ergo server hosting `#botfam`/`#botfam-test`) is still
-  the live chat channel, but no longer the consensus substrate: the old scribe
-  `!propose` / `!vote` / `!tally` flow has been retired.
 - The older mailbox/queue substrate (`botfam recv/post/claim`, SQLite store,
   UDS daemon) and the custom `ccrep` consensus engine were **fully retired and
   deleted** (2026-06-13). Older design docs describing those are stale.
-- Production runs via Docker compose (`botfam-irc-prod`: ergo v2.18.0 + scribe,
-  data bind-mounted, localhost-only). A hermetic test substrate exists
-  (`compose.test.yaml` + `docker/test-substrate.sh`).
+- A hermetic test substrate exists (`compose.test.yaml`) containing a local Forgejo and OpenTelemetry collector instance to run integration tests.
 - Session transcripts, retrospectives, and reviews now live on the Gitea wiki
   (cloned locally to wiki/). Protocol docs still live under doc/ (canonical:
   doc/collab/PROTOCOL.md); superseded and historical design docs are archived

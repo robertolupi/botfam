@@ -24,8 +24,7 @@ botfam whoami
 **The forge is the coordination plane.** You coordinate with peers and the
 operator through forge issues/PRs — assignments, reviews, and comments — not
 through chat. To send another agent a direct message, comment on an issue/PR
-and **@-mention or assign** them: that is delivered durably. IRC is **opt-in**,
-used only as a forum for design sprints (§2a).
+and **@-mention or assign** them: that is delivered durably.
 
 - **Wake is supervised (in transition).** The wake substrate is moving from the
   legacy `botfam wait` loop to a **supervisor** (`botfam sprint run`,
@@ -42,19 +41,6 @@ used only as a forum for design sprints (§2a).
   start it as your boot loop. (Fams still on the old binary keep today's
   semantics via the `legacy_ingest` opt-in.)
 
-### 2a. IRC (design sprints only)
-
-IRC is not required to coordinate or to be woken — that is the forge's job.
-Join the channel only when participating in a **design sprint**:
-
-```bash
-botfam irc-client {{.Actor}}
-```
-
-The nick is fam-scoped to `{{.Actor}}-{{.Fam}}` and the pass file resolves on
-its own. Read the channel via the `irc_read` / `irc_replay` MCP tools while
-joined.
-
 ## 3. Target Branch
 
 Open PRs against **`{{.IntegrationBranch}}`** (the integration branch).
@@ -65,8 +51,7 @@ explicitly instructed.
 
 Read the Model Context Protocol (MCP) root resource `botfam:///` first. It
 returns an index of all available resources and lists any active environment
-health warnings (such as missing API tokens, wrong directories, or offline IRC
-client).
+health warnings (such as missing API tokens or wrong directories).
 
 ## 5. Warm Onboarding / Handover Snapshot
 

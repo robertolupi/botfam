@@ -1,5 +1,5 @@
 # botfam binary image — entrypoint is the binary, so the compose `command:`
-# (or `docker run ... <subcommand>`) selects what runs: scribe, irc-client, ...
+# (or `docker run ... <subcommand>`) selects what runs.
 # Use a Go toolchain that satisfies go.mod's `go` directive (>=1.26).
 FROM golang:1.26-alpine AS build
 RUN apk add --no-cache git

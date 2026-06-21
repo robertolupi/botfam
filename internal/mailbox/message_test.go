@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+const SourceIRC = "irc"
+
 func TestMessageRoundTrip(t *testing.T) {
 	want := &Message{
 		From:        "agy",

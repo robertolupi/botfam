@@ -29,7 +29,6 @@ import (
 
 // Source values for [Message.Source].
 const (
-	SourceIRC   = "irc"
 	SourceForge = "forge"
 )
 

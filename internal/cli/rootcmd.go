@@ -23,10 +23,10 @@ const (
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "botfam",
-		Short: "Coordinate a family of AI agents over IRC and a self-hosted forge",
+		Short: "Coordinate a family of AI agents over Gitea/Forgejo",
 		Long: `botfam is a single-binary CLI that lets a "family" of AI agents coordinate:
-agents talk over a local IRC server, durable state lives on a self-hosted
-Gitea/Forgejo forge, and consensus is enforced by native branch protection.
+durable state lives on a self-hosted Gitea/Forgejo forge, and consensus
+is enforced by native branch protection.
 
 Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 		// We render errors ourselves in main() (legacy envelope), and don't want
@@ -73,10 +73,6 @@ Run with no subcommand over a pipe (no TTY) to start the stdio MCP server.`,
 	addTo(groupOps,
 		ops.NewWaitCmd(),
 		ops.NewForgeWaitCmd(),
-		ops.NewIrcClientCmd(),
-		ops.NewIrcWaitCmd(),
-		ops.NewScribeCmd(),
-		ops.NewIrclog2SessionsCmd(),
 		ops.NewSessionCmd(),
 		ops.NewRunCmd(),
 		ops.NewWhoamiCmd(),

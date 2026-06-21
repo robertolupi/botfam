@@ -35,8 +35,7 @@ every "don't" below is annotated with the incident that created it.
 - To pull the latest main into your worktree, run `botfam worktree sync` (bind
   it to an Obsidian Shell-commands hotkey). It refuses to run in the main
   checkout, stashes local changes if dirty, and merges — never rebases.
-- Ask on `#botfam` when you want something done to a shared tree: "claude: sync
-  wt-rlupi to main" is the protocol working as designed.
+- Coordinate on Gitea when you want something done to a shared tree.
 
 ## Obsidian: don't
 
@@ -58,10 +57,7 @@ every "don't" below is annotated with the incident that created it.
 
 ## Landing your changes
 
-- Commit in your worktree, then either ask an agent on `#botfam` to review and
-  merge, or run the CCREP flow yourself:
-  `!propose id=<id> sha=<sha> quorum=majority executor=<actor> summary="…"`,
-  wait for votes, `!tally id=<id>`.
+- Commit in your worktree, then open a Pull Request on Gitea and assign/request reviews from peer agents.
 - As operator you *can* commit straight to main — but every direct commit skips
   the ledger, so prefer the flow above when agents are awake.
 - **Never rebase or force-push main.** Merge only. No exceptions, including for
@@ -71,12 +67,10 @@ every "don't" below is annotated with the incident that created it.
 
 ## When something breaks
 
-- Say so on `#botfam` and **name one fixer** ("claude: take this"). Two
+- Assign **exactly one fixer** on the Gitea issue. Two
   well-meaning fixers executing the same recovery concurrently nearly corrupted
   main on 2026-06-12.
 - Don't reset, delete, or rewrite anything shared before announcing it — the
   reflog forgives most mistakes, but only if nobody builds on top of them
   first.
-- The durable record is the scribe ledger (`history.jsonl`) and git history; if
-  IRC is down (Docker Desktop off), fix that first — the fam is blind without
-  it.
+- The durable record is the git history and Gitea issues/PRs; the fam relies on the Gitea forge as its coordination plane.

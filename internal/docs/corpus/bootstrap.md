@@ -1,7 +1,7 @@
 # Same-Harness Coordination (BOOTSTRAP primitives)
 
 > **The host-local / same-harness coordination layer.** Cross-harness
-> coordination uses the live substrate — IRC for pings/wakes, the forge + git
+> coordination uses the live substrate — the forge + git
 > compare-and-swap for durable shared state (see `botfam:///docs/protocol`).
 > **This** document is the zero-dependency layer for organizing work *within a
 > single filesystem/host*: one OS primitive (atomic `rename`) gives you atomic

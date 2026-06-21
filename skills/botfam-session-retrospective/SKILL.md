@@ -25,14 +25,10 @@ defend work. Keep it blameless, factual, evidence-based, and action-oriented.
 Use only evidence available from the current session or repo:
 
 - commits and diffs,
-- IRC channel logs — the primary coordination record:
-  - your own client log (`scratch/irc/<actor>/log`, timestamped),
-  - the scribe's machine-readable ledger (JSONL at `COLLAB_HISTORY`, one event
-    per line with sender/type/target/body),
-  - server-side history when available (ergo `CHATHISTORY`),
-- Gitea PR reviews, comments, and verdicts,
-- tests run and failures,
-- human interventions (operator messages on the channel),
+- Git history, commits, and diffs,
+- Forge PR reviews, comments, and timeline events,
+- Tests run and failures,
+- Human interventions (operator messages in user prompts, reviews, or CLI inputs),
 - TODOs and unresolved questions.
 
 If evidence is missing, say so explicitly. Do not infer intent. When client
@@ -83,11 +79,9 @@ Older retrospectives migrated out of `doc/review/` are indexed on the wiki's
 ## Workflow
 
 1. Gather evidence from git status, recent commits, relevant diffs, tests, your
-   IRC client log, and the scribe ledger when available.
-2. Reconstruct the timeline from evidence. IRC logs carry per-line timestamps —
-   use them verbatim; the channel log is the authoritative event order. When
-   your client was disconnected, mark the gap explicitly and fill it from the
-   scribe ledger or server history, noting the source.
+   conversation transcript/logs, and Forge reviews/issues.
+2. Reconstruct the timeline from evidence. Use the conversation transcript/logs
+   as the authoritative event order. When there are gaps, mark them explicitly.
 3. Identify outcomes and verification gaps.
 4. Extract durable lessons as reusable principles.
 5. Write bounded self-improvement items only when they convert into concrete

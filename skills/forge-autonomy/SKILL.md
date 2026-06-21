@@ -116,8 +116,7 @@ queries the forge. In the manual-supervisor gap there is no automatic wake, so
 1. Request the review on the forge (PR reviewer request / assignment).
 2. If the reviewer doesn't respond, **tell the operator in plain text** that
    the PR is blocked on a peer review and name the PR — the operator runs the
-   reviewer. (For an active design sprint you may also ping them on IRC; see
-   `skills/join-irc`.)
+   reviewer.
 
 ## Don't
 

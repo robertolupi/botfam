@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
-	"github.com/robertolupi/botfam/internal/irc"
 	"github.com/robertolupi/botfam/internal/mailbox"
 )
 
@@ -164,85 +162,12 @@ func (l *writerLock) release() {
 	_ = l.f.Close()
 }
 
-// ircPoller tails the IRC client log and appends matching lines as irc events.
-type ircPoller struct {
-	logPath   string
-	matchNick string
-}
-
-// NewIRCPoller builds the IRC source: it tails logPath, skipping history
-// replays and matchNick's own traffic (the same filter as irc-wait).
-func NewIRCPoller(logPath, matchNick string) Poller {
-	return &ircPoller{logPath: logPath, matchNick: matchNick}
-}
-
-func (p *ircPoller) Name() string { return mailbox.SourceIRC }
-
-func (p *ircPoller) SeedEOF(c *mailbox.Cursors) {
-	if fi, err := os.Stat(p.logPath); err == nil {
-		c.IRCOffset = fi.Size()
-	}
-}
-
-func (p *ircPoller) Poll(s *mailbox.Spool, c *mailbox.Cursors) error {
-	lines, next, err := irc.ReadIrcLog(p.logPath, c.IRCOffset, 1000)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // log not created yet
-		}
-		return err
-	}
-	for _, line := range lines {
-		if !irc.IsMatchingLine(line, p.matchNick) {
-			continue
-		}
-		target, nick, text := parseIRCLine(line)
-		// Subject is the line text (capped/sanitized by Message.Encode); the body
-		// keeps the full raw line so nothing is lost on a parse miss.
-		if _, err := s.Deliver(&mailbox.Message{
-			Source:  mailbox.SourceIRC,
-			From:    nick,
-			To:      target,
-			Kind:    "message",
-			Subject: text,
-			Body:    line,
-		}); err != nil {
-			return err
-		}
-	}
-	c.IRCOffset = next
-	return nil
-}
-
-// parseIRCLine does a light best-effort parse of a human-readable client log
-// line into (target channel, nick, text). The full line is always kept as text
-// so nothing is lost even when the parse misses.
-func parseIRCLine(line string) (target, nick, text string) {
-	text = line
-	if i := strings.Index(line, "<"); i >= 0 {
-		if j := strings.Index(line[i+1:], ">"); j >= 0 {
-			nick = line[i+1 : i+1+j]
-		}
-	}
-	for _, tok := range strings.Fields(line) {
-		if strings.HasPrefix(tok, "#") {
-			target = tok
-			break
-		}
-	}
-	return target, nick, text
-}
-
-// IngestParams resolves the spool directory, IRC log path, and fam-scoped match
-// nick for the agent owning workDir, so a host can construct an Ingester. The
-// spool lives at $FAMROOT/spool/$agent (proposal-event-delivery-redesign §3).
-func IngestParams(workDir string) (spoolDir, ircLogPath, matchNick string, err error) {
+// IngestParams resolves the spool directory for the agent owning workDir.
+func IngestParams(workDir string) (spoolDir string, err error) {
 	rf, err := famconfig.ResolveFam(workDir)
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
 	spoolDir = filepath.Join(rf.FamDir, "spool", rf.Actor)
-	ircLogPath = filepath.Join(rf.WorktreeRoot, "scratch", "irc", rf.Actor, "log")
-	matchNick = famconfig.FamScopedNick(rf.Actor, rf.Slug)
-	return spoolDir, ircLogPath, matchNick, nil
+	return spoolDir, nil
 }

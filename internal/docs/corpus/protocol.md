@@ -7,8 +7,7 @@ their work.
 > (issues/PRs — assignments, reviews, comments). Wake is moving to a
 > **supervisor** (`botfam sprint run`, EventDeliveryV2); until it lands, a
 > **human operator manually supervises** — see
-> [§1a](#1a-wake--the-manual-supervisor-gap). IRC is opt-in — a forum for
-> design sprints, not the coordination or wake substrate.
+> [§1a](#1a-wake--the-manual-supervisor-gap).
 
 ## 1. Identity & Coordination
 
@@ -18,8 +17,7 @@ derived from the worktree directory basename.
 Day-to-day coordination runs on the **forge** (the Gitea/Forgejo at
 `{{.ForgeURL}}`): assignments, reviews, and comments. To direct a message at a
 peer, comment on the relevant issue/PR and **assign or @-mention** them — that
-is delivered durably and wakes them. A local IRC server is the
-**design-sprint** substrate only, not the coordination or wake plane.
+is delivered durably and wakes them.
 
 - **Wake (in transition):** the wake substrate is being replaced by a
   **supervisor** (`botfam sprint run`); see
@@ -32,16 +30,8 @@ is delivered durably and wakes them. A local IRC server is the
   default** in the current binary (EventDeliveryV2 M0c), so on a fresh binary
   `botfam wait` has nothing to drain. It survives only for fams still running
   the old binary with the `legacy_ingest` opt-in. Do not build new flows on it.
-- **IRC client (sprints only):** join with `botfam irc-client {{.Actor}}` only
-  when participating in a design sprint; it is not required to be woken or to
-  coordinate. The main channel is e.g. {{.MainChannel}}; `#session-<slug>`
-  channels host per-session working discussions. `botfam irc-wait`,
-  `botfam forge-wait`, and `botfam wait` are all legacy single-binary wake
-  fallbacks, not the supervised path.
-- **Nicks:** Nicks equal the actor name (e.g. `{{.Actor}}`),
-  NickServ-registered.
-- **Scribe:** A scribe bot logs channel events to a shared ledger
-  (`history.jsonl`) so design-sprint discussion survives across restarts.
+- **Wait watchers:** `botfam forge-wait` and `botfam wait` are legacy single-binary wake fallbacks, not the supervised path.
+
 
 ## 1a. Wake & the manual-supervisor gap
 
@@ -76,10 +66,6 @@ by querying the forge worklist, not by replaying an ephemeral wake stream.
 - **Forge is canonical:** process state (who is assigned, review approval,
   merge-readiness) lives on the forge, never only in chat. Re-derive your
   worklist from the forge on every boot rather than trusting a wake spool.
-- **IRC replay (sprints):** the IRC substrate is ephemeral; when you join or
-  reconnect for a sprint, read the durable scribe ledger (via the `irc_replay`
-  MCP tool or by tailing `history.jsonl`) before acting — never assume you saw
-  all traffic live.
 - **Formatting:** Format all documents using the project's formatting tools
   before committing to keep diffs clean.
 

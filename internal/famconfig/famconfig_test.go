@@ -392,21 +392,6 @@ func TestResolveFam(t *testing.T) {
 	}
 }
 
-func TestFamScopedNick(t *testing.T) {
-	cases := []struct{ actor, slug, want string }{
-		{"claude", "botfam", "claude-botfam"},
-		{"agy", "dc", "agy-dc"},
-		{"claude-botfam", "botfam", "claude-botfam"}, // idempotent, no double-suffix
-		{"claude", "", "claude"},                     // no slug → bare actor
-		{"", "botfam", ""},                           // no actor → bare (empty)
-	}
-	for _, tc := range cases {
-		if got := FamScopedNick(tc.actor, tc.slug); got != tc.want {
-			t.Errorf("FamScopedNick(%q, %q) = %q, want %q", tc.actor, tc.slug, got, tc.want)
-		}
-	}
-}
-
 func TestFlagFromMap(t *testing.T) {
 	flags := map[string]any{"on": int64(1), "off": false, "bad": "treu"}
 

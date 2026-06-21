@@ -286,11 +286,11 @@ func runExternalReview(ctx context.Context, opts externalReviewOpts, out io.Writ
 	if pr != "" {
 		slug = "pr-" + pr
 	} else if milestoneName != "" {
-		slug = "milestone-" + ops.Slugify(milestoneName)
+		slug = "milestone-" + slugify(milestoneName)
 	} else if sessionFile != "" {
-		slug = "session-" + ops.Slugify(strings.TrimSuffix(filepath.Base(sessionFile), filepath.Ext(sessionFile)))
+		slug = "session-" + slugify(strings.TrimSuffix(filepath.Base(sessionFile), filepath.Ext(sessionFile)))
 	} else if len(materials) > 0 {
-		slug = ops.Slugify(strings.TrimSuffix(filepath.Base(materials[0]), filepath.Ext(materials[0])))
+		slug = slugify(strings.TrimSuffix(filepath.Base(materials[0]), filepath.Ext(materials[0])))
 	} else {
 		slug = "session-review"
 	}
@@ -414,7 +414,7 @@ func runExternalReview(ctx context.Context, opts externalReviewOpts, out io.Writ
 		if err != nil {
 			res.reviewErr = err
 		} else {
-			res.outFile = filepath.Join(outDir, fmt.Sprintf("review-%s-%s.md", p.name, ops.Slugify(model)))
+			res.outFile = filepath.Join(outDir, fmt.Sprintf("review-%s-%s.md", p.name, slugify(model)))
 			if werr := os.WriteFile(res.outFile, []byte(text), 0o644); werr != nil {
 				res.writeErr = werr
 			}
@@ -618,4 +618,21 @@ func promptBelowMarker(path string) (string, error) {
 		}
 	}
 	return s, nil
+}
+
+func slugify(s string) string {
+	s = strings.ToLower(s)
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else if r == '-' || r == '_' || r == ' ' {
+			b.WriteRune('-')
+		}
+	}
+	res := b.String()
+	for strings.Contains(res, "--") {
+		res = strings.ReplaceAll(res, "--", "-")
+	}
+	return strings.Trim(res, "-")
 }

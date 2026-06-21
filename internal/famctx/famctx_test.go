@@ -400,14 +400,8 @@ func TestResolveRefusalModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ctx.ScopedNick != "bob-mf" {
-		t.Errorf("expected ScopedNick bob-mf, got %q", ctx.ScopedNick)
-	}
 	if ctx.SpoolDir != filepath.Join(famDir, "spool", "bob") {
 		t.Errorf("expected SpoolDir under famDir, got %q", ctx.SpoolDir)
-	}
-	if ctx.IRCLogDir != filepath.Join(bobDir, "scratch", "irc", "bob") {
-		t.Errorf("expected IRCLogDir under worktree root, got %q", ctx.IRCLogDir)
 	}
 }
 
@@ -507,7 +501,6 @@ func TestResolveWithInjectedResolver(t *testing.T) {
 		{"Name", ctx.Name, "injfam"},
 		{"Slug", ctx.Slug, "inj"},
 		{"RootSetID", ctx.RootSetID, "deadbeef0000"},
-		{"ScopedNick", ctx.ScopedNick, "bob-inj"},
 		{"ActorRole", string(ctx.ActorRole), string(RoleAgent)},
 	}
 	for _, c := range checks {

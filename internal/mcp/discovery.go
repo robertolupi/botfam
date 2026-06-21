@@ -123,10 +123,8 @@ func markdownResource(uri string, content []byte) []mcplib.ResourceContents {
 	}}
 }
 
-// discoverySlugs is the ordered set of embedded generic docs served under
-// botfam:///docs/<slug>. It mirrors the corpus in internal/docs (#117).
 var discoverySlugs = []string{
-	"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown",
+	"start", "protocol", "bootstrap", "operator", "review", "worktrees", "markdown",
 }
 
 // healthCheck is one entry in the discovery root's health report. A non-"ok"
@@ -179,7 +177,6 @@ func buildDiscoveryData(ctx context.Context, workDir, clientName string) discove
 		d.resolvedVia = string(c.Source)
 	}
 
-	d.tmpl.MainChannel, d.tmpl.CcrepChannel = famconfig.FamChannels(reg)
 	d.tmpl.IntegrationBranch = famconfig.FamBranch(reg)
 	d.tmpl.ReleaseBranch = famconfig.FamReleaseBranch(reg)
 	d.tmpl.ForgeURL = reg.Origin
@@ -335,29 +332,6 @@ func discoveryHealth(workDir string, t docs.TemplateData, harness, declaredHarne
 		}
 	}
 
-	// IRC client: check that a live client backs the FIFO by verifying the pidfile.
-	if t.Actor != "" {
-		fifo := filepath.Join(workDir, "scratch", "irc", t.Actor, "in")
-		pidFile := filepath.Join(workDir, "scratch", "irc", t.Actor, "pid")
-		clientRunning := false
-		if fileExists(fifo) && fileExists(pidFile) {
-			if pidData, err := os.ReadFile(pidFile); err == nil {
-				var pid int
-				if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err == nil && pid > 0 {
-					if processExists(pid) {
-						clientRunning = true
-					}
-				}
-			}
-		}
-		if clientRunning {
-			checks = append(checks, healthCheck{"irc_client", "ok", ""})
-		} else {
-			checks = append(checks, healthCheck{"irc_client", "warn",
-				fmt.Sprintf("IRC client not running: start `botfam irc-client %s` (see botfam:///docs/ops)", t.Actor)})
-		}
-	}
-
 	return checks
 }
 
@@ -387,7 +361,6 @@ func renderRoot(d discoveryData) []byte {
 	b.WriteString("## This fam\n\n")
 	fmt.Fprintf(&b, "- **fam**: %s\n", orPlaceholder(t.Fam, "<unresolved>"))
 	fmt.Fprintf(&b, "- **actor**: %s\n", orPlaceholder(t.Actor, "<unresolved>"))
-	fmt.Fprintf(&b, "- **main channel**: %s\n", orPlaceholder(t.MainChannel, "<unresolved>"))
 	fmt.Fprintf(&b, "- **integration branch**: %s — open PRs here; never target `%s` unless instructed\n",
 		orPlaceholder(t.IntegrationBranch, "<unresolved>"),
 		orPlaceholder(t.ReleaseBranch, "main"))
@@ -448,7 +421,6 @@ type discoveryIndex struct {
 	Fam struct {
 		Name              string `json:"name"`
 		Actor             string `json:"actor"`
-		MainChannel       string `json:"main_channel"`
 		IntegrationBranch string `json:"integration_branch"`
 		ReleaseBranch     string `json:"release_branch"`
 	} `json:"fam"`
@@ -464,7 +436,6 @@ func renderIndexJSON(d discoveryData) ([]byte, error) {
 	idx.Server.Version = serverVersion
 	idx.Fam.Name = d.tmpl.Fam
 	idx.Fam.Actor = d.tmpl.Actor
-	idx.Fam.MainChannel = d.tmpl.MainChannel
 	idx.Fam.IntegrationBranch = d.tmpl.IntegrationBranch
 	idx.Fam.ReleaseBranch = d.tmpl.ReleaseBranch
 	idx.ResolvedVia = d.resolvedVia
@@ -522,9 +493,6 @@ func (s *server) getTools() []mcplib.Tool {
 }
 
 func toolDomain(name string) string {
-	if strings.HasPrefix(name, "irc_") {
-		return "irc"
-	}
 	if strings.HasPrefix(name, "worktree_") {
 		return "worktree"
 	}
@@ -532,12 +500,7 @@ func toolDomain(name string) string {
 }
 
 func toolReadOnly(name string) bool {
-	switch name {
-	case "irc_read", "irc_wait":
-		return true
-	default:
-		return false
-	}
+	return name == "orient"
 }
 
 func renderToolsMarkdown(s *server) []byte {

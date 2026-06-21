@@ -3,18 +3,15 @@
 Canonical, single source of truth for how fam members coordinate. The harness
 entry files (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`) are deliberately
 lightweight pointers here — put substantive rules in this file, never there.
-Day-to-day operational recipes for the IRC substrate (rejoin, account recovery,
-wake loop, log pipeline) live in [IRC-OPS.md](IRC-OPS.md).
 
 > **Coordination is forge-first.** Members coordinate through forge issues/PRs
 > (assignments, reviews, comments); `botfam wait` is the wake loop and runs
 > do-not-disturb by default (forge events wake you only when you're an assignee
-> or @-mentioned). IRC is opt-in — a forum for design sprints, not the
-> coordination or wake substrate.
+> or @-mentioned).
 
 ______________________________________________________________________
 
-## 1. Identity & IRC Layout
+## 1. Identity & Workspace Layout
 
 Every agent works in its own git worktree of the repository. Your actor name is
 derived from the **worktree directory basename** by dynamically checking the
@@ -34,38 +31,14 @@ In the `deep-cuts` repository:
 - `wt-deep-cuts-claude` → `claude`
 
 Day-to-day coordination runs on the **forge** (issues/PRs — assignments,
-reviews, comments; see the wake loop below). A local IRC server — **ergo
-v2.18.0** in the Docker compose project `botfam-irc-prod`
-(`docker/prod/compose.yaml`), host exposure `127.0.0.1:6667` only — is the
-**design-sprint** substrate, not the coordination or wake plane. ergo provides
-IRCv3 `CHATHISTORY`, so clients replay missed sprint traffic on reconnect.
+reviews, comments; see the wake loop below).
 
 - **Wake loop:** `botfam wait` is the wake loop every member runs. It blocks on
-  the per-agent spool, which a read-only ingester fills with forge activity and
-  (when joined) IRC lines; the MCP server starts the ingester automatically
+  the per-agent spool, which a read-only ingester fills with forge activity; the MCP server starts the ingester automatically
   once identity resolves (no opt-out flag, and it does not mark forge
   notifications read — forge stays canonical). **Do-not-disturb is the
   default:** forge events wake you only when directed at you (assignee or
-  @-mention in the latest comment); `--all` surfaces everything; IRC lines are
-  always relayed.
-- **IRC client (sprints only):** join with
-  `botfam irc-client <nick> --pass-file <file>` when participating in a design
-  sprint; it is not required to be woken or to coordinate.
-- **Nicks:** Nicks are connection-bound, equal to the actor name (e.g.
-  `claude`, `agy`), NickServ-registered with strict enforcement. ergo's limit
-  is `nicklen: 32`. (Project-scoped nicks like `wt-claude` are under decision —
-  AI-R15 in the wiki's `review-2026-06-11-unified` page.)
-- **Scribe Bot:** The scribe runs as a **compose service** (not an agent-owned
-  process) with the stable nick `scribe`, logging channel messages to the
-  shared ledger. Strict NickServ nick enforcement is the single-writer guard: a
-  second scribe cannot assume the identity (AI-R1 hardens the failure mode).
-- **Channels:**
-  - `#botfam`: Main coordination and discussion channel (Operator home).
-    Production.
-  - `#botfam-test`: experiments and client testing.
-  - `#session-<slug>`: Per-session working channels.
-- **Identity Trust:** On localhost, operator-supervised trust is assumed;
-  NickServ passwords bind nicks per actor (pass files kept outside git).
+  @-mention in the latest comment); `--all` surfaces everything.
 
 ______________________________________________________________________
 
@@ -73,19 +46,8 @@ ______________________________________________________________________
 
 The **forge is the durable coordination record** — issues/PRs persist across
 restarts and `botfam wait` replays missed forge activity from the spool, so no
-coordination is lost to a restart. For the IRC **design-sprint** substrate
-(which is ephemeral), durable scribe logging is the source of truth:
+coordination is lost to a restart.
 
-- **Scribe Logger:** The scribe bot joins the channels and appends all events
-  in real-time as JSON lines to the shared `history.jsonl` (in production:
-  `~/src/botfam-collab/history.jsonl` on the host, mounted into the scribe
-  container as `/collab/history.jsonl` via `COLLAB_HISTORY`). The server-side
-  `chat.log` lives at `~/botfam-irc/data/chat.log` and feeds the sessions
-  pipeline (`botfam irclog2sessions`). This keeps the ledger unified across
-  worktrees without causing git status noise or conflicts.
-- **Replay-on-Join:** When an agent joins or reconnects, it MUST read and parse
-  the shared history log file before acting. Never assume you saw all traffic
-  live.
 - **Markdown Formatting:** Format `doc/` markdown with `tools/mdformat.sh`
   before committing. It pins the canonical mdformat + plugin versions so all
   agents produce byte-identical output and review diffs stay free of reflow
@@ -150,10 +112,7 @@ ______________________________________________________________________
 
 ## 4. Worktree Ownership
 
-Other actors' worktrees are **read-only**. To update one, message the owner on
-the IRC channel. Only act yourself when the owner is known-offline, the tree is
-clean, the operation is a pure fast-forward, and you announce it on the channel
-immediately.
+Other actors' worktrees are **read-only**. To update one, coordinate with the owner on the Gitea forge. Only act yourself when the owner is known-offline, the tree is clean, the operation is a pure fast-forward, and you record the action on Gitea immediately.
 
 ### Repository Family Boundaries
 
@@ -165,15 +124,14 @@ the same host) has strict isolation boundaries:
   cross-checking.
 - **No cross-family writing, execution, or process management**: An agent must
   never write to files, run modifying shell commands, or spawn, manage, or
-  terminate background processes/daemons (such as IRC clients, wait watchers,
-  or MCP servers) in worktrees or environments belonging to a different
+  terminate background processes/daemons (such as wait watchers or MCP servers) in worktrees or environments belonging to a different
   repository family.
 - **No identity impersonation**: An agent must never impersonate or act on
   behalf of another agent or bot from a different repository family, nor use
   their credentials or local workspace configurations.
-- **Coordination must occur over IRC**: Any request requiring action (writing
+- **Coordination must occur over the forge**: Any request requiring action (writing
   or execution) in another family's checkout must be requested and discussed on
-  the target family's shared IRC channel (e.g., `#dc`). The corresponding agent
+  the target family's Gitea repository. The corresponding agent
   belonging to that family must execute the actions themselves.
 
 ### Offline Cross-Family Issue Tracking (Contract & Bindings)
@@ -216,31 +174,15 @@ machine:
 
 #### Layer 2: Transport Bindings
 
-The Layer 1 contract is transport-agnostic and can be satisfied by any of the
-following interchangeable transport bindings:
+The Layer 1 contract is transport-agnostic and can be satisfied by Gitea issues/PRs or, as a fallback when offline, a shared file-system queue:
 
-- **Binding A (Shared `#cross` IRC Channel) [Preferred]**:
-  - **Transport**: Both families' IRC clients join the `#cross` channel on the
-    shared localhost `ergo` server.
-  - **Durability**: Scribes in each family automatically log all events in
-    `#cross` to their own local family history ledgers (e.g.,
-    `~/src/botfam-collab/history.jsonl` for `botfam` and
-    `~/src/fams/deep-cuts/dc-collab/history.jsonl` for `deep-cuts`). Clients
-    leverage `ergo`'s `CHATHISTORY` to replay missed events upon connection.
-  - **Spoof Resistance**: NickServ nick authentication ensures that nicks
-    cannot be impersonated on `#cross`.
-  - **Wake-on-Report**: Message arrival is relayed through the spool and wakes `botfam wait`.
-  - **Payload**: The JSON payload is serialized and sent as a channel PRIVMSG.
+- **Binding A (Gitea/Forgejo) [Preferred]**:
+  - **Transport**: Issues are opened directly on the target family's repository.
+  - **Durability**: Gitea stores all issue data durably.
 - **Binding B (Shared File-System Queue) [Fallback]**:
-  - **Transport**: Used when the IRC server or clients are offline. JSON
-    payloads are dropped into the host-local shared directory
-    `~/.botfam/cross-fam/issues/`.
-  - **Filename Format**: Filenames must match the pattern:
-    `~/.botfam/cross-fam/issues/<yyyy-mm-dd>-<source-family>-<source-nick>-<slug>.json`.
-  - **Spoof Resistance**: None (assumes trust on local loopback).
-  - **Lifecycle**: The target family's processor agent scans the directory,
-    ingests pending `.json` files, and renames them to `.processed` (or moves
-    them to `processed/`) to prevent duplicate processing.
+  - **Transport**: Used when the forge or network is offline. JSON payloads are dropped into the host-local shared directory `~/.botfam/cross-fam/issues/`.
+  - **Filename Format**: Filenames must match the pattern: `~/.botfam/cross-fam/issues/<yyyy-mm-dd>-<source-family>-<source-nick>-<slug>.json`.
+  - **Lifecycle**: The target family's processor agent scans the directory, ingests pending `.json` files, and renames them to `.processed` (or moves them to `processed/`) to prevent duplicate processing.
 
 ### Main checkout discipline
 
@@ -248,7 +190,7 @@ The main checkout (`~/src/botfam`) is the shared merge target. Rules, each paid
 for by a 2026-06-12 incident:
 
 - **Single writer per operation.** Any ref-changing operation there (merge,
-  reset, cherry-pick, push) is claimed on the channel first; everyone else
+  reset, cherry-pick, push) is claimed on the forge first (via issue/PR comments); everyone else
   waits until the actor reports done. Two agents executing the same recovery
   concurrently produce orphaned commits at best and a half-applied state at
   worst.
@@ -299,32 +241,7 @@ in-place:
 
 ______________________________________________________________________
 
-## 5. Operational Contract (Docker substrate)
+## 5. Platform Gotchas
 
-The architecture formula (operator-ratified 2026-06-11): **botfam is IRC + bots
-\+ local sandbox-only shims.** Protocol surfaces live on IRC; host-local
-mechanisms (signals, pidfiles, flocks) may exist only as private implementation
-details of a single process, never as inter-agent coordination.
-
-- Production IRC runs via `docker compose -f docker/prod/compose.yaml` (project
-  `botfam-irc-prod`): ergo + scribe, `restart: unless-stopped`, data
-  bind-mounted from `~/botfam-irc/data`, localhost-only exposure.
-- **IRC is down whenever Docker Desktop is down** — start-at-login must be
-  enabled on the host (operator-owned; accepted risk is recorded in the
-  2026-06-11 unified retrospective, F9 waiver).
-- The hermetic test substrate (`compose.test.yaml` +
-  `docker/test-substrate.sh`) is the canonical integration gate; it never
-  touches production (host port 16667).
-- Server logs rotate via Docker (`json-file`, 20m × 8); `chat.log` rotation is
-  an open item (AI-R6).
-- **Timestamps:** the ledger and transcripts are UTC; local wallclock is
-  typically UTC+2. Until the fam ratifies one convention (AI-R5), quote ledger
-  timestamps verbatim when referencing the log.
-
-## 6. Platform Gotchas & Protocol Limits
-
-- **IRC Message Size Limit:** The IRC protocol strictly limits message line
-  size to 512 bytes (including CRLF). The Go client splits PRIVMSG payloads
-  longer than 400 bytes at space boundaries to prevent connection termination.
 - **macOS Gatekeeper:** Rebuilt binaries must be codesigned:
   `codesign --force --sign - ~/bin/botfam`.
