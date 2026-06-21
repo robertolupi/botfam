@@ -22,11 +22,9 @@ save_token() {
 
 # Wait for Forgejo to become healthy
 note "Waiting for Forgejo container to become healthy..."
-until docker compose -f compose.test.yaml exec -T forgejo sh -c 'nc -z 127.0.0.1 3000' >/dev/null 2>&1; do
+until [ "$(curl -s -o /dev/null -w "%{http_code}" http://localhost:13000/)" = "200" ]; do
   sleep 1
 done
-
-note "Forgejo is up and listening."
 
 # Clean up any existing tokens/users if necessary by resetting user admin token, or just proceed on clean db
 # (Since it's a test substrate, we usually run with clean volumes)
