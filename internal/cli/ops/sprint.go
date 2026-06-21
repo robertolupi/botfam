@@ -483,6 +483,7 @@ func newSprintRunCmd() *cobra.Command {
 				cmd        *exec.Cmd
 				startTime  time.Time
 				ttl        time.Duration
+				captureDir string
 			}
 			type workerResult struct {
 				workerID   string
@@ -504,9 +505,10 @@ func newSprintRunCmd() *cobra.Command {
 				case <-sigChan:
 					runSupervisor = false
 				case res := <-resultChan:
-					_, ok := workers[res.workerID]
+					w, ok := workers[res.workerID]
 					if ok {
 						delete(workers, res.workerID)
+						recordRunCaptureArtifact(cmd.Context(), db, res.workItemID, w.captureDir)
 						completedAt := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 						if res.err == nil {
 							_, _ = db.ExecContext(cmd.Context(), `UPDATE work_items SET state = 'completed' WHERE id = ?`, res.workItemID)
@@ -536,35 +538,40 @@ func newSprintRunCmd() *cobra.Command {
 						}
 					}
 
-					// Poll for pending work items
-					if workerCommand != "" {
-						rows, err := db.QueryContext(cmd.Context(), `SELECT id, scope_generation FROM work_items WHERE state = 'pending'`)
+					// Dispatch pending work items, bounded by the single-thread cap.
+					if capacity := sprintMaxInFlight - len(workers); capacity > 0 {
+						rows, err := db.QueryContext(cmd.Context(), `SELECT id, source_id, kind, scope_generation FROM work_items WHERE state = 'pending' ORDER BY created_at, id LIMIT ?`, capacity)
 						if err == nil {
-							var workItemsToDispatch []struct {
-								id       string
-								scopeGen int
+							type pendingItem struct {
+								id, sourceID, kind string
+								scopeGen           int
 							}
+							var pending []pendingItem
 							for rows.Next() {
-								var wid string
-								var sgen int
-								if rows.Scan(&wid, &sgen) == nil {
-									workItemsToDispatch = append(workItemsToDispatch, struct {
-										id       string
-										scopeGen int
-									}{wid, sgen})
+								var p pendingItem
+								if rows.Scan(&p.id, &p.sourceID, &p.kind, &p.scopeGen) == nil {
+									pending = append(pending, p)
 								}
 							}
 							rows.Close()
 
-							for _, wi := range workItemsToDispatch {
+							for _, wi := range pending {
+								argv, captureDir, cmdErr := workerCommandFor(workerCommand, sessionDir, wi.id, wi.kind, wi.sourceID)
+								if cmdErr != nil {
+									// Not dispatchable (e.g. no default worker for this kind) — fail it
+									// loudly rather than spinning on it every tick.
+									_, _ = db.ExecContext(cmd.Context(), `UPDATE work_items SET state = 'failed' WHERE id = ?`, wi.id)
+									_, _ = db.ExecContext(cmd.Context(), `INSERT INTO work_item_state_transitions (work_item_id, from_state, to_state, reason) VALUES (?, 'pending', 'failed', ?)`, wi.id, cmdErr.Error())
+									continue
+								}
+
 								workerID := fmt.Sprintf("worker-%s", uuid.New().String()[:8])
 								_, _ = db.ExecContext(cmd.Context(), `UPDATE work_items SET state = 'running' WHERE id = ?`, wi.id)
 								_, _ = db.ExecContext(cmd.Context(), `INSERT INTO work_item_state_transitions (work_item_id, from_state, to_state, reason) VALUES (?, 'pending', 'running', 'Dispatched')`, wi.id)
 								dispatchID := uuid.New().String()
 								_, _ = db.ExecContext(cmd.Context(), `INSERT INTO dispatches (id, work_item_id, worker_id, scope_generation) VALUES (?, ?, ?, ?)`, dispatchID, wi.id, workerID, wi.scopeGen)
 
-								parts := strings.Fields(workerCommand)
-								wCmd := exec.CommandContext(cmd.Context(), parts[0], parts[1:]...)
+								wCmd := exec.CommandContext(cmd.Context(), argv[0], argv[1:]...)
 								wCmd.Dir = wd
 								wCmd.Stdout = cmd.OutOrStdout()
 								wCmd.Stderr = cmd.OutOrStderr()
@@ -574,6 +581,7 @@ func newSprintRunCmd() *cobra.Command {
 									"TRACEPARENT="+traceparentVal,
 									"BOTFAM_WORKER_ID="+workerID,
 									"BOTFAM_WORK_ITEM_ID="+wi.id,
+									"BOTFAM_ISSUE="+wi.sourceID,
 									"BOTFAM_WORKER_CHANNEL_SOCKET="+socketPath,
 									"BOTFAM_FENCING_TOKEN="+strconv.FormatUint(grant.Msg.GetFencingToken(), 10),
 								)
@@ -585,6 +593,7 @@ func newSprintRunCmd() *cobra.Command {
 										cmd:        wCmd,
 										startTime:  now,
 										ttl:        workerTTL,
+										captureDir: captureDir,
 									}
 									go func(wid string, wiid string, c *exec.Cmd) {
 										resultChan <- workerResult{workerID: wid, workItemID: wiid, err: c.Wait()}
@@ -621,7 +630,7 @@ func newSprintRunCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&workerCommand, "worker-command", "", "The executable or command to spawn a worker subprocess")
+	cmd.Flags().StringVar(&workerCommand, "worker-command", "", "Override the worker command, used verbatim (default: botfam run --issue <source_id> --capture-dir <session>/artifacts/<work_item>)")
 	cmd.Flags().DurationVar(&workerTTL, "worker-ttl", 30*time.Second, "The timeout duration for spawned worker subprocesses")
 	return cmd
 }
@@ -706,6 +715,41 @@ func (s *supervisorSessionResolver) Resolve(ctx context.Context, req *connect.Re
 		SessionId:    s.sessionID,
 		FencingToken: s.fencingToken,
 	}), nil
+}
+
+// sprintMaxInFlight bounds concurrent workers. v0 is single-thread (one agent at
+// a time); a configurable cap is tracked in #505.
+const sprintMaxInFlight = 1
+
+// workerCommandFor builds the argv for a work item's worker and the capture dir
+// its run artifacts should land in. An explicit --worker-command is used verbatim
+// (override) with no implied capture dir. Otherwise the default worker is
+// `botfam run --issue <source_id> --capture-dir <session>/artifacts/<work_item>`,
+// which applies to resolve_issue items with a numeric source_id.
+func workerCommandFor(workerCommand, sessionDir, workItemID, kind, sourceID string) (argv []string, captureDir string, err error) {
+	if strings.TrimSpace(workerCommand) != "" {
+		return strings.Fields(workerCommand), "", nil
+	}
+	if kind != "resolve_issue" {
+		return nil, "", fmt.Errorf("no default worker for work-item kind %q; set --worker-command", kind)
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if _, e := strconv.Atoi(sourceID); e != nil {
+		return nil, "", fmt.Errorf("resolve_issue work item %s has non-numeric source_id %q", workItemID, sourceID)
+	}
+	captureDir = filepath.Join(sessionDir, "artifacts", workItemID)
+	return []string{"botfam", "run", "--issue", sourceID, "--capture-dir", captureDir}, captureDir, nil
+}
+
+// recordRunCaptureArtifact records a pointer to a worker's run-capture directory
+// in the artifacts table (relative URI, work_item_id FK) so inspection can find
+// it. No-op when the worker had no capture dir (e.g. an override --worker-command).
+func recordRunCaptureArtifact(ctx context.Context, db *sql.DB, workItemID, captureDir string) {
+	if captureDir == "" {
+		return
+	}
+	uri := filepath.Join("artifacts", filepath.Base(captureDir))
+	_, _ = db.ExecContext(ctx, `INSERT OR IGNORE INTO artifacts (id, work_item_id, kind, uri, sha256) VALUES (?, ?, 'run_capture', ?, '')`, uuid.New().String(), workItemID, uri)
 }
 
 func newSprintEndCmd() *cobra.Command {
