@@ -77,6 +77,11 @@ the full-access blast radius of --permission-mode bypass.
 	(optional when produced) otel-traces.jsonl
 	(optional when produced) artifacts.json
   (optional when produced) env.redacted.json
+  (antigravity only) agy-cli.log
+
+For the antigravity (agy) harness, artifacts.json records the conversation id and
+a pointer to the per-conversation SQLite trajectory store; token/model usage is
+not exposed on the CLI surface (it lives in protobuf blobs in that store).
 `
 
 const (
@@ -516,8 +521,7 @@ func runHarnessCLI(ctx context.Context, harness, prompt, fallbackCommand string,
 	case famconfig.HarnessClaudeCode:
 		return runClaudeHarnessCommand(ctx, prompt, issue, worktreeRoot, permissionMode, allowTools)
 	case famconfig.HarnessAntigravity:
-		args := append(harnessPermissionArgs(canonical, permissionMode), "--print", prompt)
-		return runDirectHarnessCommand(ctx, "agy", args, issue, worktreeRoot)
+		return runAntigravityHarnessCommand(ctx, prompt, issue, worktreeRoot, runDir, permissionMode)
 	}
 	return harnessResult{
 		Status:      runStatusRunnerError,
@@ -645,6 +649,79 @@ func runCodexHarnessCommand(ctx context.Context, prompt string, issue int64, wor
 		result.TokenUsage = tokenUsageFromCodexTranscript(parsed)
 	}
 	return result
+}
+
+// antigravityConvIDRE extracts the conversation UUID from agy's diagnostic log
+// (e.g. "Created conversation 99f89a01-243b-4601-ab35-aa5f2dd15d59").
+var antigravityConvIDRE = regexp.MustCompile(`(?i)conversation[ =]"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`)
+
+// antigravityAppDataRE extracts the CLI app-data directory from agy's log
+// (e.g. "appDataDir=/Users/me/.gemini/antigravity-cli").
+var antigravityAppDataRE = regexp.MustCompile(`appDataDir=(\S+)`)
+
+// runAntigravityHarnessCommand launches `agy --print` for one prompt.
+//
+// Antigravity has no structured (JSON) output mode: stdout carries only the
+// rendered markdown answer. The richest external evidence is the diagnostic log
+// requested with --log-file, which records the conversation UUID, server
+// lifecycle, timing, and auth/runner errors. That UUID names a per-conversation
+// SQLite trajectory store under <appDataDir>/conversations/<id>.db whose step
+// payloads (including token/model usage) are protobuf blobs — not decodable
+// without Antigravity's proto schema. Token usage is therefore reported as
+// unavailable from the CLI surface; the google-antigravity SDK (UsageMetadata)
+// is the path to structured token capture if needed.
+//
+// Flag ordering matters: --print consumes the next argument as the prompt, so
+// every value-bearing flag (--log-file) must precede --print <prompt>.
+func runAntigravityHarnessCommand(ctx context.Context, prompt string, issue int64, worktreeRoot, runDir, permissionMode string) harnessResult {
+	args := harnessPermissionArgs(famconfig.HarnessAntigravity, permissionMode)
+	logFile := ""
+	if runDir != "" {
+		logFile = filepath.Join(runDir, "agy-cli.log")
+		args = append(args, "--log-file", logFile)
+	}
+	args = append(args, "--print", prompt) // prompt must stay the final positional value
+	result := runDirectHarnessCommand(ctx, "agy", args, issue, worktreeRoot)
+	annotateAntigravityArtifacts(&result, logFile)
+	return result
+}
+
+// annotateAntigravityArtifacts mines agy's diagnostic log for the conversation
+// id and trajectory-store location, recording them as run artifacts, and pins
+// the token-usage source as unavailable (with a pointer to the SDK).
+func annotateAntigravityArtifacts(result *harnessResult, logFile string) {
+	result.TokenUsage = map[string]any{
+		"source": "unavailable",
+		"note":   "Antigravity CLI exposes no token/model usage on stdout or the text log; it lives in protobuf blobs in the per-conversation SQLite trajectory store. Use the google-antigravity SDK (UsageMetadata) for structured token capture.",
+	}
+	if logFile == "" {
+		return
+	}
+	if result.Artifacts == nil {
+		result.Artifacts = map[string]any{}
+	}
+	result.Artifacts["log_file"] = logFile
+	logBytes, err := os.ReadFile(logFile)
+	if err != nil {
+		return
+	}
+	log := string(logBytes)
+	if m := antigravityConvIDRE.FindStringSubmatch(log); len(m) == 2 {
+		convID := m[1]
+		result.Artifacts["conversation_id"] = convID
+		appData := ""
+		if dm := antigravityAppDataRE.FindStringSubmatch(log); len(dm) == 2 {
+			appData = dm[1]
+		} else if home, herr := os.UserHomeDir(); herr == nil {
+			appData = filepath.Join(home, ".gemini", "antigravity-cli")
+		}
+		if appData != "" {
+			dbPath := filepath.Join(appData, "conversations", convID+".db")
+			if info, serr := os.Stat(dbPath); serr == nil && !info.IsDir() {
+				result.Artifacts["conversation_db"] = dbPath
+			}
+		}
+	}
 }
 
 func mergeRunDefaults(base, override famconfig.RunConfig) famconfig.RunConfig {

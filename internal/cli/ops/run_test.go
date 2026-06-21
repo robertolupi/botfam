@@ -777,6 +777,108 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"num_turns"
 	}
 }
 
+func TestRunIssueAntigravityHarnessCapturesConversation(t *testing.T) {
+	repoRoot := t.TempDir()
+	initGitRepo(t, repoRoot)
+	client := fakeIssueClient{issue: &forge.Issue{
+		Index:   24,
+		Title:   "Antigravity conversation capture",
+		Body:    "Say hello in one word.",
+		HTMLURL: "http://gitea:3000/botfam/botfam/issues/24",
+	}}
+	fctx := testRunContext(t, repoRoot)
+	ctx := famctx.NewContext(context.Background(), fctx)
+	outDir := t.TempDir()
+
+	// Stand up a fake Antigravity app-data dir with a per-conversation store so
+	// the artifact annotator can resolve and stat the trajectory DB.
+	appData := t.TempDir()
+	convID := "99f89a01-243b-4601-ab35-aa5f2dd15d59"
+	if err := os.MkdirAll(filepath.Join(appData, "conversations"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(appData, "conversations", convID+".db")
+	if err := os.WriteFile(dbPath, []byte("fake-sqlite"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	oldPath := os.Getenv("PATH")
+	fakeBin := t.TempDir()
+	fakeCmd := filepath.Join(fakeBin, "agy")
+	// The fake agy parses --log-file (which must precede --print), writes a
+	// glog-style log naming the app-data dir and conversation id, then prints a
+	// rendered answer (agy has no JSON output mode).
+	replacer := strings.NewReplacer("APPDATA", appData, "CONVID", convID)
+	fakeScript := replacer.Replace(`#!/bin/sh
+logfile=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) logfile="$2"; shift 2;;
+    --print) shift 2;;
+    *) shift;;
+  esac
+done
+if [ -n "$logfile" ]; then
+  echo "I0621 server.go:214] Creating CLI server backend: appDataDir=APPDATA cascadeManager=true" > "$logfile"
+  echo "I0621 server.go:789] Created conversation CONVID" >> "$logfile"
+fi
+echo Hello
+`)
+	if err := os.WriteFile(fakeCmd, []byte(fakeScript), 0o755); err != nil {
+		t.Fatalf("write fake agy: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+":"+oldPath)
+
+	err := runIssue(ctx, client, fctx, runOptions{
+		issue:      24,
+		agent:      "antigravity",
+		agentSet:   true,
+		prompt:     "Say hello in one word",
+		captureDir: outDir,
+	})
+	if err != nil {
+		t.Fatalf("runIssue: %v", err)
+	}
+
+	runDir := findRunDir(t, outDir)
+	env := mustReadRunEnvelope(t, runDir)
+	if env.FailureClass != runStatusSuccess {
+		t.Fatalf("FailureClass = %q, want %q", env.FailureClass, runStatusSuccess)
+	}
+	// --log-file must come before --print so agy does not treat it as the prompt.
+	if !strings.Contains(env.HarnessCmd, "agy") {
+		t.Fatalf("HarnessCmd = %q, want to contain agy", env.HarnessCmd)
+	}
+	logIdx := strings.Index(env.HarnessCmd, "--log-file")
+	printIdx := strings.Index(env.HarnessCmd, "--print")
+	if logIdx < 0 || printIdx < 0 || logIdx > printIdx {
+		t.Fatalf("HarnessCmd = %q, want --log-file before --print", env.HarnessCmd)
+	}
+	// Token usage is unavailable from the CLI surface.
+	if got := env.TokenUsage["source"]; got != "unavailable" {
+		t.Fatalf("TokenUsage source = %v, want unavailable: %#v", got, env.TokenUsage)
+	}
+
+	// The diagnostic log is captured as a durable artifact.
+	if _, err := os.Stat(filepath.Join(runDir, "agy-cli.log")); err != nil {
+		t.Fatalf("missing agy-cli.log: %v", err)
+	}
+	artBytes, err := os.ReadFile(filepath.Join(runDir, "artifacts.json"))
+	if err != nil {
+		t.Fatalf("read artifacts.json: %v", err)
+	}
+	var artifacts map[string]any
+	if err := json.Unmarshal(artBytes, &artifacts); err != nil {
+		t.Fatalf("parse artifacts.json: %v", err)
+	}
+	if got := artifacts["conversation_id"]; got != convID {
+		t.Fatalf("artifacts conversation_id = %v, want %q", got, convID)
+	}
+	if got := artifacts["conversation_db"]; got != dbPath {
+		t.Fatalf("artifacts conversation_db = %v, want %q", got, dbPath)
+	}
+}
+
 func TestValidatePermissionMode(t *testing.T) {
 	for _, tc := range []struct {
 		in      string
