@@ -50,7 +50,6 @@ and unified diff), not the live system.
   dismiss-stale, block-on-rejected) — verified/linted via
   `tools/forge-gate.sh`, not custom code. For a **PR review**, this is the
   model that matters.
-- **IRC and scribe are fully retired and deleted** (2026-06-21). Coordination is now strictly git- and forge-native (using pull requests, PR reviews, and native branch-protection rules).
 - The older mailbox/queue substrate (`botfam recv/post/claim`, SQLite store,
   UDS daemon) and the custom `ccrep` consensus engine were **fully retired and
   deleted** (2026-06-13). Older design docs describing those are stale.

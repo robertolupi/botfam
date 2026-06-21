@@ -33,10 +33,22 @@ done
 # Clean up any existing tokens/users if necessary by resetting user admin token, or just proceed on clean db
 # (Since it's a test substrate, we usually run with clean volumes)
 
-# Create admin user
+# Create admin user (with retries until Forgejo database/app is ready to write)
 note "Creating admin user..."
-docker compose -f compose.test.yaml exec -T -u git forgejo \
-  forgejo admin user create --username forgejo-admin --password adminpassword --email admin@example.com --admin --must-change-password=false || true
+for i in $(seq 1 30); do
+  if docker compose -f compose.test.yaml exec -T -u git forgejo \
+    forgejo admin user create --username forgejo-admin --password adminpassword --email admin@example.com --admin --must-change-password=false >/dev/null 2>&1; then
+    note "Admin user created successfully."
+    break
+  fi
+  # Fallback: check if the user was already created in a previous tick/run
+  if docker compose -f compose.test.yaml exec -T -u git forgejo \
+    forgejo admin user list 2>/dev/null | grep -q "forgejo-admin" >/dev/null 2>&1; then
+    note "Admin user already exists."
+    break
+  fi
+  sleep 1
+done
 
 # Generate admin token
 note "Generating admin access token..."
