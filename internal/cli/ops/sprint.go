@@ -171,6 +171,33 @@ func ensureSessionGitRepo(ctx context.Context, dir string) error {
 	return nil
 }
 
+// createSessionRepo initializes a fresh session repository end-to-end: a git repo
+// carrying the session identity, the artifacts dir, the gitignore, and an opened,
+// migrated session.db. It is the create half of the session-store lifecycle; the
+// open-existing half (with crashed-run recovery) is store.OpenSessionRepo, used by
+// `sprint run`. `start` creates, so there is no prior run to recover. The caller
+// owns the returned *sql.DB and must Close it.
+func createSessionRepo(ctx context.Context, sessionDir string) (*sql.DB, error) {
+	if err := ensureSessionGitRepo(ctx, sessionDir); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Join(sessionDir, "artifacts"), 0o755); err != nil {
+		return nil, fmt.Errorf("create artifacts dir: %w", err)
+	}
+	if err := store.EnsureSessionGitignore(sessionDir, singlehost.SessionRepoGitignorePatterns()...); err != nil {
+		return nil, err
+	}
+	db, err := store.Open(filepath.Join(sessionDir, "session.db"))
+	if err != nil {
+		return nil, fmt.Errorf("open session db: %w", err)
+	}
+	if err := store.ApplyMigrations(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("apply migrations: %w", err)
+	}
+	return db, nil
+}
+
 // runSprintStart resolves the scope, creates/opens the session store, and seeds a
 // new scope generation with its in-scope membership and one pending work item per
 // issue. Each call advances to a fresh scope generation (the design's
@@ -185,26 +212,11 @@ func runSprintStart(ctx context.Context, client sprintIssueClient, sessionDir, s
 		return 0, nil, errors.New("sprint start: resolved scope is empty")
 	}
 
-	// `start` creates the session store directly (there is no prior run to
-	// recover), so it does not go through OpenSessionRepo's crashed-run capture —
-	// which assumes an existing session.db.
-	if err := ensureSessionGitRepo(ctx, sessionDir); err != nil {
-		return 0, nil, err
-	}
-	if err := os.MkdirAll(filepath.Join(sessionDir, "artifacts"), 0o755); err != nil {
-		return 0, nil, fmt.Errorf("create artifacts dir: %w", err)
-	}
-	if err := store.EnsureSessionGitignore(sessionDir, singlehost.SessionRepoGitignorePatterns()...); err != nil {
-		return 0, nil, err
-	}
-	db, err := store.Open(filepath.Join(sessionDir, "session.db"))
+	db, err := createSessionRepo(ctx, sessionDir)
 	if err != nil {
-		return 0, nil, fmt.Errorf("open session db: %w", err)
+		return 0, nil, err
 	}
 	defer db.Close()
-	if err := store.ApplyMigrations(ctx, db); err != nil {
-		return 0, nil, fmt.Errorf("apply migrations: %w", err)
-	}
 
 	genID, err := seedScopeGeneration(ctx, db, repoName, milestone, sourceQuery, members)
 	if err != nil {
