@@ -9,7 +9,7 @@ conflicts in a multi-agent environment.
   `wt-alice`, `wt-bob`).
 - **Read-Only**: Treat other agents' worktrees as read-only.
   - Do not modify files in another agent's directory.
-  - Do not manage, start, or stop processes (like IRC clients or watchers)
+  - Do not manage, start, or stop processes (like server daemons or watchers)
     running inside another agent's directory.
 - **Cross-Family Isolation**: Never write to files or manage processes
   belonging to another repository family (e.g., `deep-cuts` cannot write to
@@ -21,8 +21,8 @@ The main checkout (typically `main/` or the root checkout) is a shared merge
 target.
 
 - **Single writer**: Only one agent or operator can run ref-changing commands
-  (merge, reset, push) in the main checkout at a time. Always claim operations
-  on the channel first.
+  (merge, reset, push) in the main checkout at a time. Always coordinate
+  operations first.
 - **Merge-only**: Never rebase or force-push the main checkout.
 - **Explicit identity**: The main checkout does not trigger worktree config, so
   execute merges with explicit git identity flags:
