@@ -196,6 +196,17 @@ CREATE TABLE telemetry_spans (
 );
 `,
 	},
+	{
+		Version: 4,
+		Name:    "session_meta",
+		SQL: `
+CREATE TABLE session_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+`,
+	},
 }
 
 var observeStoreEvent = func(string) {}
