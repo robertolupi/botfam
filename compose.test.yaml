@@ -1,0 +1,32 @@
+name: botfam-test
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.119.0
+    command: ["--config", "/etc/otelcol-contrib/config.yaml"]
+    user: "0:0"
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - ./docker/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - ./scratch/otel:/data
+
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:9
+    ports:
+      - "127.0.0.1:13000:3000"
+      - "127.0.0.1:12222:22"
+    environment:
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__database__PATH=/data/gitea/gitea.db
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "3000"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - forgejo-data:/data
+
+volumes:
+  forgejo-data:

@@ -33,7 +33,7 @@ func NewCloneCmd() *cobra.Command {
 	c.Flags().StringVar(&dir, "dir", "", "fam directory to create (default: ./<repo-name>)")
 	c.Flags().StringVar(&forgeURL, "forge-url", "", "HTTP(S) forge API base, e.g. https://gitea.example.com/")
 	c.Flags().StringVar(&agentsCSV, "agents", "claude=claude-code", "comma-separated name=harness (harness defaults to claude-code)")
-	c.Flags().StringVar(&slug, "slug", "", "fam slug (default: repo name); must be globally unique on the IRC server")
+	c.Flags().StringVar(&slug, "slug", "", "fam slug (default: repo name)")
 	return c
 }
 
@@ -173,7 +173,6 @@ func runClone(gitURL string, opts cloneOpts, out io.Writer) error {
 	fmt.Fprintln(out, "\nClone complete. Next steps:")
 	fmt.Fprintf(out, "  1. Confirm forge_url in %s (SSH :2222 ≠ HTTP :3000 — can't be derived from an SSH remote).\n", cfgPath)
 	fmt.Fprintf(out, "  2. Mint each harness's global forge token into ~/.botfam/token-<harness> (or run setup with an admin token).\n")
-	fmt.Fprintf(out, "  3. Ensure each fam slug is globally unique on the IRC server.\n")
 	return nil
 }
 
