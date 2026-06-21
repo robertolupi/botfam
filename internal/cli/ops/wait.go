@@ -47,6 +47,7 @@ func NewWaitCmd() *cobra.Command {
 		all      bool
 	)
 	c := &cobra.Command{
+		Use:   "wait",
 		Short: "Legacy: block on the per-agent spool until new forge events arrive",
 		Long: `Block on this agent's spool ($FAMROOT/spool/$AGENT) and print the messages
 that wake it, then exit.
