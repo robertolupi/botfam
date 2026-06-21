@@ -162,22 +162,6 @@ func FamSlug(reg Registry) string {
 	return reg.Name
 }
 
-// FamScopedNick returns the fam-scoped IRC nick for an actor: "<actor>-<slug>"
-// (e.g. "claude-botfam", "agy-dc"), so agents from different fams sharing the
-// same actor name never collide on a shared IRC server (#137). It is idempotent
-// (won't double-suffix) and returns the bare actor when no slug is resolvable.
-// Lives in the famconfig leaf so famctx can derive ScopedNick without importing
-// internal/fam (which would cycle); internal/fam re-exports it for callers.
-func FamScopedNick(actor, famSlug string) string {
-	if famSlug == "" || actor == "" {
-		return actor
-	}
-	if strings.HasSuffix(actor, "-"+famSlug) {
-		return actor
-	}
-	return actor + "-" + famSlug
-}
-
 // HarnessTokenPath returns the per-harness token path ~/.botfam/token-<harness>,
 // keyed by the canonical harness name (see CanonicalHarness, defined in
 // harness.go) so e.g. harness 'claude' and 'claude-code' resolve to the same

@@ -467,7 +467,6 @@ func (s *server) handleWorktreeSync(_ context.Context, rc *resolvedCtx, _ map[st
 	return toolResult(map[string]any{"ok": true, "output": buf.String()})
 }
 
-
 // resolveClientActor resolves the executing client actor by checking the MCP client's workspace roots.
 func (s *server) resolveClientActor(ctx context.Context, clientRoots []string) string {
 	for _, root := range clientRoots {

@@ -95,10 +95,8 @@ type Context struct {
 	// running (#371). Empty for non-agent contexts.
 	Harness string
 
-	SpoolDir   string
-	IRCLogDir  string
-	TokenPath  string
-	ScopedNick string
+	SpoolDir  string
+	TokenPath string
 
 	RootSet     []string
 	RootSetID   string
@@ -181,9 +179,7 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 				Agent:        resolved.Agent,
 				Flags:        resolved.Flags,
 				SpoolDir:     filepath.Join(resolved.FamDir, "spool", resolved.Actor),
-				IRCLogDir:    filepath.Join(resolved.WorktreeRoot, "scratch", "irc", resolved.Actor),
 				TokenPath:    resolved.TokenPath,
-				ScopedNick:   famconfig.FamScopedNick(resolved.Actor, resolved.Slug),
 				RootSet:      rootSet,
 				RootSetID:    rootSetID,
 			}
@@ -302,9 +298,7 @@ func Resolve(ctx context.Context, inputs Inputs) (Context, error) {
 			Flags:        famconfig.ResolveFlags(reg, actor),
 			Harness:      hres.Effective,
 			SpoolDir:     filepath.Join(evalRoot, "spool", actor),
-			IRCLogDir:    filepath.Join(gitRoot(dir), "scratch", "irc", actor),
 			TokenPath:    tokenPath,
-			ScopedNick:   famconfig.FamScopedNick(actor, slug),
 			RootSet:      info.RootSet,
 			RootSetID:    info.RootSetID,
 		}

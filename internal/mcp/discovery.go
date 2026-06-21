@@ -332,8 +332,6 @@ func discoveryHealth(workDir string, t docs.TemplateData, harness, declaredHarne
 		}
 	}
 
-
-
 	return checks
 }
 

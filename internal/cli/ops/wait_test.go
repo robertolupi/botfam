@@ -27,7 +27,7 @@ func seedSpool(t *testing.T) (dir string) {
 		t.Fatal(err)
 	}
 	if _, err := sp.Deliver(&mailbox.Message{
-		Source: mailbox.SourceIRC, From: "agy", To: "#botfam", Subject: "claude: ping", Body: "claude: ping",
+		Source: "irc", From: "agy", To: "#botfam", Subject: "claude: ping", Body: "claude: ping",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestWaitDND(t *testing.T) {
 	if _, err := sp.Deliver(&mailbox.Message{Source: mailbox.SourceForge, Subject: "issue: x#1", Body: "u", Directed: false}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sp.Deliver(&mailbox.Message{Source: mailbox.SourceIRC, From: "agy", To: "#botfam", Subject: "hi", Body: "hi"}); err != nil {
+	if _, err := sp.Deliver(&mailbox.Message{Source: "irc", From: "agy", To: "#botfam", Subject: "hi", Body: "hi"}); err != nil {
 		t.Fatal(err)
 	}
 
