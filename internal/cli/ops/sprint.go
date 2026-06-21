@@ -480,8 +480,8 @@ func newSprintRunCmd() *cobra.Command {
 			}
 			defer server.HTTPServer.Close()
 
-			// Set the actual endpoint and token in lease session file
-			if err := lease.SetEndpoint(socketPath, sessionToken); err != nil {
+			// Set the actual endpoint, token, and session id in the lease session file.
+			if err := lease.SetEndpoint(socketPath, sessionToken, id); err != nil {
 				return fmt.Errorf("failed to update lease session file: %w", err)
 			}
 

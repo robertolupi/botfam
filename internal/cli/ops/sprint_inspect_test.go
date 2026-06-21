@@ -61,6 +61,25 @@ func TestDeriveSessionState(t *testing.T) {
 	}
 }
 
+func TestOwnLiveSupervisor(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		targetID string
+		liveID   string
+		live     bool
+		want     bool
+	}{
+		{"this session", "s1", "s1", true, true},
+		{"different session same repo", "s1", "s2", true, false}, // must NOT signal
+		{"unproven (empty id)", "s1", "", true, false},
+		{"not live", "s1", "s1", false, false},
+	} {
+		if got := ownLiveSupervisor(tc.targetID, tc.liveID, tc.live); got != tc.want {
+			t.Errorf("%s: ownLiveSupervisor(%q,%q,%v) = %v, want %v", tc.name, tc.targetID, tc.liveID, tc.live, got, tc.want)
+		}
+	}
+}
+
 func TestRunSprintEnd(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "s-end")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

@@ -11,9 +11,9 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"github.com/pelletier/go-toml/v2"
 	pb "github.com/robertolupi/botfam/internal/eventdelivery/contract/botfam/eventdelivery/v2"
 	"github.com/robertolupi/botfam/internal/famconfig"
-	"github.com/pelletier/go-toml/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -210,8 +210,11 @@ func (l *Lease) Release(ctx context.Context, req *connect.Request[pb.ReleaseRequ
 	return connect.NewResponse(&emptypb.Empty{}), nil
 }
 
-// SetEndpoint updates the flocked session file with the actual listening address and token.
-func (l *Lease) SetEndpoint(addr string, token string) error {
+// SetEndpoint updates the flocked session file with the actual listening address,
+// token, and the sprint session id the supervisor is running (so consumers like
+// `sprint end` can confirm a live supervisor belongs to a specific session before
+// signaling it).
+func (l *Lease) SetEndpoint(addr, token, sessionID string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -225,6 +228,7 @@ func (l *Lease) SetEndpoint(addr string, token string) error {
 		PID:          os.Getpid(),
 		Addr:         addr,
 		Token:        token,
+		SessionID:    sessionID,
 	}
 
 	if _, err := l.file.Seek(0, 0); err != nil {
@@ -239,4 +243,3 @@ func (l *Lease) SetEndpoint(addr string, token string) error {
 	}
 	return l.file.Sync()
 }
-

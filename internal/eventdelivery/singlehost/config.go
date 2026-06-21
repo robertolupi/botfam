@@ -19,6 +19,10 @@ type SessionFile struct {
 	PID          int    `toml:"pid"`
 	Addr         string `toml:"addr"`
 	Token        string `toml:"token"`
+	// SessionID is the sprint session id the live supervisor is running. Empty
+	// until the supervisor stamps it via SetEndpoint; consumers that need to act
+	// on a specific session (e.g. `sprint end`) must treat empty as unproven.
+	SessionID string `toml:"session_id"`
 }
 
 // ConfigPath returns the path to the sprint session file for a repository.
@@ -37,26 +41,28 @@ func ConfigPath(repoName string) (string, error) {
 	return filepath.Join(dir, fmt.Sprintf("sprint-session-%s.config.toml", repoName)), nil
 }
 
-// LiveSupervisorPID returns the PID of the live supervisor holding the lease for
-// repoName, or (0, false) if the session file is absent or its process is no
-// longer live. Read-only; used by `sprint end` to signal a clean shutdown.
-func LiveSupervisorPID(repoName string) (int, bool) {
+// LiveSupervisorPID returns the PID and stamped sprint session id of the live
+// supervisor holding the lease for repoName, or ok=false if the session file is
+// absent or its process is no longer live. The session id is empty until the
+// supervisor stamps it (via SetEndpoint); callers acting on a specific session
+// must treat an empty/mismatched id as "not this session". Read-only.
+func LiveSupervisorPID(repoName string) (pid int, sessionID string, ok bool) {
 	path, err := ConfigPath(repoName)
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	var sf SessionFile
 	if err := toml.Unmarshal(data, &sf); err != nil {
-		return 0, false
+		return 0, "", false
 	}
 	if !isProcessLive(sf.PID) {
-		return 0, false
+		return 0, "", false
 	}
-	return sf.PID, true
+	return sf.PID, sf.SessionID, true
 }
 
 // isProcessLive checks if the process is running using flock/PID/command checks.

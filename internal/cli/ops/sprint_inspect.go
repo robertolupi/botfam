@@ -129,6 +129,15 @@ func loadSessionSummary(ctx context.Context, sessionDir, id string, live repoLiv
 	return s, nil
 }
 
+// ownLiveSupervisor reports whether the repo's live supervisor is running this
+// session — the only case in which `sprint end <id>` may signal it. The lease is
+// repo-level, so a live supervisor for the same repo but a *different* (or
+// unproven/empty) session id must never be signaled. targetID is the session
+// being ended; liveID is the stamped session id from the live session file.
+func ownLiveSupervisor(targetID, liveID string, live bool) bool {
+	return live && liveID != "" && liveID == targetID
+}
+
 // runSprintEnd stops a live supervisor for the session (if any) and records a
 // durable `ended` marker so ls/show reflect it. This is also the seam where
 // post-session analytics will eventually run (#531).
@@ -147,21 +156,31 @@ func runSprintEnd(ctx context.Context, w io.Writer, sessionDir, id string, timeo
 	_ = db.QueryRowContext(ctx, `SELECT repo FROM scope_generations ORDER BY id DESC LIMIT 1`).Scan(&repo)
 
 	if repo != "" {
-		if pid, ok := singlehost.LiveSupervisorPID(repo); ok {
+		pid, liveID, ok := singlehost.LiveSupervisorPID(repo)
+		switch {
+		case ownLiveSupervisor(id, liveID, ok):
+			// The live supervisor for this repo is running *this* session — stop it.
 			fmt.Fprintf(w, "Stopping live supervisor (pid %d)…\n", pid)
 			if proc, perr := os.FindProcess(pid); perr == nil {
 				_ = proc.Signal(syscall.SIGTERM)
 			}
 			deadline := time.Now().Add(timeout)
 			for {
-				if _, live := singlehost.LiveSupervisorPID(repo); !live {
-					break
+				_, gone, live := singlehost.LiveSupervisorPID(repo)
+				if !ownLiveSupervisor(id, gone, live) {
+					break // our target supervisor has exited (or the lease moved on)
 				}
 				if time.Now().After(deadline) {
 					return fmt.Errorf("sprint end: supervisor (pid %d) did not stop within %s", pid, timeout)
 				}
 				time.Sleep(200 * time.Millisecond)
 			}
+		case ok:
+			// A live supervisor holds this repo's lease but for a *different*
+			// session (or an unproven one). Never signal it — only mark our own
+			// session ended. (Repo-level lease; the live session is identified by
+			// the stamped session id.)
+			fmt.Fprintf(w, "note: repo %q has a live supervisor for a different session (%q); not signaling it\n", repo, liveID)
 		}
 	}
 
