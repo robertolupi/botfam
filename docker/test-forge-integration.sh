@@ -60,7 +60,7 @@ note "3. initialize repo via 'botfam credential' (exercises the push helper, #4/
 WORK="$(mktemp -d)"; REPO_DIR="$WORK/botfam"
 git clone -q "$FORGE/botfam/botfam.git" "$REPO_DIR" 2>/dev/null || { git init -q "$REPO_DIR"; git -C "$REPO_DIR" remote add origin "$FORGE/botfam/botfam.git"; }
 # Build the binary so the helper is the real `botfam credential` subcommand.
-BOTFAM_BIN="$WORK/botfam"
+BOTFAM_BIN="$WORK/botfam-bin"
 go build -o "$BOTFAM_BIN" ./cmd/botfam >/dev/null 2>&1 || { bad "go build botfam (for credential helper)"; BOTFAM_BIN=""; }
 push_as() { # push_as <user> <token-literal> <args...>
   local user="$1" tok="$2"; shift 2
