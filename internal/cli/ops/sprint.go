@@ -46,6 +46,7 @@ func NewSprintCmd() *cobra.Command {
 	c.AddCommand(newSprintRunCmd())
 	c.AddCommand(newSprintEndCmd())
 	c.AddCommand(newSprintLsCmd())
+	c.AddCommand(newSprintShowCmd())
 	c.AddCommand(newSprintUiCmd())
 
 	return c
@@ -771,8 +772,11 @@ func newSprintLsCmd() *cobra.Command {
 		Short: "List sprint sessions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), "Sprint list placeholder")
-			return nil
+			root, err := sprintSessionsRoot()
+			if err != nil {
+				return err
+			}
+			return runSprintLs(cmd.Context(), cmd.OutOrStdout(), root, defaultRepoLiveness)
 		},
 	}
 }
