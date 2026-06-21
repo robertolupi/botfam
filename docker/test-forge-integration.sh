@@ -46,7 +46,7 @@ until docker compose -f "$COMPOSE" exec -T forgejo sh -c 'nc -z 127.0.0.1 3000' 
 ok "forgejo healthy on $FORGE"
 
 note "2. bootstrap (org/repo/bots/tokens) + a 3rd reviewer"
-sh docker/bootstrap-test-forgejo.sh >/dev/null 2>&1 || true
+sh docker/bootstrap-test-forgejo.sh
 # 3rd user so required=2 is testable (author + two distinct approvers)
 fadmin admin user create --username carol-bot --password carolbotpass --email carol-bot@example.com --must-change-password=false >/dev/null 2>&1 || true
 curl -s -X PUT -H "Authorization: token $(fadmin admin user generate-access-token --username forgejo-admin --token-name boot-$(date +%s%N) --scopes all --raw)" "$FORGE/api/v1/teams/1/members/carol-bot" >/dev/null 2>&1 || true
