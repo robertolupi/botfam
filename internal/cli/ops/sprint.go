@@ -3,6 +3,8 @@ package ops
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,6 +28,7 @@ import (
 	"github.com/robertolupi/botfam/internal/eventdelivery/workerchannel"
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/famctx"
+	"github.com/robertolupi/botfam/internal/forge"
 	"github.com/robertolupi/botfam/internal/mcp"
 	"github.com/spf13/cobra"
 )
@@ -60,16 +64,41 @@ func newSprintStartCmd() *cobra.Command {
 			if milestone == 0 && issuesStr == "" {
 				return errors.New("must specify either --milestone N or --issues N1,N2")
 			}
-
-			var issues []string
-			if issuesStr != "" {
-				issues = strings.Split(issuesStr, ",")
-				for i, issue := range issues {
-					issues[i] = strings.TrimSpace(issue)
-				}
+			if milestone != 0 && issuesStr != "" {
+				return errors.New("specify only one of --milestone or --issues")
+			}
+			issues, err := parseIssueNumbers(issuesStr)
+			if err != nil {
+				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Sprint start placeholder: ID=%s, Milestone=%d, Issues=%v\n", id, milestone, issues)
+			wd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			repoName := famconfig.ResolveRepoName(wd)
+			if repoName == "" {
+				return errors.New("could not resolve repository name from current directory")
+			}
+			fctx, err := famctx.ResolveAgentRuntime(wd)
+			if err != nil {
+				return fmt.Errorf("resolve agent runtime context: %w", err)
+			}
+			client, err := forge.NewClientForWorkDir(wd, fctx.Actor)
+			if err != nil {
+				return fmt.Errorf("forge client: %w", err)
+			}
+
+			sessionDir, err := sprintSessionDir(id)
+			if err != nil {
+				return err
+			}
+
+			genID, members, err := runSprintStart(cmd.Context(), client, sessionDir, id, repoName, milestone, issues)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Sprint %s started: scope generation %d seeded with %d work item(s) at %s\n", id, genID, len(members), sessionDir)
 			return nil
 		},
 	}
@@ -77,6 +106,245 @@ func newSprintStartCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&milestone, "milestone", 0, "Milestone number")
 	cmd.Flags().StringVar(&issuesStr, "issues", "", "Comma-separated list of issue numbers")
 	return cmd
+}
+
+// sprintIssueClient is the minimal forge surface `sprint start` needs to resolve
+// a scope into concrete issues. Satisfied by *forge.Client; faked in tests.
+type sprintIssueClient interface {
+	GetIssue(ctx context.Context, num int) (*forge.Issue, error)
+	ListIssuesByMilestone(ctx context.Context, milestoneID int64) ([]*forge.Issue, error)
+}
+
+// scopeIssue is a resolved scope member: an issue number and its title.
+type scopeIssue struct {
+	number int
+	title  string
+}
+
+// sprintSessionDir returns the canonical session directory ~/.botfam/sessions/<id>.
+func sprintSessionDir(id string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("user home dir: %w", err)
+	}
+	return filepath.Join(home, ".botfam", "sessions", id), nil
+}
+
+// parseIssueNumbers parses a comma-separated list of positive issue numbers.
+func parseIssueNumbers(s string) ([]int, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	var out []int
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("invalid issue number %q", part)
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// ensureSessionGitRepo creates the session directory and initializes it as a git
+// repo (with a local identity) if it is not one already. `sprint start` owns
+// session creation; `sprint run` requires the session to already exist.
+func ensureSessionGitRepo(ctx context.Context, dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create session dir: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	runner := store.ExecRunner{}
+	if out, err := runner.Run(ctx, dir, "git", "init"); err != nil {
+		return fmt.Errorf("git init session dir: %w: %s", err, string(out))
+	}
+	_, _ = runner.Run(ctx, dir, "git", "config", "user.name", "botfam-supervisor")
+	_, _ = runner.Run(ctx, dir, "git", "config", "user.email", "supervisor@botfam.invalid")
+	return nil
+}
+
+// createSessionRepo initializes a fresh session repository end-to-end: a git repo
+// carrying the session identity, the artifacts dir, the gitignore, and an opened,
+// migrated session.db. It is the create half of the session-store lifecycle; the
+// open-existing half (with crashed-run recovery) is store.OpenSessionRepo, used by
+// `sprint run`. `start` creates, so there is no prior run to recover. The caller
+// owns the returned *sql.DB and must Close it.
+func createSessionRepo(ctx context.Context, sessionDir string) (*sql.DB, error) {
+	if err := ensureSessionGitRepo(ctx, sessionDir); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Join(sessionDir, "artifacts"), 0o755); err != nil {
+		return nil, fmt.Errorf("create artifacts dir: %w", err)
+	}
+	if err := store.EnsureSessionGitignore(sessionDir, singlehost.SessionRepoGitignorePatterns()...); err != nil {
+		return nil, err
+	}
+	db, err := store.Open(filepath.Join(sessionDir, "session.db"))
+	if err != nil {
+		return nil, fmt.Errorf("open session db: %w", err)
+	}
+	if err := store.ApplyMigrations(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("apply migrations: %w", err)
+	}
+	return db, nil
+}
+
+// runSprintStart resolves the scope, creates/opens the session store, and seeds a
+// new scope generation with its in-scope membership and one pending work item per
+// issue. Each call advances to a fresh scope generation (the design's
+// scope-as-snapshot model); the work_items UNIQUE(kind, source_id,
+// scope_generation) constraint dedups within a generation.
+func runSprintStart(ctx context.Context, client sprintIssueClient, sessionDir, sessionID, repoName string, milestone int64, issues []int) (int64, []scopeIssue, error) {
+	members, sourceQuery, err := resolveScopeMembers(ctx, client, milestone, issues)
+	if err != nil {
+		return 0, nil, err
+	}
+	if len(members) == 0 {
+		return 0, nil, errors.New("sprint start: resolved scope is empty")
+	}
+
+	db, err := createSessionRepo(ctx, sessionDir)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer db.Close()
+
+	genID, err := seedScopeGeneration(ctx, db, repoName, milestone, sourceQuery, members)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	msg := fmt.Sprintf("sprint start %s: scope generation %d (%d issues)", sessionID, genID, len(members))
+	if err := commitSessionSnapshot(ctx, sessionDir, msg); err != nil {
+		return 0, nil, err
+	}
+	return genID, members, nil
+}
+
+// resolveScopeMembers turns a --milestone or --issues selection into concrete
+// (number, title) members plus a recorded source query.
+func resolveScopeMembers(ctx context.Context, client sprintIssueClient, milestone int64, issues []int) ([]scopeIssue, string, error) {
+	if milestone > 0 {
+		list, err := client.ListIssuesByMilestone(ctx, milestone)
+		if err != nil {
+			return nil, "", fmt.Errorf("list issues for milestone %d: %w", milestone, err)
+		}
+		members := make([]scopeIssue, 0, len(list))
+		for _, iss := range list {
+			members = append(members, scopeIssue{number: int(iss.Index), title: iss.Title})
+		}
+		return members, fmt.Sprintf("milestone:%d", milestone), nil
+	}
+	members := make([]scopeIssue, 0, len(issues))
+	for _, n := range issues {
+		iss, err := client.GetIssue(ctx, n)
+		if err != nil {
+			return nil, "", fmt.Errorf("fetch issue #%d: %w", n, err)
+		}
+		members = append(members, scopeIssue{number: int(iss.Index), title: iss.Title})
+	}
+	return members, "issues:" + joinIssueNumbers(issues), nil
+}
+
+// seedScopeGeneration writes one scope_generations row, its scope_membership, and
+// one pending work_item per member, all in a single transaction.
+func seedScopeGeneration(ctx context.Context, db *sql.DB, repo string, milestone int64, sourceQuery string, members []scopeIssue) (int64, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var milestoneArg any
+	if milestone > 0 {
+		milestoneArg = milestone
+	}
+	res, err := tx.ExecContext(ctx,
+		`INSERT INTO scope_generations (repo, milestone_id, scope_hash, source_query) VALUES (?, ?, ?, ?)`,
+		repo, milestoneArg, hashScope(members), sourceQuery)
+	if err != nil {
+		return 0, fmt.Errorf("insert scope generation: %w", err)
+	}
+	genID, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+
+	for _, m := range members {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO scope_membership (scope_generation_id, artifact_kind, artifact_number, disposition) VALUES (?, 'issue', ?, 'in_scope')`,
+			genID, m.number); err != nil {
+			return 0, fmt.Errorf("insert scope membership #%d: %w", m.number, err)
+		}
+		workItemID := uuid.New().String()
+		ins, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO work_items (id, kind, source_id, title, scope_generation, state) VALUES (?, 'resolve_issue', ?, ?, ?, 'pending')`,
+			workItemID, strconv.Itoa(m.number), m.title, genID)
+		if err != nil {
+			return 0, fmt.Errorf("insert work item #%d: %w", m.number, err)
+		}
+		if n, _ := ins.RowsAffected(); n > 0 {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO work_item_state_transitions (work_item_id, from_state, to_state, reason) VALUES (?, NULL, 'pending', 'seeded by sprint start')`,
+				workItemID); err != nil {
+				return 0, fmt.Errorf("insert work item transition #%d: %w", m.number, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return genID, nil
+}
+
+// commitSessionSnapshot dumps session.db to session.sql and commits the session
+// repo, so `sprint run` opens from a clean tree (and doesn't mistake the seed for
+// crashed-run state).
+func commitSessionSnapshot(ctx context.Context, dir, message string) error {
+	runner := store.ExecRunner{}
+	if err := store.DumpToFile(filepath.Join(dir, "session.db"), filepath.Join(dir, "session.sql")); err != nil {
+		return fmt.Errorf("dump session: %w", err)
+	}
+	if out, err := runner.Run(ctx, dir, "git", "add", ".gitignore", "session.sql", "artifacts"); err != nil {
+		return fmt.Errorf("stage session snapshot: %w: %s", err, string(out))
+	}
+	if out, err := runner.Run(ctx, dir, "git", "commit", "-m", message); err != nil {
+		return fmt.Errorf("commit session snapshot: %w: %s", err, string(out))
+	}
+	return nil
+}
+
+// hashScope is a stable short hash of the sorted member set, recorded on the
+// scope generation for drift detection.
+func hashScope(members []scopeIssue) string {
+	nums := make([]int, len(members))
+	for i, m := range members {
+		nums[i] = m.number
+	}
+	sort.Ints(nums)
+	h := sha256.New()
+	for _, n := range nums {
+		fmt.Fprintf(h, "%d,", n)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
+}
+
+func joinIssueNumbers(ns []int) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ",")
 }
 
 func newSprintRunCmd() *cobra.Command {
@@ -98,14 +366,16 @@ func newSprintRunCmd() *cobra.Command {
 				return errors.New("could not resolve repository name from current directory")
 			}
 
-			// Determine session dir: ~/.botfam/sessions/<ID>
-			home, err := os.UserHomeDir()
+			// Session dir is created by `sprint start`; `run` requires it to exist.
+			sessionDir, err := sprintSessionDir(id)
 			if err != nil {
-				return fmt.Errorf("user home dir: %w", err)
+				return err
 			}
-			sessionDir := filepath.Join(home, ".botfam", "sessions", id)
-			if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-				return fmt.Errorf("create session dir: %w", err)
+			if _, err := os.Stat(filepath.Join(sessionDir, "session.db")); err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("sprint run: session %q not found; run `botfam sprint start %s` first", id, id)
+				}
+				return fmt.Errorf("stat session db: %w", err)
 			}
 
 			// Run ID recovery
@@ -144,23 +414,7 @@ func newSprintRunCmd() *cobra.Command {
 				return nil
 			}
 
-			// Initialize session repo as git repository if it isn't one already
-			if _, err := os.Stat(filepath.Join(sessionDir, ".git")); os.IsNotExist(err) {
-				initCmd := exec.CommandContext(cmd.Context(), "git", "init")
-				initCmd.Dir = sessionDir
-				if out, err := initCmd.CombinedOutput(); err != nil {
-					return fmt.Errorf("failed to git init session directory: %w: %s", err, string(out))
-				}
-				// Configure dummy user/email locally to prevent crash-recovery commit failures
-				configUserCmd := exec.CommandContext(cmd.Context(), "git", "config", "user.name", "botfam-supervisor")
-				configUserCmd.Dir = sessionDir
-				_ = configUserCmd.Run()
-				configEmailCmd := exec.CommandContext(cmd.Context(), "git", "config", "user.email", "supervisor@botfam.invalid")
-				configEmailCmd.Dir = sessionDir
-				_ = configEmailCmd.Run()
-			}
-
-			// Open session repo
+			// Open session repo (created by `sprint start`)
 			db, err := store.OpenSessionRepo(cmd.Context(), store.SessionRepoOptions{
 				Dir:               sessionDir,
 				RunNumber:         lastRunNumber,
@@ -324,7 +578,6 @@ func newSprintRunCmd() *cobra.Command {
 									"BOTFAM_FENCING_TOKEN="+strconv.FormatUint(grant.Msg.GetFencingToken(), 10),
 								)
 
-
 								if err := wCmd.Start(); err == nil {
 									workers[workerID] = &activeWorker{
 										workerID:   workerID,
@@ -438,8 +691,6 @@ func getOrGenerateTraceparent() (traceID string, spanID string, traceparentVal s
 	return traceID, childSpanID, fmt.Sprintf("00-%s-%s-01", traceID, childSpanID)
 }
 
-
-
 type supervisorSessionResolver struct {
 	sessionID    string
 	fencingToken uint64
@@ -456,7 +707,6 @@ func (s *supervisorSessionResolver) Resolve(ctx context.Context, req *connect.Re
 		FencingToken: s.fencingToken,
 	}), nil
 }
-
 
 func newSprintEndCmd() *cobra.Command {
 	return &cobra.Command{

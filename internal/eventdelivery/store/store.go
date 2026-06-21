@@ -537,7 +537,16 @@ func CaptureCrashedRun(ctx context.Context, dir string, runNumber int, runner Co
 	if strings.TrimSpace(string(out)) == "" {
 		return nil
 	}
-	if out, err := runner.Run(ctx, dir, "git", "add", ".gitignore", "session.sql", "artifacts"); err != nil {
+	args := []string{"add"}
+	for _, f := range []string{".gitignore", "session.sql", "artifacts"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			args = append(args, f)
+		}
+	}
+	if len(args) == 1 {
+		return nil
+	}
+	if out, err := runner.Run(ctx, dir, "git", args...); err != nil {
 		return fmt.Errorf("stage crashed-run state: %w: %s", err, string(out))
 	}
 	message := fmt.Sprintf("crashed-run: run %d auto-captured state", runNumber)

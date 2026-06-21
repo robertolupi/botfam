@@ -329,6 +329,28 @@ func TestOpenSessionRepoCapturesCrashBeforeMigrations(t *testing.T) {
 	}
 }
 
+// TestOpenSessionRepoTrulyFresh guards against a regression where
+// CaptureCrashedRun staged session.sql unconditionally. On a first-ever
+// open there is no session.db yet, so no session.sql is dumped, and a static
+// `git add session.sql` aborted with a pathspec error, failing OpenSessionRepo.
+func TestOpenSessionRepoTrulyFresh(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.name", "test")
+	runGit(t, dir, "config", "user.email", "test@example.invalid")
+
+	db, err := OpenSessionRepo(ctx, SessionRepoOptions{Dir: dir})
+	if err != nil {
+		t.Fatalf("OpenSessionRepo on truly-fresh repo: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := os.Stat(filepath.Join(dir, "session.db")); err != nil {
+		t.Fatalf("session.db not created: %v", err)
+	}
+}
+
 func TestEnsureSessionGitignoreIgnoresSQLiteSessionFiles(t *testing.T) {
 	dir := t.TempDir()
 	if err := EnsureSessionGitignore(dir); err != nil {
