@@ -76,6 +76,7 @@ if [ -n "$BOTFAM_BIN" ]; then
   push_as claude-bot "$CLAUDE_TOKEN" push -q origin HEAD:refs/heads/botfam-next 2>/dev/null \
     && ok "git push via 'botfam credential' (created botfam-next)" || bad "helper push failed"
 fi
+sleep 2
 areq "$ADMIN_TOKEN" PATCH /repos/botfam/botfam '{"default_branch":"botfam-next"}' >/dev/null
 
 note "4. provision + lint the go-native gate (forge-gate.sh apply/check)"
