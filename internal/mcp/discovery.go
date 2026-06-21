@@ -123,10 +123,8 @@ func markdownResource(uri string, content []byte) []mcplib.ResourceContents {
 	}}
 }
 
-// discoverySlugs is the ordered set of embedded generic docs served under
-// botfam:///docs/<slug>. It mirrors the corpus in internal/docs (#117).
 var discoverySlugs = []string{
-	"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown",
+	"start", "protocol", "bootstrap", "operator", "review", "worktrees", "markdown",
 }
 
 // healthCheck is one entry in the discovery root's health report. A non-"ok"
@@ -335,28 +333,7 @@ func discoveryHealth(workDir string, t docs.TemplateData, harness, declaredHarne
 		}
 	}
 
-	// IRC client: check that a live client backs the FIFO by verifying the pidfile.
-	if t.Actor != "" {
-		fifo := filepath.Join(workDir, "scratch", "irc", t.Actor, "in")
-		pidFile := filepath.Join(workDir, "scratch", "irc", t.Actor, "pid")
-		clientRunning := false
-		if fileExists(fifo) && fileExists(pidFile) {
-			if pidData, err := os.ReadFile(pidFile); err == nil {
-				var pid int
-				if _, err := fmt.Sscanf(strings.TrimSpace(string(pidData)), "%d", &pid); err == nil && pid > 0 {
-					if processExists(pid) {
-						clientRunning = true
-					}
-				}
-			}
-		}
-		if clientRunning {
-			checks = append(checks, healthCheck{"irc_client", "ok", ""})
-		} else {
-			checks = append(checks, healthCheck{"irc_client", "warn",
-				fmt.Sprintf("IRC client not running: start `botfam irc-client %s` (see botfam:///docs/ops)", t.Actor)})
-		}
-	}
+
 
 	return checks
 }
@@ -522,9 +499,6 @@ func (s *server) getTools() []mcplib.Tool {
 }
 
 func toolDomain(name string) string {
-	if strings.HasPrefix(name, "irc_") {
-		return "irc"
-	}
 	if strings.HasPrefix(name, "worktree_") {
 		return "worktree"
 	}
@@ -532,12 +506,7 @@ func toolDomain(name string) string {
 }
 
 func toolReadOnly(name string) bool {
-	switch name {
-	case "irc_read", "irc_wait":
-		return true
-	default:
-		return false
-	}
+	return name == "orient"
 }
 
 func renderToolsMarkdown(s *server) []byte {

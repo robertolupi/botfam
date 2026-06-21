@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
@@ -27,7 +26,6 @@ import (
 	"github.com/robertolupi/botfam/internal/famconfig"
 	"github.com/robertolupi/botfam/internal/famctx"
 	"github.com/robertolupi/botfam/internal/ingest"
-	"github.com/robertolupi/botfam/internal/irc"
 	"github.com/robertolupi/botfam/internal/mailbox"
 	"github.com/robertolupi/botfam/internal/provision"
 	"github.com/robertolupi/botfam/internal/wiki"
@@ -156,7 +154,7 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	if on, _ := rf.FlagEnabled("legacy_ingest", false); !on {
 		return
 	}
-	spoolDir, ircLog, matchNick, err := ingest.IngestParams(workDir)
+	spoolDir, err := ingest.IngestParams(workDir)
 	if err != nil {
 		return // not resolvable yet; a later tool call retries
 	}
@@ -168,9 +166,8 @@ func (s *server) maybeStartIngest(workDir, actor string) {
 	s.ingestStarted = true
 	s.mu.Unlock()
 
-	pollers := []ingest.Poller{ingest.NewIRCPoller(ircLog, matchNick)}
-	// Add the forge source when one can be built; IRC-only otherwise (e.g. no
-	// repository declared, or no notification-scoped token). The forge source
+	var pollers []ingest.Poller
+	// Add the forge source when one can be built. The forge source
 	// drains the repo's unread set (append-to-mailbox then mark-read).
 	if fp, err := ingest.ForgePollerFor(workDir, actor); err == nil {
 		pollers = append(pollers, fp)
@@ -298,53 +295,6 @@ func (s *server) buildEntries() map[string]dispatchEntry {
 		entries[e.tool.Name] = e
 	}
 
-	add(dispatchEntry{
-		tool: mcplib.NewTool("irc_write",
-			mcplib.WithDescription("Write a raw line to the IRC client's input pipe."),
-			mcplib.WithToolAnnotation(giteaannot.Write("Write to IRC")),
-			mcplib.WithString("message", mcplib.Required()),
-			mcplib.WithString("target"),
-			mcplib.WithString("actor"),
-			mcplib.WithString("work_dir"),
-		),
-		handler: s.handleIrcWrite,
-	})
-	add(dispatchEntry{
-		tool: mcplib.NewTool("irc_read",
-			mcplib.WithDescription("Read lines from the IRC client's log (raw tail, no filtering)."),
-			mcplib.WithToolAnnotation(giteaannot.ReadOnly("Read IRC log")),
-			mcplib.WithNumber("lines"),
-			mcplib.WithNumber("from_offset"),
-			mcplib.WithString("actor"),
-			mcplib.WithString("work_dir"),
-		),
-		handler:  s.handleIrcRead,
-		readOnly: true,
-	})
-	add(dispatchEntry{
-		tool: mcplib.NewTool("irc_wait",
-			mcplib.WithDescription("Block until new IRC log lines relevant to the actor appear, or timeout."),
-			mcplib.WithToolAnnotation(giteaannot.ReadOnly("Wait for IRC log lines")),
-			mcplib.WithNumber("timeout_s"),
-			mcplib.WithNumber("from_offset"),
-			mcplib.WithString("actor"),
-			mcplib.WithString("work_dir"),
-		),
-		handler:  s.handleIrcWait,
-		readOnly: true,
-	})
-	add(dispatchEntry{
-		tool: mcplib.NewTool("irc_replay",
-			mcplib.WithDescription("Replay durable shared channel history logs."),
-			mcplib.WithToolAnnotation(giteaannot.ReadOnly("Replay channel history")),
-			mcplib.WithString("since"),
-			mcplib.WithString("channels"),
-			mcplib.WithString("actor"),
-			mcplib.WithString("work_dir"),
-		),
-		handler:  s.handleIrcReplay,
-		readOnly: true,
-	})
 	add(dispatchEntry{
 		tool: mcplib.NewTool("worktree_init",
 			mcplib.WithDescription("Initialize git worktree configuration and identity for an actor."),
@@ -517,142 +467,6 @@ func (s *server) handleWorktreeSync(_ context.Context, rc *resolvedCtx, _ map[st
 	return toolResult(map[string]any{"ok": true, "output": buf.String()})
 }
 
-func (s *server) handleIrcWrite(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
-	message := params.GetOptionalString(args, "message", "")
-	if message == "" {
-		return nil, errors.New("message is required")
-	}
-	target := params.GetOptionalString(args, "target", "")
-
-	absWorkDir, err := filepath.Abs(rc.workDir)
-	if err != nil {
-		return nil, err
-	}
-
-	fifoPath := filepath.Join(absWorkDir, "scratch", "irc", rc.actor, "in")
-	fi, err := os.Stat(fifoPath)
-	if err != nil {
-		return nil, fmt.Errorf("IRC FIFO not found at %s: %w", fifoPath, err)
-	}
-	if fi.Mode()&os.ModeNamedPipe == 0 {
-		return nil, fmt.Errorf("path %s is not a named pipe", fifoPath)
-	}
-
-	f, err := os.OpenFile(fifoPath, os.O_WRONLY|syscall.O_NONBLOCK, 0600)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open IRC FIFO (is the client running?): %w", err)
-	}
-	defer f.Close()
-
-	msg := message
-	if target != "" {
-		msg = fmt.Sprintf("/msg %s %s", target, message)
-	}
-	if !strings.HasSuffix(msg, "\n") {
-		msg += "\n"
-	}
-
-	if _, err := f.WriteString(msg); err != nil {
-		return nil, fmt.Errorf("failed to write to IRC FIFO: %w", err)
-	}
-
-	return toolResult(map[string]any{"ok": true})
-}
-
-func (s *server) handleIrcRead(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
-	absWorkDir, err := filepath.Abs(rc.workDir)
-	if err != nil {
-		return nil, err
-	}
-
-	logPath := filepath.Join(absWorkDir, "scratch", "irc", rc.c.Actor, "log")
-	if _, err := os.Stat(logPath); err != nil {
-		return nil, fmt.Errorf("IRC log not found at %s (is the client running?): %w", logPath, err)
-	}
-
-	maxLines := int(params.GetOptionalInt(args, "lines", 0))
-	fromOffset := params.GetOptionalInt(args, "from_offset", -1)
-	lines, nextOffset, err := irc.ReadIrcLog(logPath, fromOffset, maxLines)
-	if err != nil {
-		return nil, err
-	}
-	if lines == nil {
-		lines = []string{}
-	}
-	return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
-}
-
-func (s *server) handleIrcWait(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
-	absWorkDir, err := filepath.Abs(rc.workDir)
-	if err != nil {
-		return nil, err
-	}
-
-	logPath := filepath.Join(absWorkDir, "scratch", "irc", rc.c.Actor, "log")
-	timeoutS := optionalFloat(args, "timeout_s", 60)
-	if timeoutS <= 0 {
-		timeoutS = 60
-	}
-	if timeoutS > 300 {
-		timeoutS = 300
-	}
-	fromOffset := params.GetOptionalInt(args, "from_offset", -1)
-	// The FIFO dir is keyed by the bare actor, but the agent's own messages
-	// appear under the fam-scoped nick (claude-botfam) in the log — match on
-	// the scoped nick or the wait wakes on its own traffic (#137; matches the
-	// `botfam irc-wait` CLI fix).
-	matchNick := rc.c.ScopedNick
-	if rc.actor != rc.c.Actor {
-		matchNick = famconfig.FamScopedNick(rc.actor, rc.c.Slug)
-	}
-	lines, nextOffset, timedOut, err := irc.WaitIrcLines(logPath, matchNick, fromOffset, time.Duration(timeoutS*float64(time.Second)))
-	if err != nil {
-		return nil, err
-	}
-	if lines == nil {
-		lines = []string{}
-	}
-	return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset, "timed_out": timedOut})
-}
-
-func (s *server) handleIrcReplay(_ context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
-	historyPath := filepath.Join(rc.c.FamDir, famconfig.FamLedgerDirName(rc.c.Registry), "history.jsonl")
-	since := params.GetOptionalString(args, "since", "")
-	channelsStr := params.GetOptionalString(args, "channels", "")
-
-	// Parse filter channels
-	var filterChans []string
-	if channelsStr != "" {
-		for _, ch := range strings.Split(channelsStr, ",") {
-			ch = strings.TrimSpace(ch)
-			if ch != "" {
-				filterChans = append(filterChans, ch)
-			}
-		}
-	} else {
-		// default to main + ccrep channels
-		mainChan, ccrepChan := famconfig.FamChannels(rc.c.Registry)
-		if mainChan != "" {
-			filterChans = append(filterChans, mainChan)
-		}
-		if ccrepChan != "" {
-			filterChans = append(filterChans, ccrepChan)
-		}
-	}
-
-	matchNick := rc.c.ScopedNick
-	if rc.actor != rc.c.Actor {
-		matchNick = famconfig.FamScopedNick(rc.actor, rc.c.Slug)
-	}
-	lines, nextOffset, err := irc.ReplayHistory(historyPath, rc.actor, matchNick, since, filterChans)
-	if err != nil {
-		return nil, err
-	}
-	if lines == nil {
-		lines = []string{}
-	}
-	return toolResult(map[string]any{"lines": lines, "next_offset": nextOffset})
-}
 
 // resolveClientActor resolves the executing client actor by checking the MCP client's workspace roots.
 func (s *server) resolveClientActor(ctx context.Context, clientRoots []string) string {

@@ -24,7 +24,7 @@ This guide is for the human operator managing the coordination environment.
 ## 3. Disaster Recovery
 
 - **Single fixer per operation**: If something breaks, assign one agent on the
-  IRC channel to fix it (e.g., "claude: take this"). Avoid having multiple
+  forge to fix it (e.g., by assigning them to the relevant issue). Avoid having multiple
   agents/operators attempt recovery concurrently.
 - **Announce recovery actions**: Never reset, delete, or rewrite shared
   commits/refs without announcing it first.

@@ -37,17 +37,8 @@ func TestServeGateValidAgentWorktreeServesNormalTools(t *testing.T) {
 
 	wtDir, _ := quarantineFam(t)
 
-	// irc_read needs a log file to get past the gate and reach its handler.
-	logDir := filepath.Join(wtDir, "scratch", "irc", "alice")
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(logDir, "log"), nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": wtDir}); err != nil {
-		t.Fatalf("valid agent worktree should serve irc_read, got: %v", err)
+	if _, err := s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": wtDir}); err != nil {
+		t.Fatalf("valid agent worktree should serve worktree_sync, got: %v", err)
 	}
 }
 
@@ -60,7 +51,7 @@ func TestServeGateNonAgentWorktreeQuarantined(t *testing.T) {
 
 	_, mainDir := quarantineFam(t)
 
-	_, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": mainDir})
+	_, err := s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": mainDir})
 	if err == nil {
 		t.Fatal("expected quarantine error from the base/main checkout, got nil")
 	}

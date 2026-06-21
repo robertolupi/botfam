@@ -47,8 +47,7 @@ func NewWaitCmd() *cobra.Command {
 		all      bool
 	)
 	c := &cobra.Command{
-		Use:   "wait",
-		Short: "Legacy: block on the per-agent spool until new IRC/forge events arrive",
+		Short: "Legacy: block on the per-agent spool until new forge events arrive",
 		Long: `Block on this agent's spool ($FAMROOT/spool/$AGENT) and print the messages
 that wake it, then exit.
 
@@ -64,8 +63,7 @@ with the 'legacy_ingest' flag opted in.
 By default it runs in do-not-disturb: forge events wake you only when they are
 directed at you (you are an assignee, or @-mentioned in the latest comment).
 Non-directed forge events are still drained to cur/ (see --replay) but do not
-disturb you. IRC is always relayed — you control exposure by joining/parting the
-channel. Pass --all to surface every forge event regardless.
+disturb you. Pass --all to surface every forge event regardless.
 
 It drains the spool's new/ box, prints each surfaced message verbatim (RFC-822
 headers + body) under a banner, and moves the batch to cur/ — the move is the
@@ -141,7 +139,7 @@ is what fills the spool when 'legacy_ingest' is opted in.`,
 		},
 	}
 	c.Flags().IntVar(&timeoutS, "timeout", 0, "give up after N seconds and exit 0 (0 = block forever)")
-	c.Flags().StringVar(&sources, "sources", "irc,forge", "comma-separated event sources to surface")
+	c.Flags().StringVar(&sources, "sources", "forge", "comma-separated event sources to surface")
 	c.Flags().StringVar(&spoolDir, "spool", "", "path to the spool directory (overrides fam resolution)")
 	c.Flags().StringVar(&workDir, "work-dir", ".", "worktree to resolve the agent/spool from")
 	c.Flags().IntVar(&pollMs, "poll-ms", 500, "poll interval in milliseconds")
@@ -309,8 +307,7 @@ func runWait(ctx context.Context, out, errw io.Writer, spoolDir string, want map
 				continue // source not selected
 			}
 			// Do-not-disturb (the default): forge events only wake me when they're
-			// directed at me (assignee / @-mention). IRC is always relayed — I
-			// control exposure by joining/parting the channel. Non-directed forge
+			// directed at me (assignee / @-mention). Non-directed forge
 			// events are still drained below (kept in cur/ for --replay), just not
 			// surfaced. --all turns this off.
 			if directedOnly && d.source == mailbox.SourceForge && !d.directed {
