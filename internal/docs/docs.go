@@ -13,8 +13,6 @@ var Files embed.FS
 type TemplateData struct {
 	Actor             string
 	Fam               string
-	MainChannel       string
-	CcrepChannel      string
 	OperatorEmail     string
 	OperatorName      string
 	ForgeURL          string

@@ -75,8 +75,6 @@ func TestTemplateRendering(t *testing.T) {
 	data := TemplateData{
 		Actor:             "testactor",
 		Fam:               "testfam",
-		MainChannel:       "#testmain",
-		CcrepChannel:      "#testccrep",
 		OperatorEmail:     "operator@test.com",
 		OperatorName:      "testoperator",
 		ForgeURL:          "http://testforge:3000",

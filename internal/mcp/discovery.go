@@ -177,7 +177,6 @@ func buildDiscoveryData(ctx context.Context, workDir, clientName string) discove
 		d.resolvedVia = string(c.Source)
 	}
 
-	d.tmpl.MainChannel, d.tmpl.CcrepChannel = famconfig.FamChannels(reg)
 	d.tmpl.IntegrationBranch = famconfig.FamBranch(reg)
 	d.tmpl.ReleaseBranch = famconfig.FamReleaseBranch(reg)
 	d.tmpl.ForgeURL = reg.Origin
@@ -364,7 +363,6 @@ func renderRoot(d discoveryData) []byte {
 	b.WriteString("## This fam\n\n")
 	fmt.Fprintf(&b, "- **fam**: %s\n", orPlaceholder(t.Fam, "<unresolved>"))
 	fmt.Fprintf(&b, "- **actor**: %s\n", orPlaceholder(t.Actor, "<unresolved>"))
-	fmt.Fprintf(&b, "- **main channel**: %s\n", orPlaceholder(t.MainChannel, "<unresolved>"))
 	fmt.Fprintf(&b, "- **integration branch**: %s — open PRs here; never target `%s` unless instructed\n",
 		orPlaceholder(t.IntegrationBranch, "<unresolved>"),
 		orPlaceholder(t.ReleaseBranch, "main"))
@@ -425,7 +423,6 @@ type discoveryIndex struct {
 	Fam struct {
 		Name              string `json:"name"`
 		Actor             string `json:"actor"`
-		MainChannel       string `json:"main_channel"`
 		IntegrationBranch string `json:"integration_branch"`
 		ReleaseBranch     string `json:"release_branch"`
 	} `json:"fam"`
@@ -441,7 +438,6 @@ func renderIndexJSON(d discoveryData) ([]byte, error) {
 	idx.Server.Version = serverVersion
 	idx.Fam.Name = d.tmpl.Fam
 	idx.Fam.Actor = d.tmpl.Actor
-	idx.Fam.MainChannel = d.tmpl.MainChannel
 	idx.Fam.IntegrationBranch = d.tmpl.IntegrationBranch
 	idx.Fam.ReleaseBranch = d.tmpl.ReleaseBranch
 	idx.ResolvedVia = d.resolvedVia
