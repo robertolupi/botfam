@@ -4,9 +4,10 @@ This document defines the core rules for how agents in a family coordinate
 their work.
 
 > **Coordination is forge-first.** Members coordinate through the forge
-> (issues/PRs — assignments, reviews, comments); `botfam wait` is the wake loop
-> and runs do-not-disturb by default. IRC is opt-in — a forum for design
-> sprints, not the coordination or wake substrate.
+> (issues/PRs — assignments, reviews, comments). Wake is moving to a
+> **supervisor** (`botfam sprint run`, EventDeliveryV2); until it lands, a
+> **human operator manually supervises** — see
+> [§1a](#1a-wake--the-manual-supervisor-gap).
 
 ## 1. Identity & Coordination
 
@@ -16,42 +17,55 @@ derived from the worktree directory basename.
 Day-to-day coordination runs on the **forge** (the Gitea/Forgejo at
 `{{.ForgeURL}}`): assignments, reviews, and comments. To direct a message at a
 peer, comment on the relevant issue/PR and **assign or @-mention** them — that
-is delivered durably and wakes them. A local IRC server is the
-**design-sprint** substrate only, not the coordination or wake plane.
+is delivered durably and wakes them.
 
-- **Wake loop:** `botfam wait` is the unified wake point every member runs. It
-  blocks on the per-agent spool, which a read-only ingester fills with forge
-  activity and (when joined) IRC lines; the MCP server starts the ingester
-  automatically once identity resolves (it does **not** mark forge
-  notifications read — the forge stays canonical). **Do-not-disturb is the
-  default:** forge events wake you only when directed at you (you are an
-  assignee, or @-mentioned in the latest comment); pass `--all` to surface
-  everything; IRC lines are always relayed while joined. Re-arm `botfam wait`
-  after every wake-up.
-- **IRC client (sprints only):** join with `botfam irc-client {{.Actor}}` only
-  when participating in a design sprint; it is not required to be woken or to
-  coordinate. The main channel is e.g. {{.MainChannel}}; `#session-<slug>`
-  channels host per-session working discussions. `botfam irc-wait` and
-  `botfam forge-wait` are deprecated single-source fallbacks — prefer
-  `botfam wait`.
-- **Nicks:** Nicks equal the actor name (e.g. `{{.Actor}}`),
-  NickServ-registered.
-- **Scribe:** A scribe bot logs channel events to a shared ledger
-  (`history.jsonl`) so design-sprint discussion survives across restarts.
+- **Wake (in transition):** the wake substrate is being replaced by a
+  **supervisor** (`botfam sprint run`); see
+  [§1a](#1a-wake--the-manual-supervisor-gap). Until it lands, a human operator
+  manually re-runs agents — there is no always-on automatic wake loop to rely
+  on.
+- **`botfam wait` is legacy:** it still blocks on the per-agent spool and
+  prints what arrives, but it is **no longer the unified wake loop** and must
+  not be treated as one. The spool ingester that fed it is **disabled by
+  default** in the current binary (EventDeliveryV2 M0c), so on a fresh binary
+  `botfam wait` has nothing to drain. It survives only for fams still running
+  the old binary with the `legacy_ingest` opt-in. Do not build new flows on it.
+- **Wait watchers:** `botfam forge-wait` and `botfam wait` are legacy single-binary wake fallbacks, not the supervised path.
+
+
+## 1a. Wake & the manual-supervisor gap
+
+Wake is migrating from the legacy single-binary `botfam wait` loop to a
+**supervisor** process (`botfam sprint run`, EventDeliveryV2). The supervisor
+will own session lifetime: it decides when a sprint is done, sends an explicit
+end-of-session message, and reaps hung agents on a TTL.
+
+That supervisor has not landed yet. **In the interim the human operator is the
+manual supervisor** — there is no automatic wake loop. The expected operating
+pattern is:
+
+1. **Finish the task** in front of you (land the PR, post the review, write the
+   handover snapshot to the forge).
+2. **Yield** — do not spin on a wake loop.
+3. **Notify the operator in plain text** that you are done and what is next.
+4. **Wait to be run again by hand.** The operator re-runs agents as work
+   accrues.
+
+Do not depend on `botfam wait` to keep you alive between tasks: its spool
+ingester is disabled by default (EventDeliveryV2 M0c), so on a current binary
+it has nothing to surface. Agents still on the old binary keep today's `wait`
+semantics until the new supervised path replaces them — that path ships as a
+unit, never pushed onto a running agent mid-gap.
 
 ## 2. Durability
 
 The **forge is the durable coordination record** — issues/PRs persist across
-restarts, and `botfam wait` replays missed forge activity from the spool, so no
-coordination is lost to a restart.
+restarts, so no coordination is lost to a restart: standing work is recovered
+by querying the forge worklist, not by replaying an ephemeral wake stream.
 
 - **Forge is canonical:** process state (who is assigned, review approval,
-  merge-readiness) lives on the forge, never only in chat.
-  `botfam wait --replay` re-reads already-surfaced messages for gap recovery.
-- **IRC replay (sprints):** the IRC substrate is ephemeral; when you join or
-  reconnect for a sprint, read the durable scribe ledger (via the `irc_replay`
-  MCP tool or by tailing `history.jsonl`) before acting — never assume you saw
-  all traffic live.
+  merge-readiness) lives on the forge, never only in chat. Re-derive your
+  worklist from the forge on every boot rather than trusting a wake spool.
 - **Formatting:** Format all documents using the project's formatting tools
   before committing to keep diffs clean.
 

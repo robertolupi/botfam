@@ -31,8 +31,10 @@ func SpoolDir(workDir string) (string, error) {
 	return filepath.Join(rf.FamDir, "spool", rf.Actor), nil
 }
 
-// NewWaitCmd builds the `botfam wait` Cobra command — the single wake point that
-// blocks on the per-agent spool and prints whatever arrives (#229).
+// NewWaitCmd builds the `botfam wait` Cobra command — the legacy spool wake
+// (#229). It still blocks on the per-agent spool and prints whatever arrives,
+// but is no longer the unified wake loop: its ingester is off by default and
+// wake is moving to the supervisor (EventDeliveryV2 M0c, #484).
 func NewWaitCmd() *cobra.Command {
 	var (
 		timeoutS int
@@ -46,15 +48,23 @@ func NewWaitCmd() *cobra.Command {
 	)
 	c := &cobra.Command{
 		Use:   "wait",
-		Short: "Block on the per-agent spool until new IRC/forge events arrive",
+		Short: "Legacy: block on the per-agent spool until new forge events arrive",
 		Long: `Block on this agent's spool ($FAMROOT/spool/$AGENT) and print the messages
-that wake it, then exit — the single wake point unifying irc-wait and forge-wait.
+that wake it, then exit.
+
+LEGACY (EventDeliveryV2 M0c): this is no longer the unified wake loop. The spool
+ingester that fills it is disabled by default in the current binary, so on a
+fresh binary this command has nothing to drain. Wake is moving to a supervisor
+(botfam sprint run) that drives session termination (an end-of-session message,
+plus a TTL reaper for hung agents); until it lands, a human operator manually
+re-runs agents. This command still always blocks for incoming events — it never
+returns early on an empty spool. It survives for fams still on the old binary
+with the 'legacy_ingest' flag opted in.
 
 By default it runs in do-not-disturb: forge events wake you only when they are
 directed at you (you are an assignee, or @-mentioned in the latest comment).
 Non-directed forge events are still drained to cur/ (see --replay) but do not
-disturb you. IRC is always relayed — you control exposure by joining/parting the
-channel. Pass --all to surface every forge event regardless.
+disturb you. Pass --all to surface every forge event regardless.
 
 It drains the spool's new/ box, prints each surfaced message verbatim (RFC-822
 headers + body) under a banner, and moves the batch to cur/ — the move is the
@@ -67,8 +77,9 @@ issue/PR's timeline, returning on the next event (comment, review, close, or a
 silent force-push that emits no notification). Use it to watch a specific PR a
 peer is reviewing.
 
-This command only reads the spool (or, with a number, polls one issue/PR); a
-background ingester (hosted in the botfam MCP server) is what fills the spool.`,
+This command only reads the spool (or, with a number, polls one issue/PR); the
+legacy background ingester (hosted in the botfam MCP server, off by default)
+is what fills the spool when 'legacy_ingest' is opted in.`,
 		Args:          cobra.MaximumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -129,7 +140,7 @@ background ingester (hosted in the botfam MCP server) is what fills the spool.`,
 		},
 	}
 	c.Flags().IntVar(&timeoutS, "timeout", 0, "give up after N seconds and exit 0 (0 = block forever)")
-	c.Flags().StringVar(&sources, "sources", "irc,forge", "comma-separated event sources to surface")
+	c.Flags().StringVar(&sources, "sources", "forge", "comma-separated event sources to surface")
 	c.Flags().StringVar(&spoolDir, "spool", "", "path to the spool directory (overrides fam resolution)")
 	c.Flags().StringVar(&workDir, "work-dir", ".", "worktree to resolve the agent/spool from")
 	c.Flags().IntVar(&pollMs, "poll-ms", 500, "poll interval in milliseconds")
@@ -297,8 +308,7 @@ func runWait(ctx context.Context, out, errw io.Writer, spoolDir string, want map
 				continue // source not selected
 			}
 			// Do-not-disturb (the default): forge events only wake me when they're
-			// directed at me (assignee / @-mention). IRC is always relayed — I
-			// control exposure by joining/parting the channel. Non-directed forge
+			// directed at me (assignee / @-mention). Non-directed forge
 			// events are still drained below (kept in cur/ for --replay), just not
 			// surfaced. --all turns this off.
 			if directedOnly && d.source == mailbox.SourceForge && !d.directed {

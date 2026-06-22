@@ -68,6 +68,56 @@ func (c *Client) ListAllIssues(ctx context.Context) ([]*Issue, error) {
 	return out, nil
 }
 
+// RepoSlug returns the "owner/repo" identity of the client's repository, used
+// as the repo component of event identities in the observation pipeline.
+func (c *Client) RepoSlug() string {
+	return c.Owner + "/" + c.Repo
+}
+
+// ListOpenIssuesAssignedTo returns the open issues (excluding pull requests)
+// assigned to the given actor. This is the standing worklist query that recovers
+// "assigned-and-open" work across restarts independently of any notification.
+func (c *Client) ListOpenIssuesAssignedTo(ctx context.Context, actor string) ([]*Issue, error) {
+	var out []*Issue
+	for page := 1; ; page++ {
+		issues, resp, err := c.sdk.Issues.ListRepoIssues(ctx, c.Owner, c.Repo, giteasdk.ListIssueOption{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: sdkPageLimit},
+			Type:        giteasdk.IssueTypeIssue,
+			State:       giteasdk.StateOpen,
+			AssignedBy:  actor,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list assigned issues page %d: %w", page, err)
+		}
+		out = append(out, issues...)
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// ListOpenPulls returns every open pull request. The observation pipeline
+// filters these in memory by assignee / requested-reviewer / author because the
+// forge's PR list endpoint does not expose those filters.
+func (c *Client) ListOpenPulls(ctx context.Context) ([]*PullRequest, error) {
+	var out []*PullRequest
+	for page := 1; ; page++ {
+		pulls, resp, err := c.sdk.PullRequests.ListRepoPullRequests(ctx, c.Owner, c.Repo, giteasdk.ListPullRequestsOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: sdkPageLimit},
+			State:       giteasdk.StateOpen,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list open pulls page %d: %w", page, err)
+		}
+		out = append(out, pulls...)
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
 // ListAllPulls returns every pull request (state=all).
 func (c *Client) ListAllPulls(ctx context.Context) ([]*PullRequest, error) {
 	var out []*PullRequest

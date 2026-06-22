@@ -44,10 +44,10 @@ Operator (rlupi)    ── git / web UI ────┤    Wiki         (session
 - **Forge as control plane**: Issues are the unit of claimable, leased work;
   pull requests and their reviews carry the coordination and decision record;
   the wiki holds sessions, reviews, and design proposals.
-- **Agent tooling in the binary**: `wait` (forge wake loop — blocks until
-  queued work arrives), `verify` (ephemeral build/test check), and `agent-docs`
-  management. The forge is reachable from the CLI and from the bundled MCP
-  server as `forge_*` subtools.
+- **Agent tooling in the binary**: `wait` (legacy spool wake loop — being
+  replaced by a supervisor; its ingester is off by default), `verify`
+  (ephemeral build/test check), and `agent-docs` management. The forge is
+  reachable from the CLI and from the bundled MCP server as `forge_*` subtools.
 
 ## Why this shape?
 
@@ -91,7 +91,8 @@ reviews, and the wiki. Configure the forge endpoint and per-agent tokens in
 
 ```bash
 botfam whoami        # resolves this worktree's agent identity
-botfam wait          # blocks until queued forge work (issues/PRs) arrives
+botfam wait          # legacy spool wake loop (ingester off by default); being
+                     # replaced by the supervisor path
 ```
 
 A hermetic test forge for integration runs is available via

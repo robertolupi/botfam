@@ -8,7 +8,7 @@ import (
 )
 
 func TestReadEmbeddedDocs(t *testing.T) {
-	slugs := []string{"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown"}
+	slugs := []string{"start", "protocol", "bootstrap", "operator", "review", "worktrees", "markdown"}
 	for _, slug := range slugs {
 		content, err := Render(slug, TemplateData{})
 		if err != nil {
@@ -75,15 +75,13 @@ func TestTemplateRendering(t *testing.T) {
 	data := TemplateData{
 		Actor:             "testactor",
 		Fam:               "testfam",
-		MainChannel:       "#testmain",
-		CcrepChannel:      "#testccrep",
 		OperatorEmail:     "operator@test.com",
 		OperatorName:      "testoperator",
 		ForgeURL:          "http://testforge:3000",
 		IntegrationBranch: "testbranch",
 	}
 
-	slugs := []string{"start", "protocol", "bootstrap", "ops", "operator", "review", "worktrees", "markdown"}
+	slugs := []string{"start", "protocol", "bootstrap", "operator", "review", "worktrees", "markdown"}
 	for _, slug := range slugs {
 		content, err := Render(slug, data)
 		if err != nil {
@@ -103,23 +101,19 @@ func TestTemplateRendering(t *testing.T) {
 		// Verify that specific fuzzed values actually exist in the output where expected
 		switch slug {
 		case "start":
-			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "testfam") {
+			if !strings.Contains(contentStr, "testactor") {
 				t.Errorf("rendered start.md missing expected placeholders: %s", contentStr)
 			}
 		case "worktrees":
 			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "operator@test.com") {
 				t.Errorf("rendered worktrees.md missing expected placeholders: %s", contentStr)
 			}
-		case "ops":
-			if !strings.Contains(contentStr, "testfam") || !strings.Contains(contentStr, "testactor") {
-				t.Errorf("rendered ops.md missing expected placeholders: %s", contentStr)
-			}
 		case "operator":
 			if !strings.Contains(contentStr, "testactor") {
 				t.Errorf("rendered operator.md missing expected placeholders: %s", contentStr)
 			}
 		case "protocol":
-			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "#testmain") || !strings.Contains(contentStr, "testbranch") {
+			if !strings.Contains(contentStr, "testactor") || !strings.Contains(contentStr, "testbranch") {
 				t.Errorf("rendered protocol.md missing expected placeholders: %s", contentStr)
 			}
 		case "bootstrap":

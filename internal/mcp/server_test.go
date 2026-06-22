@@ -1,7 +1,6 @@
 package mcp
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -10,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -18,7 +16,6 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 
 	"github.com/robertolupi/botfam/internal/famconfig"
-	"github.com/robertolupi/botfam/internal/irc"
 	"github.com/robertolupi/botfam/internal/mailbox"
 )
 
@@ -111,36 +108,60 @@ func TestMaybeStartIngestGuards(t *testing.T) {
 	})
 }
 
-// TestMaybeStartIngestForWorkDirArmsIngester locks the fix for the "no spool"
-// bug: the ingester must be armed when a discovery workDir resolves an actor
-// (the onboarding resources/read path), not only on the first qualifying tool
-// call. A server whose ingester started only from callTool left a fresh session
-// with no spool for `botfam wait` to read.
-func TestMaybeStartIngestForWorkDirArmsIngester(t *testing.T) {
-	s, root := newTestServer(t) // chdir'd into the wt-agy worktree
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s.ctx = ctx
+// TestMaybeStartIngestForWorkDir locks the EventDeliveryV2 M0c (#484) contract:
+// the legacy spool ingester is disabled by default, and only arms when the
+// `legacy_ingest` flag is opted in. The default-off arm guards the keystone
+// ("after M0c, botfam serve does not start the spool ingester"); the opt-in arm
+// preserves the prior "no spool" fix (ingester armed from the discovery workDir,
+// not only on the first qualifying tool call) for fams still on the old binary.
+func TestMaybeStartIngestForWorkDir(t *testing.T) {
+	t.Run("disabled by default (M0c)", func(t *testing.T) {
+		s, _ := newTestServer(t) // chdir'd into the wt-agy worktree
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s.ctx = ctx
 
-	wtDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.maybeStartIngestForWorkDir(ctx, wtDir)
-
-	if !s.ingestStarted {
-		t.Fatal("ingester was not armed from the resolved workDir")
-	}
-	// The goroutine creates the spool at $FAMROOT/spool/$actor.
-	spoolDir := filepath.Join(root, "spool", "agy")
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(spoolDir); err == nil {
-			return
+		wtDir, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("ingester did not create the spool at %s", spoolDir)
+		s.maybeStartIngestForWorkDir(ctx, wtDir)
+
+		if s.ingestStarted {
+			t.Fatal("legacy ingester armed without the legacy_ingest opt-in flag")
+		}
+	})
+
+	t.Run("opt-in via legacy_ingest flag", func(t *testing.T) {
+		s, root := newTestServer(t) // chdir'd into the wt-agy worktree
+		// Opt the mockfam repo stanza into legacy ingestion.
+		registerFam(t, "mockfam", root, nil, func(rc *famconfig.RepoConfig) {
+			rc.Flags = map[string]any{"legacy_ingest": true}
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s.ctx = ctx
+
+		wtDir, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.maybeStartIngestForWorkDir(ctx, wtDir)
+
+		if !s.ingestStarted {
+			t.Fatal("ingester was not armed despite legacy_ingest opt-in")
+		}
+		// The goroutine creates the spool at $FAMROOT/spool/$actor.
+		spoolDir := filepath.Join(root, "spool", "agy")
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(spoolDir); err == nil {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("ingester did not create the spool at %s", spoolDir)
+	})
 }
 
 // TestNudgeCallbackGating: the #337 notification nudge is on by default for a
@@ -194,22 +215,24 @@ func TestBoundActorConflictsWithWorkDirActor(t *testing.T) {
 	bobDir := setupTestWorktree(t, base, "wt-bob", "bob")
 	writeMockRegistry(t, base, aliceDir, "mockfam")
 
-	// Create log files so irc_read doesn't fail
-	if err := os.MkdirAll(filepath.Join(aliceDir, "scratch", "irc", "alice"), 0755); err != nil {
-		t.Fatal(err)
+	s.entries = s.buildEntries()
+	s.entries["test_read"] = dispatchEntry{
+		tool: mcplib.NewTool("test_read", mcplib.WithDescription("")),
+		handler: func(ctx context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+			return toolResult(map[string]any{"ok": true})
+		},
+		readOnly: true,
 	}
-	if err := os.WriteFile(filepath.Join(aliceDir, "scratch", "irc", "alice", "log"), nil, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(bobDir, "scratch", "irc", "bob"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(bobDir, "scratch", "irc", "bob", "log"), nil, 0644); err != nil {
-		t.Fatal(err)
+	s.entries["test_write"] = dispatchEntry{
+		tool: mcplib.NewTool("test_write", mcplib.WithDescription("")),
+		handler: func(ctx context.Context, rc *resolvedCtx, args map[string]any) (*mcplib.CallToolResult, error) {
+			return toolResult(map[string]any{"ok": true})
+		},
+		readOnly: false,
 	}
 
 	// First call binds the session to alice via the directory-derived actor.
-	if _, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": aliceDir}); err != nil {
+	if _, err := s.callTool(context.Background(), "test_read", map[string]any{"work_dir": aliceDir}); err != nil {
 		t.Fatalf("first call from wt-alice failed: %v", err)
 	}
 	if s.actor != "alice" {
@@ -217,25 +240,21 @@ func TestBoundActorConflictsWithWorkDirActor(t *testing.T) {
 	}
 
 	// A later call whose work_dir resolves to a different actor (bob) is cross-actor.
-	// Since irc_read is read-only, it must succeed.
-	if _, err := s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": bobDir}); err != nil {
-		t.Fatalf("cross-actor read-only call to irc_read failed: %v", err)
+	// Since test_read is read-only, it must succeed.
+	if _, err := s.callTool(context.Background(), "test_read", map[string]any{"work_dir": bobDir}); err != nil {
+		t.Fatalf("cross-actor read-only call to test_read failed: %v", err)
 	}
 
-	// A mutating call like irc_write to bob's work_dir must be blocked.
-	_, err := s.callTool(context.Background(), "irc_write", map[string]any{
+	// A mutating call like test_write to bob's work_dir must be blocked.
+	_, err := s.callTool(context.Background(), "test_write", map[string]any{
 		"work_dir": bobDir,
-		"message":  "hello",
 	})
 	if err == nil {
 		t.Fatal("expected mutating call in cross-actor worktree to be blocked, got nil error")
 	}
-	want := "acting in another agent's worktree (executing: alice, target: bob) is read-only; mutating tool 'irc_write' is blocked"
+	want := "acting in another agent's worktree (executing: alice, target: bob) is read-only; mutating tool 'test_write' is blocked"
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("expected error containing %q, got %q", want, err.Error())
-	}
-	if s.actor != "alice" {
-		t.Errorf("bound actor changed: got %q", s.actor)
 	}
 }
 
@@ -306,155 +325,6 @@ func TestIdentityOptionalToolsStillEnforceConflictsAndBinding(t *testing.T) {
 	}
 }
 
-func TestIrcWriteTool(t *testing.T) {
-	s, _ := newTestServer(t)
-	base := t.TempDir()
-	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-	writeMockRegistry(t, base, aliceDir, "mockfam")
-
-	// Create scratch/irc/alice directory structure
-	fifoDir := filepath.Join(aliceDir, "scratch", "irc", "alice")
-	if err := os.MkdirAll(fifoDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	fifoPath := filepath.Join(fifoDir, "in")
-	// Create named pipe
-	if err := syscall.Mkfifo(fifoPath, 0666); err != nil {
-		t.Fatalf("failed to create test FIFO: %v", err)
-	}
-
-	// Open FIFO for reading in a separate goroutine so it doesn't block
-	readCh := make(chan string, 1)
-	errCh := make(chan error, 1)
-	ready := make(chan struct{})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go func() {
-		// Open the FIFO in RDWR mode so it returns immediately and guarantees a reader
-		f, err := os.OpenFile(fifoPath, os.O_RDWR, 0)
-		if err != nil {
-			errCh <- err
-			return
-		}
-		defer f.Close()
-
-		close(ready)
-
-		// Set a read timeout using select/context
-		lineCh := make(chan string, 1)
-		go func() {
-			reader := bufio.NewReader(f)
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return
-			}
-			lineCh <- line
-		}()
-
-		select {
-		case line := <-lineCh:
-			readCh <- line
-		case <-ctx.Done():
-			errCh <- ctx.Err()
-		case <-time.After(2 * time.Second):
-			errCh <- fmt.Errorf("timeout waiting for FIFO read")
-		}
-	}()
-
-	// Wait for reader to be ready before calling irc_write (O_WRONLY|O_NONBLOCK)
-	select {
-	case <-ready:
-	case err := <-errCh:
-		t.Fatalf("failed to start FIFO reader: %v", err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for FIFO reader to start")
-	}
-
-	// Call the irc_write tool using the server
-	_, err := s.callTool(context.Background(), "irc_write", map[string]any{
-		"work_dir": aliceDir,
-		"message":  "hello irc\n",
-	})
-	if err != nil {
-		t.Fatalf("irc_write tool call failed: %v", err)
-	}
-
-	select {
-	case err := <-errCh:
-		t.Fatalf("FIFO reader error: %v", err)
-	case line := <-readCh:
-		if line != "hello irc\n" {
-			t.Errorf("expected line %q, got %q", "hello irc\n", line)
-		}
-	}
-
-	// Test writing with target parameter
-	readCh2 := make(chan string, 1)
-	errCh2 := make(chan error, 1)
-	ready2 := make(chan struct{})
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
-
-	go func() {
-		f, err := os.OpenFile(fifoPath, os.O_RDWR, 0)
-		if err != nil {
-			errCh2 <- err
-			return
-		}
-		defer f.Close()
-
-		close(ready2)
-
-		lineCh := make(chan string, 1)
-		go func() {
-			reader := bufio.NewReader(f)
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				return
-			}
-			lineCh <- line
-		}()
-
-		select {
-		case line := <-lineCh:
-			readCh2 <- line
-		case <-ctx2.Done():
-			errCh2 <- ctx2.Err()
-		case <-time.After(2 * time.Second):
-			errCh2 <- fmt.Errorf("timeout waiting for FIFO read (target test)")
-		}
-	}()
-
-	// Wait for reader to be ready before calling irc_write (O_WRONLY|O_NONBLOCK)
-	select {
-	case <-ready2:
-	case err := <-errCh2:
-		t.Fatalf("failed to start FIFO reader 2: %v", err)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout waiting for FIFO reader 2 to start")
-	}
-
-	_, err = s.callTool(context.Background(), "irc_write", map[string]any{
-		"work_dir": aliceDir,
-		"message":  "hello target",
-		"target":   "#chan",
-	})
-	if err != nil {
-		t.Fatalf("irc_write tool call with target failed: %v", err)
-	}
-
-	select {
-	case err := <-errCh2:
-		t.Fatalf("FIFO reader error on target test: %v", err)
-	case line := <-readCh2:
-		if line != "/msg #chan hello target\n" {
-			t.Errorf("expected line %q, got %q", "/msg #chan hello target\n", line)
-		}
-	}
-}
-
 // decodeToolResult unmarshals the JSON text payload of a tool result.
 func decodeToolResult(t *testing.T, res *mcplib.CallToolResult, v any) {
 	t.Helper()
@@ -486,17 +356,17 @@ func TestNativeToolCapability(t *testing.T) {
 	s := &server{}
 	entries := s.buildEntries()
 
-	if ro := entries["irc_read"].tool.Annotations.ReadOnlyHint; ro == nil || !*ro {
-		t.Error("irc_read should carry ReadOnlyHint=true")
+	if ro := entries["orient"].tool.Annotations.ReadOnlyHint; ro == nil || !*ro {
+		t.Error("orient should carry ReadOnlyHint=true")
 	}
-	if ro := entries["irc_write"].tool.Annotations.ReadOnlyHint; ro == nil || *ro {
-		t.Error("irc_write should carry ReadOnlyHint=false")
+	if ro := entries["worktree_init"].tool.Annotations.ReadOnlyHint; ro == nil || *ro {
+		t.Error("worktree_init should carry ReadOnlyHint=false")
 	}
-	if !entries["irc_read"].readOnly {
-		t.Error("irc_read entry.readOnly should be true")
+	if !entries["orient"].readOnly {
+		t.Error("orient entry.readOnly should be true")
 	}
-	if entries["irc_write"].readOnly {
-		t.Error("irc_write entry.readOnly should be false (it mutates)")
+	if entries["worktree_init"].readOnly {
+		t.Error("worktree_init entry.readOnly should be false (it mutates)")
 	}
 	if !entries["worktree_init"].identityOptional || !entries["worktree_sync"].identityOptional {
 		t.Error("worktree_init/worktree_sync should be identityOptional")
@@ -536,253 +406,6 @@ func TestWithRecoveryPanicDoesNotKillSession(t *testing.T) {
 	}
 }
 
-func TestIrcReadTool(t *testing.T) {
-	s, _ := newTestServer(t)
-	base := t.TempDir()
-	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-	writeMockRegistry(t, base, aliceDir, "mockfam")
-
-	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
-	content := "12:00 <bob> one\n12:01 <bob> two\n12:02 <bob> three\n"
-	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := s.callTool(context.Background(), "irc_read", map[string]any{
-		"work_dir": aliceDir,
-		"lines":    float64(2),
-	})
-	if err != nil {
-		t.Fatalf("irc_read tool call failed: %v", err)
-	}
-
-	var out struct {
-		Lines      []string `json:"lines"`
-		NextOffset int64    `json:"next_offset"`
-	}
-	decodeToolResult(t, res, &out)
-	want := []string{"12:01 <bob> two", "12:02 <bob> three"}
-	if len(out.Lines) != 2 || out.Lines[0] != want[0] || out.Lines[1] != want[1] {
-		t.Errorf("lines = %v, want %v", out.Lines, want)
-	}
-	if out.NextOffset != int64(len(content)) {
-		t.Errorf("next_offset = %d, want %d", out.NextOffset, len(content))
-	}
-
-	// Paging from an explicit offset returns the remainder.
-	res, err = s.callTool(context.Background(), "irc_read", map[string]any{
-		"work_dir":    aliceDir,
-		"from_offset": float64(len("12:00 <bob> one\n")),
-	})
-	if err != nil {
-		t.Fatalf("irc_read with from_offset failed: %v", err)
-	}
-	decodeToolResult(t, res, &out)
-	if len(out.Lines) != 2 || out.Lines[0] != "12:01 <bob> two" {
-		t.Errorf("paged lines = %v", out.Lines)
-	}
-	if out.NextOffset != int64(len(content)) {
-		t.Errorf("paged next_offset = %d, want %d", out.NextOffset, len(content))
-	}
-}
-
-func TestIrcReadToolMissingLog(t *testing.T) {
-	s, _ := newTestServer(t)
-	base := t.TempDir()
-	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-	writeMockRegistry(t, base, aliceDir, "mockfam")
-
-	_, err := s.callTool(context.Background(), "irc_read", map[string]any{
-		"work_dir": aliceDir,
-	})
-	if err == nil {
-		t.Fatal("expected error for missing IRC log, got nil")
-	}
-	wantPath := filepath.Join(aliceDir, "scratch", "irc", "alice", "log")
-	if !strings.Contains(err.Error(), wantPath) {
-		t.Errorf("error %q does not mention log path %q", err.Error(), wantPath)
-	}
-	if !strings.Contains(err.Error(), "client running") {
-		t.Errorf("error %q does not hint that the client may not be running", err.Error())
-	}
-}
-
-func TestIrcReplayTool(t *testing.T) {
-	s, _ := newTestServer(t)
-	base := t.TempDir()
-	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-	writeMockRegistry(t, base, aliceDir, "myfam")
-
-	// Create a history file
-	historyDir := filepath.Join(base, "myfam-collab")
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	historyFile := filepath.Join(historyDir, "history.jsonl")
-
-	writeEntry := func(sender, evType, target, body string) {
-		entry := irc.HistoryEntry{
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-			Sender:    sender,
-			Type:      evType,
-			Target:    target,
-			Body:      body,
-		}
-		data, err := json.Marshal(entry)
-		if err != nil {
-			t.Fatal(err)
-		}
-		f, err := os.OpenFile(historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer f.Close()
-		_, _ = f.Write(append(data, '\n'))
-	}
-
-	writeEntry("bob", "PRIVMSG", "#botfam", "peer msg")
-	writeEntry("alice-myfam", "PRIVMSG", "#botfam", "my own msg")
-
-	// Call the irc_replay tool using the server
-	res, err := s.callTool(context.Background(), "irc_replay", map[string]any{
-		"work_dir": aliceDir,
-		"since":    "lines:10",
-		"channels": "#botfam",
-	})
-	if err != nil {
-		t.Fatalf("irc_replay tool call failed: %v", err)
-	}
-
-	var out struct {
-		Lines      []string `json:"lines"`
-		NextOffset int64    `json:"next_offset"`
-	}
-	decodeToolResult(t, res, &out)
-
-	if len(out.Lines) != 1 {
-		t.Errorf("expected 1 line, got %d: %v", len(out.Lines), out.Lines)
-	}
-	if !strings.Contains(out.Lines[0], "peer msg") {
-		t.Errorf("expected line to contain 'peer msg', got %q", out.Lines[0])
-	}
-	if strings.Contains(out.Lines[0], "alice-myfam") {
-		t.Errorf("expected own message to be filtered out, got %q", out.Lines[0])
-	}
-}
-
-func TestIrcWaitToolTimeout(t *testing.T) {
-	s, _ := newTestServer(t)
-	base := t.TempDir()
-	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-	writeMockRegistry(t, base, aliceDir, "mockfam")
-
-	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
-	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte("12:00 <bob> static\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	start := time.Now()
-	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
-		"work_dir":  aliceDir,
-		"timeout_s": float64(0.05),
-	})
-	if err != nil {
-		t.Fatalf("irc_wait tool call failed: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("irc_wait took too long: %v", elapsed)
-	}
-
-	var out struct {
-		Lines      []string `json:"lines"`
-		NextOffset int64    `json:"next_offset"`
-		TimedOut   bool     `json:"timed_out"`
-	}
-	decodeToolResult(t, res, &out)
-	if !out.TimedOut {
-		t.Error("expected timed_out=true")
-	}
-	if len(out.Lines) != 0 {
-		t.Errorf("expected no lines, got %v", out.Lines)
-	}
-	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
-		t.Errorf("next_offset = %d, want snapshot size %d", out.NextOffset, len("12:00 <bob> static\n"))
-	}
-}
-
-// TestIrcWaitAcceptsStringNumbers verifies the #428 win: numeric args passed as
-// JSON strings (LLMs routinely do this) are coerced — here from_offset "0" and
-// timeout_s "0.05" — instead of falling back to defaults.
-func TestIrcWaitAcceptsStringNumbers(t *testing.T) {
-	s, _ := newTestServer(t)
-	base := t.TempDir()
-	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-	writeMockRegistry(t, base, aliceDir, "mockfam")
-	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
-	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte("12:00 <bob> static\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	start := time.Now()
-	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
-		"work_dir":    aliceDir,
-		"from_offset": "0",    // string, not number
-		"timeout_s":   "0.05", // string fractional seconds
-	})
-	if err != nil {
-		t.Fatalf("irc_wait failed: %v", err)
-	}
-	// If "0.05" were ignored, the default 60s timeout would apply.
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
-		t.Errorf("string timeout_s was not honored; waited %v", elapsed)
-	}
-	var out struct {
-		NextOffset int64 `json:"next_offset"`
-		TimedOut   bool  `json:"timed_out"`
-	}
-	decodeToolResult(t, res, &out)
-	// from_offset "0" means start-from-zero, so the snapshot advances to EOF.
-	if out.NextOffset != int64(len("12:00 <bob> static\n")) {
-		t.Errorf("from_offset string not honored; next_offset = %d", out.NextOffset)
-	}
-}
-
-// TestIrcWaitToolFiltersScopedSelf verifies the MCP irc_wait tool filters the
-// agent's OWN messages by the fam-scoped nick (claude-botfam), not the bare
-// actor — otherwise it wakes on its own traffic once nicks are scoped (#137,
-// codex review of #139).
-func TestIrcWaitToolFiltersScopedSelf(t *testing.T) {
-	s, _ := newTestServer(t)
-	base := t.TempDir()
-	aliceDir := setupTestWorktree(t, base, "wt-alice", "alice")
-	writeMockRegistry(t, base, aliceDir, "myfam")
-	logDir := mkdir(t, filepath.Join(aliceDir, "scratch", "irc", "alice"))
-	content := "12:00 <alice-myfam> my own line\n12:01 <bob> peer line\n"
-	if err := os.WriteFile(filepath.Join(logDir, "log"), []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	res, err := s.callTool(context.Background(), "irc_wait", map[string]any{
-		"work_dir":    aliceDir,
-		"from_offset": float64(0),
-		"timeout_s":   float64(2),
-	})
-	if err != nil {
-		t.Fatalf("irc_wait: %v", err)
-	}
-	var out struct {
-		Lines    []string `json:"lines"`
-		TimedOut bool     `json:"timed_out"`
-	}
-	decodeToolResult(t, res, &out)
-	joined := strings.Join(out.Lines, "\n")
-	if strings.Contains(joined, "alice-myfam") {
-		t.Errorf("own fam-scoped message was not filtered: %v", out.Lines)
-	}
-	if !strings.Contains(joined, "<bob>") {
-		t.Errorf("peer message missing from wait result: %v", out.Lines)
-	}
-}
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
@@ -1008,7 +631,7 @@ func TestMcpCatalogsAndCLI(t *testing.T) {
 		t.Fatalf("failed to read botfam:///tools: %v", err)
 	}
 	toolsMarkdown := res[0].(mcplib.TextResourceContents).Text
-	if !strings.Contains(toolsMarkdown, "# botfam Tools Catalog") || !strings.Contains(toolsMarkdown, "irc_read") {
+	if !strings.Contains(toolsMarkdown, "# botfam Tools Catalog") || !strings.Contains(toolsMarkdown, "orient") {
 		t.Errorf("unexpected tools markdown: %q", toolsMarkdown)
 	}
 
@@ -1033,23 +656,23 @@ func TestMcpCatalogsAndCLI(t *testing.T) {
 	if toolsIdx.Schema != "botfam.tools.v1" {
 		t.Errorf("expected schema botfam.tools.v1, got %q", toolsIdx.Schema)
 	}
-	foundIrcRead := false
+	foundOrient := false
 	for _, tool := range toolsIdx.Tools {
-		if tool.Name == "irc_read" {
-			foundIrcRead = true
-			if tool.Domain != "irc" {
-				t.Errorf("expected domain 'irc' for irc_read, got %q", tool.Domain)
+		if tool.Name == "orient" {
+			foundOrient = true
+			if tool.Domain != "unknown" {
+				t.Errorf("expected domain 'unknown' for orient, got %q", tool.Domain)
 			}
 			if !tool.ReadOnly {
-				t.Errorf("expected read_only true for irc_read")
+				t.Errorf("expected read_only true for orient")
 			}
 			if len(tool.InputSchemaHash) != 64 {
 				t.Errorf("expected 64-char schema hash, got %q", tool.InputSchemaHash)
 			}
 		}
 	}
-	if !foundIrcRead {
-		t.Errorf("irc_read tool not found in tools.json catalog")
+	if !foundOrient {
+		t.Errorf("orient tool not found in tools.json catalog")
 	}
 
 	// 2. Verify skills catalog
@@ -1364,14 +987,6 @@ func TestCallToolWithDotWorkDirAtRoot(t *testing.T) {
 
 	wtDir := setupTestWorktree(t, baseDir, "agy", "agy")
 
-	// Create required log files
-	if err := os.MkdirAll(filepath.Join(wtDir, "scratch", "irc", "agy"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(wtDir, "scratch", "irc", "agy", "log"), nil, 0644); err != nil {
-		t.Fatal(err)
-	}
-
 	t.Setenv("BOTFAM_FAM", "")
 	t.Setenv("PWD", wtDir)
 
@@ -1379,7 +994,7 @@ func TestCallToolWithDotWorkDirAtRoot(t *testing.T) {
 		t.Skipf("cannot chdir to /: %v", err)
 	}
 
-	_, err = s.callTool(context.Background(), "irc_read", map[string]any{"work_dir": "."})
+	_, err = s.callTool(context.Background(), "worktree_sync", map[string]any{"work_dir": "."})
 	if err != nil {
 		t.Fatalf("callTool failed when CWD=/ with work_dir=\".\": %v", err)
 	}

@@ -46,6 +46,40 @@ func (c *Client) ListRepoLabels(ctx context.Context) ([]Label, error) {
 	return all, nil
 }
 
+// ListIssueDependencies returns the issues that block the given issue/PR (its
+// dependencies). Used by the close/merge gate: an open blocker that is
+// out-of-scope holds the close/merge.
+func (c *Client) ListIssueDependencies(ctx context.Context, num int) ([]*Issue, error) {
+	var all []*Issue
+	for page := 1; ; page++ {
+		deps, resp, err := c.sdk.Issues.ListIssueDependencies(ctx, c.Owner, c.Repo, int64(num), giteasdk.ListIssueDependenciesOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: 50},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list issue %d dependencies: %w", num, err)
+		}
+		all = append(all, deps...)
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return all, nil
+}
+
+// GetCombinedStatusState returns the combined CI status state for a commit ref
+// (e.g. "success", "pending", "failure", "" when no statuses). Gitea emits no
+// notification on status changes, so this is polled by the gap-coverage layer.
+func (c *Client) GetCombinedStatusState(ctx context.Context, ref string) (string, error) {
+	cs, _, err := c.sdk.Repositories.GetCombinedStatus(ctx, c.Owner, c.Repo, ref)
+	if err != nil {
+		return "", fmt.Errorf("combined status %s: %w", ref, err)
+	}
+	if cs == nil {
+		return "", nil
+	}
+	return string(cs.State), nil
+}
+
 // AddLabels adds labels (by ID) to an issue or PR.
 func (c *Client) AddLabels(ctx context.Context, num int, labelIDs []int64) error {
 	if len(labelIDs) == 0 {

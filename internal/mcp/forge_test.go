@@ -13,7 +13,7 @@ func TestForgeToolsMounted(t *testing.T) {
 	entries := s.buildEntries()
 
 	// Native tools survive unprefixed.
-	for _, native := range []string{"irc_read", "worktree_init", "orient"} {
+	for _, native := range []string{"worktree_sync", "worktree_init", "orient"} {
 		if _, ok := entries[native]; !ok {
 			t.Errorf("native tool %q missing from registry", native)
 		}

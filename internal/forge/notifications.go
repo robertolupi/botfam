@@ -42,6 +42,29 @@ func (c *Client) ListUnreadNotifications(ctx context.Context) ([]Notification, e
 	return sdkThreadsToLocal(threads), nil
 }
 
+// ListAllUnreadNotifications returns every unread notification thread across all
+// repositories, paginating until the feed is exhausted. The pre-session unread
+// bootstrap depends on seeing ALL unread threads — a single page would silently
+// drop pokes past the page boundary, which is exactly the under-wake the
+// backstop exists to prevent.
+func (c *Client) ListAllUnreadNotifications(ctx context.Context) ([]Notification, error) {
+	var all []Notification
+	for page := 1; ; page++ {
+		threads, resp, err := c.sdk.Notifications.List(ctx, giteasdk.ListNotificationOptions{
+			ListOptions: giteasdk.ListOptions{Page: page, PageSize: notificationsPageLimit},
+			Status:      []giteasdk.NotificationStatus{giteasdk.NotificationStatusUnread},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list notifications page %d: %w", page, err)
+		}
+		all = append(all, sdkThreadsToLocal(threads)...)
+		if resp == nil || resp.NextPage == 0 {
+			break
+		}
+	}
+	return all, nil
+}
+
 // ListUnreadRepoNotifications returns one page of unread notification threads
 // scoped to a single repo (owner/repo).
 func (c *Client) ListUnreadRepoNotifications(ctx context.Context, repo string) ([]Notification, error) {
