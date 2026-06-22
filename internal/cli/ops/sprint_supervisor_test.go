@@ -120,7 +120,6 @@ harness = "gemini"
 	runGit(t, sessionDir, "config", "user.name", "test")
 	runGit(t, sessionDir, "config", "user.email", "test@example.invalid")
 
-
 	// 1. Initialize the database and pre-insert a pending work item
 	dbPath := filepath.Join(sessionDir, "session.db")
 	db, err := store.Open(dbPath)
@@ -370,4 +369,3 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	}
 	return string(out)
 }
-

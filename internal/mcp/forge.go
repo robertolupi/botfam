@@ -308,4 +308,3 @@ func (e *ForgeExecutor) ExecuteForgeAction(ctx context.Context, toolName, argume
 }
 
 var _ workerchannel.ForgeExecutor = (*ForgeExecutor)(nil)
-

@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/pelletier/go-toml/v2"
 	pb "github.com/robertolupi/botfam/internal/eventdelivery/contract/botfam/eventdelivery/v2"
 	"github.com/robertolupi/botfam/internal/eventdelivery/singlehost"
-	"github.com/pelletier/go-toml/v2"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -155,4 +155,3 @@ func getDeadPIDViaExec(t *testing.T) int {
 	_, _ = p.Wait()
 	return pid
 }
-

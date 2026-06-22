@@ -226,4 +226,3 @@ func TestForgeTokenHealthCheck(t *testing.T) {
 		t.Errorf("expected ok when token present, got %q", hc.Status)
 	}
 }
-
